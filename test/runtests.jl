@@ -1,11 +1,7 @@
 using ActuaryUtilities
 
 using Dates
-using Documenter
 using Test
-
-# run doctests
-doctest(ActuaryUtilities)
 
 @testset "Temporal functions" begin
     @testset "years_between" begin
