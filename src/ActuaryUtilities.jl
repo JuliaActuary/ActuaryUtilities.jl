@@ -2,12 +2,6 @@ module ActuaryUtilities
 
 using Dates
 
-```@meta
-DocTestSetup = quote
-    using ActuaryUtilities
-    using Dates
-end
-```
 
 
 """
@@ -19,9 +13,11 @@ end
     annivesary should count as a full year.
 
 # Examples
-```jldoctest; setup = :(using ActuaryUtilities,Dates)
+```jldoctest
 julia> d1 = Date(2018,09,30);
+
 julia> d2 = Date(2019,09,30);
+
 julia> d3 = Date(2019,10,01);
 
 julia> years_between(d1,d3) 

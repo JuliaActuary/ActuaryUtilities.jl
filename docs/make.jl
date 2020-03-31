@@ -1,5 +1,8 @@
 using Documenter, ActuaryUtilities
 
+# Setup for doctests embedded in docstrings.
+DocMeta.setdocmeta!(ActuaryUtilities, :DocTestSetup, :(using ActuaryUtilities, Dates))
+
 makedocs(;
     modules=[ActuaryUtilities],
     format=Documenter.HTML(),
