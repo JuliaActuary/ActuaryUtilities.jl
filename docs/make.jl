@@ -9,12 +9,12 @@ makedocs(;
     pages=[
         "Home" => "index.md",
     ],
-    repo="https://github.com/alecloudenback/ActuaryUtilities.jl/blob/{commit}{path}#L{line}",
+    repo="https://github.com/JuliaActuary/ActuaryUtilities.jl/blob/{commit}{path}#L{line}",
     sitename="ActuaryUtilities.jl",
     authors="Alec Loudenback",
     assets=String[],
 )
 
 deploydocs(;
-    repo="github.com/alecloudenback/ActuaryUtilities.jl",
+    repo="github.com/JuliaActuary/ActuaryUtilities.jl",
 )
