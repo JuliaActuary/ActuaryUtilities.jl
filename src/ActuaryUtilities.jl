@@ -66,6 +66,6 @@ function duration(issue_date::Date, proj_date::Date)
 end
 
 
-export years_between
+export years_between, duration
 
 end # module
