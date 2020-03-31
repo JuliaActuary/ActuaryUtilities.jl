@@ -49,6 +49,19 @@ function years_between(d1::Date,d2::Date,overlap=true)
     return dur - 1
 end
 
+
+"""
+    duration(Date,Date)
+
+    Compute the duration given two dates, which is the number of years
+    since the first date. The interval `[0,1)` is defined as having 
+    duration `1`.
+"""
+function duration(issue_date::Date, proj_date::Date)
+    return years_between(issue_date,proj_date,false) + 1
+end
+
+
 export years_between
 
 end # module
