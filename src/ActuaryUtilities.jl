@@ -2,6 +2,11 @@ module ActuaryUtilities
 
 using Dates
 
+```@meta
+DocTestSetup = quote
+    using ActuaryUtilities
+end
+```
 
 
 """
@@ -14,9 +19,9 @@ using Dates
 
 # Examples
 ```jldoctest
-julia> d1 = Date(2018,09,30)
-julia> d2 = Date(2019,09,30)
-julia> d3 = Date(2019,10,01)
+julia> d1 = Date(2018,09,30);
+julia> d2 = Date(2019,09,30);
+julia> d3 = Date(2019,10,01);
 
 julia> years_between(d1,d3) 
 1
@@ -56,6 +61,8 @@ end
     Compute the duration given two dates, which is the number of years
     since the first date. The interval `[0,1)` is defined as having 
     duration `1`.
+
+    
 """
 function duration(issue_date::Date, proj_date::Date)
     return years_between(issue_date,proj_date,false) + 1
