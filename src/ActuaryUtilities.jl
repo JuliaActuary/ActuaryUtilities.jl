@@ -7,10 +7,10 @@ using Dates
 """
     Years_Between(Date,Date)
     
-    Compute the number of integer years between two dates, with the 
-    first date typically before the second. Will return negative number if
-    first date is after the second. Use third argument to indicate if calendar 
-    annivesary should count as a full year.
+Compute the number of integer years between two dates, with the 
+first date typically before the second. Will return negative number if
+first date is after the second. Use third argument to indicate if calendar 
+annivesary should count as a full year.
 
 # Examples
 ```jldoctest
@@ -55,9 +55,9 @@ end
 """
     duration(Date,Date)
 
-    Compute the duration given two dates, which is the number of years
-    since the first date. The interval `[0,1)` is defined as having 
-    duration `1`.
+Compute the duration given two dates, which is the number of years
+since the first date. The interval `[0,1)` is defined as having 
+duration `1`.
 
 
 """
