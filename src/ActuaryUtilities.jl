@@ -57,12 +57,29 @@ end
 
 Compute the duration given two dates, which is the number of years
 since the first date. The interval `[0,1)` is defined as having 
-duration `1`.
+duration `1`. Can return negative durations if second argument is before the first.
 
+
+```jldoctest
+julia> issue_date  = Date(2018,9,30);
+
+julia> duration(issue_date , Date(2019,9,30) ) 
+2
+julia> duration(issue_date , issue_date) 
+1
+julia> duration(issue_date , Date(2018,10,1) ) 
+1
+julia> duration(issue_date , Date(2019,10,1) ) 
+2
+julia> duration(issue_date , Date(2018,6,30) ) 
+0
+julia> duration(Date(2018,9,30),Date(2017,6,30)) 
+-1
+```
 
 """
 function duration(issue_date::Date, proj_date::Date)
-    return years_between(issue_date,proj_date,false) + 1
+    return years_between(issue_date,proj_date,true) + 1
 end
 
 
