@@ -1,7 +1,7 @@
 using Documenter, ActuaryUtilities
 
 # Setup for doctests embedded in docstrings.
-DocMeta.setdocmeta!(ActuaryUtilities, :DocTestSetup, :(using ActuaryUtilities, Dates))
+DocMeta.setdocmeta!(ActuaryUtilities, :DocTestSetup, :(using ActuaryUtilities, Dates,DayCounts),recursive=true)
 
 makedocs(;
     modules=[ActuaryUtilities],
