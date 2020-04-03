@@ -173,8 +173,88 @@ end
 pv = present_value
 
 
+"""
+    breakeven(cashflows,accumulation_rate)
+
+Calculate the time when the accumulated cashflows breakeven.
+Assumes that :
+- cashflows evenly spaced with the first one occuring at time zero 
+- cashflows occur at the end of the period
+- that the accumulation rate correponds to the periodicity of the cashflows.
+
+Returns `nothing` if cashflow stream never breaks even.
+
+```jldoctest
+julia> breakeven([-10,1,2,3,4,8],0.10)
+5
+julia> breakeven([-10,15,2,3,4,8],0.10)
+1
+julia> breakeven([-10,-15,2,3,4,8],0.10)
+nothing
+
+```
+"""
+function breakeven(cashflows::Vector,i::Real)
+    λ = (accum,next) -> accum * (1+i) + next
+    accum = accumulate(λ,cashflows )
+    last_neg = findlast(x -> x < 0.0, accum)
+    if last_neg == length(cashflows)
+        return nothing
+    else
+        return last_neg
+    end
+end
+
+"""
+    breakeven(cashflows::Vector,timepoints::Vector, accumulation_rate::Real)
+
+Calculate the time when the accumulated cashflows breakeven.
+Assumes that:
+- cashflows occur at the timepoint indicated at the corresponding `timepoints` position
+- cashflows occur at the end of the period
+- that the accumulation rate correponds to the periodicity of the cashflows.
+
+Returns `nothing` if cashflow stream never breaks even.
+
+```jldoctest; setup = :(times = [0,1,2,3,4,5])
+julia> times = [0,1,2,3,4,5];
+julia> breakeven([-10,1,2,3,4,8],times,0.10)
+5
+julia> breakeven([-10,15,2,3,4,8],times,0.10)
+1
+julia> breakeven([-10,-15,2,3,4,8],times,0.10) # returns the `nothing` value
+
+
+"""
+function breakeven(cashflows::Vector,timepoints::Vector, i::Real)
+    accum = cashflows[1]
+    last_neg = nothing
+
+
+    for t in 2:length(cashflows)
+        timespan = timepoints[t] - timepoints[t-1]
+        accum *= (1+i) ^ timespan
+        accum += cashflows[t]
+        
+        # keep last negative timepoint, but if 
+        # we go negative then go back to `nothing`
+        if accum >= 0.0 && isnothing(last_neg)
+            last_neg = timepoints[t]
+        elseif accum < 0.0
+            last_neg = nothing
+        end
+    end
+
+    return last_neg
+
+end
+
+
+
+
 export years_between, duration,
     irr, internal_rate_of_return, 
-    pv, present_value
+    pv, present_value,
+    breakeven
 
 end # module

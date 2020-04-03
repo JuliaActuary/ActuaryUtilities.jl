@@ -76,3 +76,21 @@ end
 
     end
 end
+
+@testset "Breakeven time" begin
+
+    @testset "basic" begin
+        @test breakeven([-10,1,2,3,4,8],0.10) == 5
+        @test breakeven([-10,15,2,3,4,8],0.10) == 1
+        @test breakeven([-10,15,2,3,4,8],0.10) == 1
+        @test isnothing(breakeven([-10,-15,2,3,4,8],0.10))
+    end
+
+    @testset "timepoints" begin
+        times = [t for t in 0:5]
+        @test breakeven([-10,1,2,3,4,8],times,0.10) == 5
+        @test breakeven([-10,15,2,3,4,8],times,0.10) == 1
+        @test breakeven([-10,15,2,3,4,8],times,0.10) == 1
+        @test isnothing(breakeven([-10,-15,2,3,4,8],times,0.10))
+    end
+end
