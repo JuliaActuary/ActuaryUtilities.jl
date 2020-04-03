@@ -2,8 +2,6 @@ module ActuaryUtilities
 
 using Dates
 using Roots
-using DayCounts
-
 
 """
     Years_Between(Date,Date)
@@ -115,18 +113,6 @@ function irr(cashflows,times;interval::Tuple{Real,Real}=(-1.0,1.0))
 
 end
 
-function irr(cashflows,dates::Vector{T};daycount=Actual365,interval=(-1.0,1.0)) where T <: Dates.TimeType
-
-    t0 = dates[1]
-     times = yearfrac.(t0,dates[2:end],daycount)
-
-    irr(cashflows,[0.0;times];interval=interval)
-end
-
-function irr(cashflows,dates::StepRange{T};daycount=Actual365,interval=(-1.0,1.0)) where T <: Dates.TimeType
-    return irr(cashflows,collect(dates);daycount=daycount,interval=interval)
-end
-
 """
     pv(interest_rate, vector)
 
@@ -141,16 +127,33 @@ function pv(i,v)
 end
 
 """
-    pv(interest_rate, vector)
+    pv(interest_rate, vector,timepoints)
 
-Discount the vector `v` at interest rate `i`. It is assumed that the cashflows are 
-periodic commisurate with the period of the interest rate (ie use an annual rate for 
-annual values in the vector, quarterly interest rate for quarterly cashflows). The first
-value of the vector `v` is assumed to occur at the end of period 1.
+Discount the vector `v` at interest rate `i` and with the cashflows occuring
+at the times specified in `timepoints`. 
+
+```jldoctest
+julia> pv(0.1, [10,20],[0,1])
+28.18181818181818
+```
+
+Example on how to use real dates using the [DayCounts.jl](https://github.com/JuliaFinance/DayCounts.jl) package
+```jldoctest
+
+using DayCounts 
+dates = Dates(2012,12,31):Year(1):Date(2013,12:31)
+times = yearfrac.(dates[1], dates,Actual365) # [0.0,1.0]
+pv(0.1, [10,20],times)
+
+# output
+28.18181818181818
+
+
+```
 
 """
-function pv(i,v,dates;daycount=Actual365)
-    return sum(v .* [1/(1+i)^t for t in 1:length(v)])
+function pv(i,v,timepoints;)
+    return sum(v .* [1/(1+i)^t for t in timepoints])
 end
 
 

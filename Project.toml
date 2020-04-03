@@ -5,7 +5,6 @@ version = "0.1.1"
 
 [deps]
 Dates = "ade2ca70-3891-5945-98fb-dc099432e06a"
-DayCounts = "44e31299-2c53-5a9b-9141-82aa45d7972f"
 Roots = "f2b01f46-fcfa-551c-844a-d8ac1e96c665"
 
 [compat]
