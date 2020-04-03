@@ -11,7 +11,9 @@ julia:
 notifications:
   email: false
 
-script: # the default script is equivalent to the following
+script: # the default script is equivalent to the following ()
+        # I added DayCounts as an import here to avoid adding a dependency
+        # just for doctests
  - if [[ -a .git/shallow ]]; then git fetch --unshallow; fi
  - julia --project -e 'using Pkg; Pkg.add("DayCounts"); Pkg.build(); Pkg.test(; coverage=true)';
 after_success:
