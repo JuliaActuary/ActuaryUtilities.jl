@@ -187,10 +187,12 @@ Returns `nothing` if cashflow stream never breaks even.
 ```jldoctest
 julia> breakeven([-10,1,2,3,4,8],0.10)
 5
+
 julia> breakeven([-10,15,2,3,4,8],0.10)
 1
-julia> breakeven([-10,-15,2,3,4,8],0.10)
-nothing
+
+julia> breakeven([-10,-15,2,3,4,8],0.10) # returns the `nothing` value
+
 
 ```
 """
@@ -218,10 +220,13 @@ Returns `nothing` if cashflow stream never breaks even.
 
 ```jldoctest; setup = :(times = [0,1,2,3,4,5])
 julia> times = [0,1,2,3,4,5];
+
 julia> breakeven([-10,1,2,3,4,8],times,0.10)
 5
+
 julia> breakeven([-10,15,2,3,4,8],times,0.10)
 1
+
 julia> breakeven([-10,-15,2,3,4,8],times,0.10) # returns the `nothing` value
 
 
