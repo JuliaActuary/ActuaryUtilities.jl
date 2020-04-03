@@ -102,7 +102,7 @@ Calculate the irr with given timepoints.
 
 ```jldoctest
 julia> irr([-100,110],[0,1]) # e.g. cashflows at time 0 and 1
-0.1
+0.10000000000000005
 ```
 """
 function irr(cashflows,times;interval::Tuple{Real,Real}=(-1.0,1.0))
