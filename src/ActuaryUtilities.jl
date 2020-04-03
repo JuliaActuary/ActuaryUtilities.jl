@@ -82,9 +82,9 @@ function duration(issue_date::Date, proj_date::Date)
 end
 
 """
-    irr(cashflows; search_interval)
+    internal_rate_of_return(cashflows; search_interval)
     
-Calculate the irr of a series of equally spaced cashflows, assuming the first 
+Calculate the internal_rate_of_return of a series of equally spaced cashflows, assuming the first 
 element occurs at time zero. By default searches the `search_interval` `[-1,1]`.
 
 """
