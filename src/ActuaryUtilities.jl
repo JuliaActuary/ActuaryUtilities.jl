@@ -82,36 +82,44 @@ function duration(issue_date::Date, proj_date::Date)
 end
 
 """
-    irr(cashflows::vector; interval)
+    irr(cashflows::vector; search_interval)
     
 Calculate the irr of a series of equally spaced cashflows, assuming the first 
-element occurs at time zero. By default searches the `interval` `[-1,1]`.
+element occurs at time zero. By default searches the `search_interval` `[-1,1]`.
 
 """
-function irr(cashflows;interval::Tuple{Real,Real}=(-1.0,1.0))
+function internal_rate_of_return(cashflows;search_interval::Tuple{Real,Real}=(-1.0,1.0))
 
     f(i) = pv(i,cashflows[2:end]) + cashflows[1]
 
-    return find_zero(f,interval)
+    return find_zero(f,search_interval)
 end
 
 """
-    irr(cashflows,timepoints)
+    internal_rate_of_return(cashflows,timepoints;search_interval)
 
-Calculate the irr with given timepoints.
+Calculate the internal_rate_of_return with given timepoints.
 
 ```jldoctest
-julia> irr([-100,110],[0,1]) # e.g. cashflows at time 0 and 1
+julia> internal_rate_of_return([-100,110],[0,1]) # e.g. cashflows at time 0 and 1
 0.10000000000000005
 ```
 """
-function irr(cashflows,times;interval::Tuple{Real,Real}=(-1.0,1.0))
+function internal_rate_of_return(cashflows,times;search_interval::Tuple{Real,Real}=(-1.0,1.0))
 
     f(i) = sum(cashflows[1:end] .* [1/(1+i)^t for t in times])
 
-    return find_zero(f,interval)
+    return find_zero(f,search_interval)
 
 end
+
+"""
+    irr()
+
+    A shorthand for `internal_rate_of_return`.
+"""
+irr = internal_rate_of_return
+
 
 """
     pv(interest_rate, vector)
@@ -122,18 +130,18 @@ annual values in the vector, quarterly interest rate for quarterly cashflows). T
 value of the vector `v` is assumed to occur at the end of period 1.
 
 """
-function pv(i,v)
+function present_value(i,v)
     return sum(v .* [1/(1+i)^t for t in 1:length(v)])
 end
 
 """
-    pv(interest_rate, vector,timepoints)
+    present_value(interest_rate, vector,timepoints)
 
 Discount the vector `v` at interest rate `i` and with the cashflows occuring
 at the times specified in `timepoints`. 
 
 ```jldoctest
-julia> pv(0.1, [10,20],[0,1])
+julia> present_value(0.1, [10,20],[0,1])
 28.18181818181818
 ```
 
@@ -141,9 +149,9 @@ Example on how to use real dates using the [DayCounts.jl](https://github.com/Jul
 ```jldoctest
 
 using DayCounts 
-dates = Dates(2012,12,31):Year(1):Date(2013,12:31)
-times = yearfrac.(dates[1], dates,Actual365) # [0.0,1.0]
-pv(0.1, [10,20],times)
+dates = Date(2012,12,31):Year(1):Date(2013,12,31)
+times = yearfrac.(dates[1], dates, Actual365) # [0.0,1.0]
+present_value(0.1, [10,20],times)
 
 # output
 28.18181818181818
@@ -152,14 +160,21 @@ pv(0.1, [10,20],times)
 ```
 
 """
-function pv(i,v,timepoints;)
+function present_value(i,v,timepoints;)
     return sum(v .* [1/(1+i)^t for t in timepoints])
 end
 
 
+"""
+    pv()
+
+    A shorthand for `present_value`.
+"""
+pv = present_value
 
 
 export years_between, duration,
-    irr, pv
+    irr, internal_rate_of_return, 
+    pv, present_value
 
 end # module
