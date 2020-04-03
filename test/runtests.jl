@@ -2,6 +2,7 @@ using ActuaryUtilities
 
 using Dates
 using Test
+using DayCounts
 
 @testset "Temporal functions" begin
     @testset "years_between" begin
@@ -24,5 +25,48 @@ using Test
         @test duration(Date(2018,10,15),Date(2019,10,30)) == 2
         @test duration(Date(2018,10,15),Date(2019,10,15)) == 2
         @test duration(Date(2018,10,15),Date(2019,10,14)) == 1
+    end
+end
+
+@testset "financial calcs" begin
+
+    @testset "pv" begin
+
+    v = [100, 100]
+        @test pv(0.05,v) ≈ v[1] / 1.05 + v[2] / 1.05^2
+    end
+
+    @testset "irr" begin
+
+        v = [-70000,12000,15000,18000,21000,26000]
+        
+        # per Excel (example comes from Excel help text)
+        @test isapprox(irr(v[1:2]), -0.8285714285714)
+        @test isapprox(irr(v[1:3]), -0.4435069413346)
+        @test isapprox(irr(v[1:4]), -0.1821374641455)
+        @test isapprox(irr(v[1:5]), -0.0212448482734)
+        @test isapprox(irr(v[1:6]),  0.0866309480365)
+
+    end
+    @testset "xirr with float times" begin
+
+    
+        @test irr([-100,100],[0,1]) ≈ 0.0
+        @test irr([-100,110],[0,1]) ≈ 0.1
+
+    end
+
+    @testset "xirr with real dates" begin
+
+    v = [-70000,12000,15000,18000,21000,26000]
+    dates = Date(2019,12,31):Year(1):Date(2024,12,31)
+        
+    # per Excel (example comes from Excel help text)
+    @test isapprox(irr(v[1:2], dates[1:2]; daycount=DayCounts.Thirty360), -0.8285714285714)
+    @test isapprox(irr(v[1:3], dates[1:3]; daycount=DayCounts.Thirty360), -0.4435069413346)
+    @test isapprox(irr(v[1:4], dates[1:4]; daycount=DayCounts.Thirty360), -0.1821374641455)
+    @test isapprox(irr(v[1:5], dates[1:5]; daycount=DayCounts.Thirty360), -0.0212448482734)
+    @test isapprox(irr(v[1:6], dates[1:6]; daycount=DayCounts.Thirty360),  0.0866309480365)
+
     end
 end

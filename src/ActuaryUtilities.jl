@@ -1,7 +1,8 @@
 module ActuaryUtilities
 
 using Dates
-
+using Roots
+using DayCounts
 
 
 """
@@ -82,7 +83,80 @@ function duration(issue_date::Date, proj_date::Date)
     return years_between(issue_date,proj_date,true) + 1
 end
 
+"""
+    irr(cashflows::vector; interval)
+    
+Calculate the irr of a series of equally spaced cashflows, assuming the first 
+element occurs at time zero. By default searches the `interval` `[-1,1]`.
 
-export years_between, duration
+"""
+function irr(cashflows;interval::Tuple{Real,Real}=(-1.0,1.0))
+
+    f(i) = pv(i,cashflows[2:end]) + cashflows[1]
+
+    return find_zero(f,interval)
+end
+
+"""
+    irr(cashflows,timepoints)
+
+Calculate the irr with given timepoints.
+
+```jldoctest
+julia> irr([-100,110],[0,1]) # e.g. cashflows at time 0 and 1
+0.1
+```
+"""
+function irr(cashflows,times;interval::Tuple{Real,Real}=(-1.0,1.0))
+
+    f(i) = sum(cashflows[1:end] .* [1/(1+i)^t for t in times])
+
+    return find_zero(f,interval)
+
+end
+
+function irr(cashflows,dates::Vector{T};daycount=Actual365,interval=(-1.0,1.0)) where T <: Dates.TimeType
+
+    t0 = dates[1]
+     times = yearfrac.(t0,dates[2:end],daycount)
+
+    irr(cashflows,[0.0;times];interval=interval)
+end
+
+function irr(cashflows,dates::StepRange{T};daycount=Actual365,interval=(-1.0,1.0)) where T <: Dates.TimeType
+    return irr(cashflows,collect(dates);daycount=daycount,interval=interval)
+end
+
+"""
+    pv(interest_rate, vector)
+
+Discount the vector `v` at interest rate `i`. It is assumed that the cashflows are 
+periodic commisurate with the period of the interest rate (ie use an annual rate for 
+annual values in the vector, quarterly interest rate for quarterly cashflows). The first
+value of the vector `v` is assumed to occur at the end of period 1.
+
+"""
+function pv(i,v)
+    return sum(v .* [1/(1+i)^t for t in 1:length(v)])
+end
+
+"""
+    pv(interest_rate, vector)
+
+Discount the vector `v` at interest rate `i`. It is assumed that the cashflows are 
+periodic commisurate with the period of the interest rate (ie use an annual rate for 
+annual values in the vector, quarterly interest rate for quarterly cashflows). The first
+value of the vector `v` is assumed to occur at the end of period 1.
+
+"""
+function pv(i,v,dates;daycount=Actual365)
+    return sum(v .* [1/(1+i)^t for t in 1:length(v)])
+end
+
+
+
+
+export years_between, duration,
+    irr, pv
 
 end # module
