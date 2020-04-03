@@ -4,7 +4,7 @@ using Dates
 using Roots
 
 """
-    Years_Between(Date,Date)
+    Years_Between(Date, Date)
     
 Compute the number of integer years between two dates, with the 
 first date typically before the second. Will return negative number if
@@ -52,7 +52,7 @@ end
 
 
 """
-    duration(Date,Date)
+    duration(Date, Date)
 
 Compute the duration given two dates, which is the number of years
 since the first date. The interval `[0,1)` is defined as having 
@@ -82,7 +82,7 @@ function duration(issue_date::Date, proj_date::Date)
 end
 
 """
-    irr(cashflows::vector; search_interval)
+    irr(cashflows; search_interval)
     
 Calculate the irr of a series of equally spaced cashflows, assuming the first 
 element occurs at time zero. By default searches the `search_interval` `[-1,1]`.
@@ -96,7 +96,7 @@ function internal_rate_of_return(cashflows;search_interval::Tuple{Real,Real}=(-1
 end
 
 """
-    internal_rate_of_return(cashflows,timepoints;search_interval)
+    internal_rate_of_return(cashflows, timepoints; search_interval)
 
 Calculate the internal_rate_of_return with given timepoints.
 
@@ -135,7 +135,7 @@ function present_value(i,v)
 end
 
 """
-    present_value(interest_rate, vector,timepoints)
+    present_value(interest_rate, vector, timepoints)
 
 Discount the vector `v` at interest rate `i` and with the cashflows occuring
 at the times specified in `timepoints`. 
