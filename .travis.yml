@@ -10,6 +10,10 @@ julia:
   - nightly
 notifications:
   email: false
+
+script: # the default script is equivalent to the following
+ - if [[ -a .git/shallow ]]; then git fetch --unshallow; fi
+ - julia --project -e 'using Pkg; Pkg.add("DayCounts"); Pkg.build(); Pkg.test(; coverage=true)';
 after_success:
   - julia -e 'using Pkg; Pkg.add("Coverage"); using Coverage; Codecov.submit(process_folder())'
 jobs:
