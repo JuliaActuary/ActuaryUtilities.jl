@@ -4,7 +4,7 @@ using Dates
 using Roots
 
 """
-    Years_Between(Date, Date)
+    Years_Between(d1::Date, d2::Date)
     
 Compute the number of integer years between two dates, with the 
 first date typically before the second. Will return negative number if
@@ -52,7 +52,7 @@ end
 
 
 """
-    duration(Date, Date)
+    duration(d1::Date, d2::Date)
 
 Compute the duration given two dates, which is the number of years
 since the first date. The interval `[0,1)` is defined as having 
@@ -82,10 +82,10 @@ function duration(issue_date::Date, proj_date::Date)
 end
 
 """
-    internal_rate_of_return(cashflows; search_interval)
+    internal_rate_of_return(cashflows::vector; search_interval::Tuple{Real,Real})
     
 Calculate the internal_rate_of_return of a series of equally spaced cashflows, assuming the first 
-element occurs at time zero. By default searches the `search_interval` `[-1,1]`.
+element occurs at time zero. By default searches the `search_interval`in the numeric range `[-1,1]`.
 
 """
 function internal_rate_of_return(cashflows;search_interval::Tuple{Real,Real}=(-1.0,1.0))
@@ -96,9 +96,10 @@ function internal_rate_of_return(cashflows;search_interval::Tuple{Real,Real}=(-1
 end
 
 """
-    internal_rate_of_return(cashflows, timepoints; search_interval)
+    internal_rate_of_return(cashflows::Vector, timepoints::Vector; search_interval::Tuple{Real,Real})
 
-Calculate the internal_rate_of_return with given timepoints.
+Calculate the internal_rate_of_return with given timepoints. 
+By default searches the `search_interval`in the numeric range `[-1,1]`.
 
 ```jldoctest
 julia> internal_rate_of_return([-100,110],[0,1]) # e.g. cashflows at time 0 and 1
@@ -122,12 +123,12 @@ irr = internal_rate_of_return
 
 
 """
-    pv(interest_rate, vector)
+    pv(interest_rate::Real, cashflows::Vector)
 
-Discount the vector `v` at interest rate `i`. It is assumed that the cashflows are 
+Discount the `cashflows` vector at the given decimal `interest_rate`. It is assumed that the cashflows are 
 periodic commisurate with the period of the interest rate (ie use an annual rate for 
 annual values in the vector, quarterly interest rate for quarterly cashflows). The first
-value of the vector `v` is assumed to occur at the end of period 1.
+value of the `cashflows` vector is assumed to occur at the end of period 1.
 
 """
 function present_value(i,v)
@@ -135,9 +136,9 @@ function present_value(i,v)
 end
 
 """
-    present_value(interest_rate, vector, timepoints)
+    present_value(interest_rate::Real, cashflows::Vector, timepoints)
 
-Discount the vector `v` at interest rate `i` and with the cashflows occuring
+Discount the `cashflows` vector at the given decimal `interest_rate`,  with the cashflows occuring
 at the times specified in `timepoints`. 
 
 ```jldoctest
@@ -174,7 +175,7 @@ pv = present_value
 
 
 """
-    breakeven(cashflows,accumulation_rate)
+    breakeven(cashflows::Vector,accumulation_rate::Real)
 
 Calculate the time when the accumulated cashflows breakeven.
 Assumes that :
@@ -228,7 +229,7 @@ julia> breakeven([-10,15,2,3,4,8],times,0.10)
 1
 
 julia> breakeven([-10,-15,2,3,4,8],times,0.10) # returns the `nothing` value
-
+```
 
 """
 function breakeven(cashflows::Vector,timepoints::Vector, i::Real)
