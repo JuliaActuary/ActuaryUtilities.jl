@@ -6,4 +6,14 @@
 [![Codecov](https://codecov.io/gh/JuliaActuary/ActuaryUtilities.jl/branch/master/graph/badge.svg)](https://codecov.io/gh/JuliaActuary/ActuaryUtilities.jl)
 
 
-A collection of common functions/manipulations used in Actuarial Calculations, such as the `duration` given two dates. Click the docs badges above for more details.
+A collection of common functions/manipulations used in Actuarial Calculations.
+
+Some of the functions included:
+
+- `duration` to calculate the duration given an issue date and date
+- `present_value` or `pv` to calculate the present value of a set of cashflows
+- `internal_rate_of_return` or `irr` to calculate the IRR given cashflows (including at timepoints like Excel's `XIRR`)
+- `breakeven` to calculate the breakeven time for a set of cashflows
+
+### Documentation
+Click the docs badges above for more details and examples.
