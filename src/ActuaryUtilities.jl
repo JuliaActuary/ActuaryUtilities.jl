@@ -82,38 +82,35 @@ function duration(issue_date::Date, proj_date::Date)
 end
 
 """
-    internal_rate_of_return(cashflows::vector; guess::Real,method)
+    internal_rate_of_return(cashflows::vector; search_interval::Tuple{Real,Real})
     
 Calculate the internal_rate_of_return of a series of equally spaced cashflows, assuming the first 
-element occurs at time zero. 
-The default value for `guess` is `0.1`. 
-The default method comes from `Roots.jl` and is `Order2()`
+element occurs at time zero. By default searches the `search_interval`in the numeric range `[-1,1]`.
 
 """
-function internal_rate_of_return(cashflows;guess::Real=0.1,method=Order2())
+function internal_rate_of_return(cashflows;search_interval::Tuple{Real,Real}=(-1.0,1.0))
 
     f(i) = pv(i,cashflows[2:end]) + cashflows[1]
 
-    return find_zero(f,guess,)
+    return find_zero(f,search_interval)
 end
 
 """
-    internal_rate_of_return(cashflows::Vector, timepoints::Vector; guess::Real,method)
+    internal_rate_of_return(cashflows::Vector, timepoints::Vector; search_interval::Tuple{Real,Real})
 
 Calculate the internal_rate_of_return with given timepoints. 
-The default value for `guess` is `0.1`. 
-The default method comes from `Roots.jl` and is `Order2()`
+By default searches the `search_interval`in the numeric range `[-1,1]`.
 
 ```jldoctest
 julia> internal_rate_of_return([-100,110],[0,1]) # e.g. cashflows at time 0 and 1
 0.10000000000000005
 ```
 """
-function internal_rate_of_return(cashflows,times;guess::Real=0.1,method=Order2())
+function internal_rate_of_return(cashflows,times;search_interval::Tuple{Real,Real}=(-1.0,1.0))
 
     f(i) = sum(cashflows[1:end] .* [1/(1+i)^t for t in times])
 
-    return find_zero(f,guess,method)
+    return find_zero(f,search_interval)
 
 end
 
