@@ -53,7 +53,17 @@ end
         @test irr(v[1:5]) ≈ -0.0212448482734
         @test irr(v[1:6]) ≈  0.0866309480365
 
+        # much more challenging to solve b/c of the overflow below zero
+        cfs = [t % 10 == 0 ? -10 : 1.5 for t in 0:99]
+
+        @test irr(cfs) ≈ 0.06463163963925866
+
+        # test the unsolvable
+
+        @test isnothing(irr([100,100]))
+
     end
+
     @testset "xirr with float times" begin
 
     
