@@ -1,7 +1,6 @@
 module ActuaryUtilities
 
 using Dates
-using Roots
 using Optim
 
 """
