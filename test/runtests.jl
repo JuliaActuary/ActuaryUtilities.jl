@@ -47,16 +47,16 @@ end
         v = [-70000,12000,15000,18000,21000,26000]
         
         # per Excel (example comes from Excel help text)
-        @test irr(v[1:2]) ≈ -0.8285714285714
-        @test irr(v[1:3]) ≈ -0.4435069413346
-        @test irr(v[1:4]) ≈ -0.1821374641455
-        @test irr(v[1:5]) ≈ -0.0212448482734
-        @test irr(v[1:6]) ≈  0.0866309480365
+        @test isapprox(irr(v[1:2]), -0.8285714285714,atol = 0.001)
+        @test isapprox(irr(v[1:3]), -0.4435069413346,atol = 0.001)
+        @test isapprox(irr(v[1:4]), -0.1821374641455,atol = 0.001)
+        @test isapprox(irr(v[1:5]), -0.0212448482734,atol = 0.001)
+        @test isapprox(irr(v[1:6]),  0.0866309480365,atol = 0.001)
 
         # much more challenging to solve b/c of the overflow below zero
         cfs = [t % 10 == 0 ? -10 : 1.5 for t in 0:99]
 
-        @test irr(cfs) ≈ 0.06463163963925866
+        @test isapprox(irr(cfs), 0.06463163963925866,atol=0.001)
 
         # test the unsolvable
 
@@ -67,8 +67,8 @@ end
     @testset "xirr with float times" begin
 
     
-        @test irr([-100,100],[0,1]) ≈ 0.0
-        @test irr([-100,110],[0,1]) ≈ 0.1
+        @test isapprox(irr([-100,100],[0,1]), 0.0, atol =0.001)
+        @test isapprox(irr([-100,110],[0,1]), 0.1, atol =0.001)
 
     end
 
@@ -78,11 +78,11 @@ end
     dates = Date(2019,12,31):Year(1):Date(2024,12,31)
     times = yearfrac.(dates[1],dates,Thirty360)
     # per Excel (example comes from Excel help text)
-    @test irr(v[1:2], times[1:2]) ≈ -0.8285714285714
-    @test irr(v[1:3], times[1:3]) ≈ -0.4435069413346
-    @test irr(v[1:4], times[1:4]) ≈ -0.1821374641455
-    @test irr(v[1:5], times[1:5]) ≈ -0.0212448482734
-    @test irr(v[1:6], times[1:6]) ≈  0.0866309480365
+    @test isapprox(irr(v[1:2], times[1:2]), -0.8285714285714, atol = 0.001)
+    @test isapprox(irr(v[1:3], times[1:3]), -0.4435069413346, atol = 0.001)
+    @test isapprox(irr(v[1:4], times[1:4]), -0.1821374641455, atol = 0.001)
+    @test isapprox(irr(v[1:5], times[1:5]), -0.0212448482734, atol = 0.001)
+    @test isapprox(irr(v[1:6], times[1:6]),  0.0866309480365, atol = 0.001)
 
     end
 end
@@ -104,3 +104,6 @@ end
         @test isnothing(breakeven([-10,-15,2,3,4,8],times,0.10))
     end
 end
+
+
+include("run_doctests.jl")

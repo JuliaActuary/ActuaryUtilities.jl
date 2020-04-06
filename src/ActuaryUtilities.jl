@@ -2,6 +2,7 @@ module ActuaryUtilities
 
 using Dates
 using Roots
+using Optim
 
 """
     Years_Between(d1::Date, d2::Date)
@@ -82,36 +83,48 @@ function duration(issue_date::Date, proj_date::Date)
 end
 
 """
-    internal_rate_of_return(cashflows::vector; search_interval::Tuple{Real,Real})
+    internal_rate_of_return(cashflows::vector)
     
 Calculate the internal_rate_of_return of a series of equally spaced cashflows, assuming the first 
-element occurs at time zero. By default searches the `search_interval`in the numeric range `[-1,1]`.
+element occurs at time zero. First tries to find a positive rate in the interval `[0.0,1.0]`. If none is found,
+will extend search to [-1.0,1.0]. If still not found, will return `nothing`.
 
 """
-function internal_rate_of_return(cashflows;search_interval::Tuple{Real,Real}=(-1.0,1.0))
+function internal_rate_of_return(cashflows)
+    
 
-    f(i) = pv(i,cashflows[2:end]) + cashflows[1]
-
-    return find_zero(f,search_interval)
+    return internal_rate_of_return(cashflows,[t for t in 0:(length(cashflows)-1)])
+    
 end
 
 """
-    internal_rate_of_return(cashflows::Vector, timepoints::Vector; search_interval::Tuple{Real,Real})
+    internal_rate_of_return(cashflows::Vector, timepoints::Vector)
 
 Calculate the internal_rate_of_return with given timepoints. 
-By default searches the `search_interval`in the numeric range `[-1,1]`.
+First tries to find a positive rate in the interval `[0.0,1.0]`. If none is found,
+will extend search to [-1.0,1.0]. If still not found, will return `nothing`.
 
 ```jldoctest
 julia> internal_rate_of_return([-100,110],[0,1]) # e.g. cashflows at time 0 and 1
-0.10000000000000005
+0.10000000001652906
 ```
 """
-function internal_rate_of_return(cashflows,times;search_interval::Tuple{Real,Real}=(-1.0,1.0))
-
-    f(i) = sum(cashflows[1:end] .* [1/(1+i)^t for t in times])
-
-    return find_zero(f,search_interval)
-
+function internal_rate_of_return(cashflows,times)
+    # Optim requires the optimizing variable to be an array, thus the i[1]
+    f(i) = sum(cashflows .* [1/(1+i[1])^t for t in times])
+    result = optimize(x -> f(x)^2, 0.0,1.0)
+    if abs(f(result.minimizer)) < 1.0e-3 # arbitrary that seems to work
+        return result.minimizer
+    else
+        # try finding a negative irr
+        result = optimize(x -> f(x)^2, -1.0,1.0)
+        if abs(f(result.minimizer)) < 1.0e-3 # arbitrary that seems to work
+            return result.minimizer
+        else
+            return nothing
+        end
+    end
+    
 end
 
 """
