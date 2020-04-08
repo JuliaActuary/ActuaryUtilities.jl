@@ -31,16 +31,32 @@ end
 @testset "financial calcs" begin
 
     @testset "pv" begin
-
-    v = [100, 100]
+        v = [100, 100]
+        
         @test pv(0.05,v) ≈ v[1] / 1.05 + v[2] / 1.05^2
     end
 
     @testset "pv with timepoints" begin
+        v = [100, 100]
 
-    v = [100, 100]
         @test pv(0.05,v,[1,2]) ≈ v[1] / 1.05 + v[2] / 1.05^2
     end
+
+    @testset "pv with vector discount rates" begin
+        v = [100, 100]
+        @test pv([0.0,0.05],v) ≈ 100 / 1.0 + 100 / 1.05
+        @test pv([0.05,0.0],v) ≈ 100 / 1.05 + 100 / 1.05
+        @test pv([0.05,0.1],v) ≈ 100 / 1.05 + 100 / 1.05 / 1.1
+
+        ts = [0.5,1]
+        @test pv([0.0,0.05],v,ts) ≈ 100 / 1.0 + 100 / 1.05 ^ 0.5 
+        @test pv([0.05,0.0],v,ts) ≈ 100 / 1.05 ^ 0.5 + 100 / 1.05 ^ 0.5 
+        @test pv([0.05,0.1],v,ts) ≈ 100 / 1.05 ^ 0.5 + 100 / (1.05 ^ 0.5) / (1.1 ^ 0.5)
+
+
+
+    end
+
 
     @testset "irr" begin
 
@@ -94,6 +110,15 @@ end
         @test breakeven([-10,15,2,3,4,8],0.10) == 1
         @test breakeven([-10,15,2,3,4,8],0.10) == 1
         @test isnothing(breakeven([-10,-15,2,3,4,8],0.10))
+    end
+
+    @testset "basic with vector interest" begin
+        @test breakeven([-10,1,2,3,4],[1,2,3,4,5],0.0) == 5
+        # 
+        @test isnothing(breakeven([-10,1,2,3,4],[1,2,3,4,5],[0.0,0.0,0.0,0.0,0.1]))
+        @test breakeven([-10,1,2,3,4],[1,2,3,4,5],[0.0,0.0,0.0,0.0,-0.5]) == 5
+        @test breakeven([-10,1,2,3,4],[1,2,3,4,5],[0.0,0.0,0.0,-0.9,-0.5]) == 4
+        @test breakeven([-10,1,12,3,4],[1,2,3,4,5],[0.1,0.1,0.2,0.1,0.1]) == 3
     end
 
     @testset "timepoints" begin
