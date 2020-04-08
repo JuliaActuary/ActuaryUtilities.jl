@@ -222,25 +222,21 @@ julia> breakeven([-10,-15,2,3,4,8],0.10) # returns the `nothing` value
 
 ```
 """
-function breakeven(cashflows::Vector,i::Real)
-    λ = (accum,next) -> accum * (1+i) + next
-    accum = accumulate(λ,cashflows )
-    last_neg = findlast(x -> x < 0.0, accum)
-    if last_neg == length(cashflows)
-        return nothing
-    else
-        return last_neg
-    end
+function breakeven(cashflows::Vector,i)
+    return breakeven(cashflows,[t for t in 0:length(cashflows)-1],i)
 end
 
 """
-    breakeven(cashflows::Vector,timepoints::Vector, accumulation_rate::Real)
+    breakeven(cashflows::Vector,timepoints::Vector, accumulation_rate)
 
 Calculate the time when the accumulated cashflows breakeven.
 Assumes that:
 - cashflows occur at the timepoint indicated at the corresponding `timepoints` position
 - cashflows occur at the end of the period
-- that the accumulation rate correponds to the periodicity of the cashflows.
+- that the accumulation rate correponds to the periodicity of the cashflows. 
+- If given a vector of 
+interest rates, the first rate is effectively never used, as it's treated as the accumulation 
+rate between time zero and the first cashflow.
 
 Returns `nothing` if cashflow stream never breaks even.
 
@@ -257,7 +253,29 @@ julia> breakeven([-10,-15,2,3,4,8],times,0.10) # returns the `nothing` value
 ```
 
 """
-function breakeven(cashflows::Vector,timepoints::Vector, i::Real)
+function breakeven(cashflows::Vector,timepoints::Vector, i::Vector)
+    accum = cashflows[1]
+    last_neg = nothing
+
+
+    for t in 2:length(cashflows)
+        timespan = timepoints[t] - timepoints[t-1]
+        accum *= (1+i[t]) ^ timespan
+        accum += cashflows[t]
+        
+        # keep last negative timepoint, but if 
+        # we go negative then go back to `nothing`
+        if accum >= 0.0 && isnothing(last_neg)
+            last_neg = timepoints[t]
+        elseif accum < 0.0
+            last_neg = nothing
+        end
+    end
+
+    return last_neg
+
+end
+function breakeven(cashflows::Vector,timepoints::Vector, i)
     accum = cashflows[1]
     last_neg = nothing
 
@@ -275,7 +293,6 @@ function breakeven(cashflows::Vector,timepoints::Vector, i::Real)
             last_neg = nothing
         end
     end
-
     return last_neg
 
 end
