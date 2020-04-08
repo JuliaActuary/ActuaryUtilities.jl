@@ -144,13 +144,13 @@ value of the `cashflows` vector is assumed to occur at the end of period 1.
 
 """
 function present_value(i,v)
-    return sum(v .* [1/(1+i)^t for t in 1:length(v)])
+    return present_value(i,v,[t for t in 1:length(v)])
 end
 
 """
     present_value(interest_rate::Real, cashflows::Vector, timepoints)
 
-Discount the `cashflows` vector at the given decimal `interest_rate`,  with the cashflows occuring
+Discount the `cashflows` vector at the given scalar or vector `interest_rate`,  with the cashflows occuring
 at the times specified in `timepoints`. 
 
 ```jldoctest
@@ -173,10 +173,23 @@ present_value(0.1, [10,20],times)
 ```
 
 """
-function present_value(i,v,timepoints;)
-    return sum(v .* [1/(1+i)^t for t in timepoints])
+function present_value(interest_rates::Array,cashflows,timepoints)
+    v = ones(length(timepoints))
+    v[1] = 1.0 / (1 + interest_rates[1]) ^ timepoints[1]
+    for t in 2:length(v)
+        v[t] = v[t-1] / (1 + interest_rates[t]) ^ (timepoints[t] - timepoints[t-1])
+    end
+    return sum(cashflows .* v)
 end
 
+function present_value(interest_rate,cashflows,timepoints)
+    v = ones(length(timepoints))
+    v[1] = 1.0 / (1 + interest_rate) ^ timepoints[1]
+    for t in 2:length(v)
+        v[t] = v[t-1] / (1 + interest_rate) ^ (timepoints[t] - timepoints[t-1])
+    end
+    return sum(cashflows .* v)
+end
 
 """
     pv()
