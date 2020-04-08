@@ -9,7 +9,7 @@ using Optim
 Compute the number of integer years between two dates, with the 
 first date typically before the second. Will return negative number if
 first date is after the second. Use third argument to indicate if calendar 
-annivesary should count as a full year.
+anniversary should count as a full year.
 
 # Examples
 ```jldoctest
@@ -150,7 +150,7 @@ end
 """
     present_value(interest_rate::Real, cashflows::Vector, timepoints)
 
-Discount the `cashflows` vector at the given scalar or vector `interest_rate`,  with the cashflows occuring
+Discount the `cashflows` vector at the given scalar or vector `interest_rate`,  with the cashflows occurring
 at the times specified in `timepoints`. 
 
 ```jldoctest
@@ -233,7 +233,7 @@ Calculate the time when the accumulated cashflows breakeven.
 Assumes that:
 - cashflows occur at the timepoint indicated at the corresponding `timepoints` position
 - cashflows occur at the end of the period
-- that the accumulation rate correponds to the periodicity of the cashflows. 
+- that the accumulation rate corresponds to the periodicity of the cashflows. 
 - If given a vector of 
 interest rates, the first rate is effectively never used, as it's treated as the accumulation 
 rate between time zero and the first cashflow.
