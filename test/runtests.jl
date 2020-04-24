@@ -2,7 +2,7 @@ using ActuaryUtilities
 
 using Dates
 using Test
-using DayCounts
+import DayCounts
 
 @testset "Temporal functions" begin
     @testset "years_between" begin
@@ -92,7 +92,7 @@ end
 
     v = [-70000,12000,15000,18000,21000,26000]
     dates = Date(2019,12,31):Year(1):Date(2024,12,31)
-    times = yearfrac.(dates[1],dates,Thirty360)
+    times = map(d -> DayCounts.yearfrac(dates[1],d,DayCounts.Thirty360()),dates)
     # per Excel (example comes from Excel help text)
     @test isapprox(irr(v[1:2], times[1:2]), -0.8285714285714, atol = 0.001)
     @test isapprox(irr(v[1:3], times[1:3]), -0.4435069413346, atol = 0.001)
