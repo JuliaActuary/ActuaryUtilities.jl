@@ -1,4 +1,4 @@
-name: Tests and Documentation
+name: CI
 on:
   - push
   - pull_request
