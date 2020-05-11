@@ -1,7 +1,12 @@
 module ActuaryUtilities
 
 using Dates
+using Interpolations
 using Optim
+using QuadGK
+
+include("financial_math.jl")
+
 
 """
     Years_Between(d1::Date, d2::Date)
@@ -80,6 +85,8 @@ julia> duration(Date(2018,9,30),Date(2017,6,30))
 function duration(issue_date::Date, proj_date::Date)
     return years_between(issue_date,proj_date,true) + 1
 end
+
+
 
 """
     internal_rate_of_return(cashflows::vector)
@@ -163,7 +170,7 @@ Example on how to use real dates using the [DayCounts.jl](https://github.com/Jul
 
 using DayCounts 
 dates = Date(2012,12,31):Year(1):Date(2013,12,31)
-times = yearfrac.(dates[1], dates, Actual365) # [0.0,1.0]
+times = map(d -> yearfrac(dates[1], d, DayCounts.Actual365Fixed()),dates) # [0.0,1.0]
 present_value(0.1, [10,20],times)
 
 # output
@@ -297,12 +304,54 @@ function breakeven(cashflows::Vector,timepoints::Vector, i)
 
 end
 
+abstract type Duration end
+
+struct Macaulay <: Duration end
+struct Modified <: Duration end
+struct DV01 <: Duration end
+
+""" 
+    duration(::Macaulay,int,cfs,times)
+
+Calculates the Macaulay duration, with a fixed int (e.g. `0.05`). `int` should be an annual effective interest rate, **not** a bond effective yield.
+
+Not yet generalized for `InterestCurve` arguments.
+
+"""
+function duration(::Macaulay,int,cfs,times)
+    return sum(times .* present_value.(int,cfs,times) / present_value(int,cfs,times))
+end
 
 
+""" 
+    duration(::Modified,int,cfs,times)
+
+Calculates the Modified duration, with a fixed int (e.g. `0.05`). `int` should be an annual effective interest rate, **not** a bond effective yield.
+
+Not yet generalized for `InterestCurve` arguments
+
+"""
+function duration(::Modified,int,cfs,times)
+    return duration(Macaulay(),int,cfs,times) / (1+int)
+end
+
+""" 
+    duration(::DV01,int,cfs,times)
+
+Calculates the DV01, with a fixed int (e.g. `0.05`). `int` should be an annual effective interest rate, **not** a bond effective yield.
+
+Not yet generalized for `InterestCurve` arguments
+
+"""
+function duration(::DV01,int,cfs,times)
+    return (duration(Modified(),int,cfs,times) * present_value(int,cfs,times) ) / 100
+end
 
 export years_between, duration,
     irr, internal_rate_of_return, 
     pv, present_value,
-    breakeven
+    breakeven,
+    InterestCurve,interest_rate,discount_rate,StepwiseInterp,LinearInterp,
+    Macaulay,Modified,DV01,duration
 
 end # module

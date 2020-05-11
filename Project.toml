@@ -5,7 +5,9 @@ version = "0.2.1"
 
 [deps]
 Dates = "ade2ca70-3891-5945-98fb-dc099432e06a"
+Interpolations = "a98d9a8b-a2ab-59e6-89dd-64a1c18fca59"
 Optim = "429524aa-4258-5aef-a3af-852621145aeb"
+QuadGK = "1fd47b50-473d-5c70-9696-f719f8f3bcdc"
 
 [compat]
 Optim = "^0.20, 0.21"
