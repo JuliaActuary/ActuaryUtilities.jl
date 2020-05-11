@@ -2,7 +2,11 @@ using ActuaryUtilities
 
 using Dates
 using Test
+using Interpolations
+
 import DayCounts
+
+include("financial_math.jl")
 
 @testset "Temporal functions" begin
     @testset "years_between" begin
@@ -31,27 +35,27 @@ end
 @testset "financial calcs" begin
 
     @testset "pv" begin
-        v = [100, 100]
+        cf = [100, 100]
         
-        @test pv(0.05,v) ≈ v[1] / 1.05 + v[2] / 1.05^2
+        @test pv(0.05,cf) ≈ cf[1] / 1.05 + cf[2] / 1.05^2
     end
 
     @testset "pv with timepoints" begin
-        v = [100, 100]
+        cf = [100, 100]
 
-        @test pv(0.05,v,[1,2]) ≈ v[1] / 1.05 + v[2] / 1.05^2
+        @test pv(0.05,cf,[1,2]) ≈ cf[1] / 1.05 + cf[2] / 1.05^2
     end
 
     @testset "pv with vector discount rates" begin
-        v = [100, 100]
-        @test pv([0.0,0.05],v) ≈ 100 / 1.0 + 100 / 1.05
-        @test pv([0.05,0.0],v) ≈ 100 / 1.05 + 100 / 1.05
-        @test pv([0.05,0.1],v) ≈ 100 / 1.05 + 100 / 1.05 / 1.1
+        cf = [100, 100]
+        @test pv([0.0,0.05],cf) ≈ 100 / 1.0 + 100 / 1.05
+        @test pv([0.05,0.0],cf) ≈ 100 / 1.05 + 100 / 1.05
+        @test pv([0.05,0.1],cf) ≈ 100 / 1.05 + 100 / 1.05 / 1.1
 
         ts = [0.5,1]
-        @test pv([0.0,0.05],v,ts) ≈ 100 / 1.0 + 100 / 1.05 ^ 0.5 
-        @test pv([0.05,0.0],v,ts) ≈ 100 / 1.05 ^ 0.5 + 100 / 1.05 ^ 0.5 
-        @test pv([0.05,0.1],v,ts) ≈ 100 / 1.05 ^ 0.5 + 100 / (1.05 ^ 0.5) / (1.1 ^ 0.5)
+        @test pv([0.0,0.05],cf,ts) ≈ 100 / 1.0 + 100 / 1.05 ^ 0.5 
+        @test pv([0.05,0.0],cf,ts) ≈ 100 / 1.05 ^ 0.5 + 100 / 1.05 ^ 0.5 
+        @test pv([0.05,0.1],cf,ts) ≈ 100 / 1.05 ^ 0.5 + 100 / (1.05 ^ 0.5) / (1.1 ^ 0.5)
 
 
 
@@ -127,6 +131,20 @@ end
         @test breakeven([-10,15,2,3,4,8],times,0.10) == 1
         @test breakeven([-10,15,2,3,4,8],times,0.10) == 1
         @test isnothing(breakeven([-10,-15,2,3,4,8],times,0.10))
+    end
+end
+
+@testset "duration" begin
+    
+    @testset "wikipedia example" begin
+        times = [0.5,1,1.5,2]
+        cfs = [10,10,10,110]
+        V = present_value(0.04,cfs,times)
+
+        @test duration(Macaulay(), 0.04,cfs,times) ≈ 1.777570320376649
+        @test duration(Modified(), 0.04,cfs,times) ≈ 1.777570320376649 / (1 + 0.04)
+        @test duration(DV01(), 0.04,cfs,times) ≈ 1.777570320376649 / (1 + 0.04) * V / 100
+
     end
 end
 
