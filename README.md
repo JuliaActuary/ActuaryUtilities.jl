@@ -17,3 +17,7 @@ Some of the functions included:
 
 ### Documentation
 Click the docs badges above for more details and examples.
+
+### Useful tips
+
+Functions often use a mix of interest_rates, cashflows, and timepoints. When calling functions, the general order of the arguments is 1) interest rates, 2) cashflows, and 3) timepoints. 
