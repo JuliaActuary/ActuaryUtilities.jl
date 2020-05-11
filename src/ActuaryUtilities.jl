@@ -170,7 +170,7 @@ Example on how to use real dates using the [DayCounts.jl](https://github.com/Jul
 
 using DayCounts 
 dates = Date(2012,12,31):Year(1):Date(2013,12,31)
-times = yearfrac.(dates[1], dates, Actual365) # [0.0,1.0]
+times = map(d -> yearfrac(dates[1], d, DayCounts.Actual365Fixed()),dates) # [0.0,1.0]
 present_value(0.1, [10,20],times)
 
 # output
