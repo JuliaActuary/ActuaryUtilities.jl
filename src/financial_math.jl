@@ -25,12 +25,16 @@ function InterestCurve(rates,times,interpolation_method::LinearInterp)
     return InterestCurve(rates,times,interpolation_method,f)
 
 end
+
+function InterestCurve(rates)
+    return InterestCurve(rates,1:length(rates),StepwiseInterp())
+end
 function InterestCurve(rates,times)
-    return InterestCurve(rates,times,LinearInterp())
+    return InterestCurve(rates,times,StepwiseInterp())
 end
 
 function InterestCurve(rates,times,interpolation_method::StepwiseInterp)
-    f(time) = rates[findfirst(t -> t >= time,times)]
+    f(time) = time > last(times) ? last(rates) : rates[findfirst(t -> t >= time,times)]
     return InterestCurve(rates,times,interpolation_method,f)
 
 end
@@ -41,13 +45,21 @@ Base.Broadcast.broadcastable(ic::InterestCurve) = Ref(ic)
 
 
 """
-    interest_rate(InterestCurve,time)
+interest_rate(interest,time)
 
-Return the interest rate at the instant `time`.
+Return the interest rate at `time`. 
+
+`interest` can be:
+    - an `InterestCurve`
+    - a vector wrapped in an interest curve
+    - a scalar rate
 
 # Examples
+
+## InterestCurve
 ```julia-repl
 julia> ic = InterestCurve([0.01,0.05,0.05,0.1],[1,2,3,4])
+julia> ic = InterestCurve([0.01,0.05,0.05,0.1])  # this is equivalent to the line above
 
 julia> interest_rate(ic,1)
 0.01
@@ -60,17 +72,8 @@ julia> interest_rate.(ic,0:4) # function is broadcastable
  0.05
  0.1
 ```
-"""
-function interest_rate(ic::InterestCurve,time)
-    return ic.interp_func(time)
-end
 
-"""
-    interest_rate(i,time)
-
-Returns `i` at all times.
-
-# Examples
+## Scalar
 ```julia-repl
 julia> interest_rate(0.05,1)
 0.05
@@ -82,20 +85,33 @@ julia> interest_rate.(0.05,1:3) # function can be broadcasted
 0.05
 ```
 """
+function interest_rate(ic::InterestCurve,time)
+    return ic.interp_func(time)
+end
+
 function interest_rate(i,time)
     return i
 end
 
 """
-    interest_rate(InterestCurve,time)
+    discount_rate(interest,time)
 
 Return the discount rate at `time`. 
 
-Internally, this method is general in that it will use the interpolated interest rate to use an integral approxmation to the accumulated force of interest.
+`interest` can be:
+    - a `InterestCurve`
+    - a vector wrapped in an interest curve
+    - a scalar rate
+
+Internally, if not a scalar argument, this method will use the interpolated interest rate to use an integral approxmation to the accumulated force of interest. This generalizes well. For more performance on repeated calls, use an `InterestCurve` instead of a vector.
 
 # Examples
+
+## InterestCurve
+
 ```julia-repl
 julia> ic = InterestCurve([0.01,0.05,0.05,0.1],[1,2,3,4])
+julia> ic = InterestCurve([0.01,0.05,0.05,0.1])  # this is equivalent to the line above
 
 julia> discount_rate(ic,1)
 0.9900990099009901
@@ -108,23 +124,8 @@ julia> discount_rate.(ic,0:4) # function is broadcastable
  0.9155443705701612
  0.8517459660161829
 ```
-"""
-function discount_rate(ic::InterestCurve,time)
-    # as a general approach, convert Effective Annual Rates
-    # to continuously compounded rates for integration
-    # i = exp(δ) - 1
-    # δ = ln(1+i)
-    integral, err = quadgk(t -> log(1+interest_rate(ic,t)),0,time)
-    return 1/exp(integral)
-end
 
-
-"""
-discount_rate(rate,times)
-
-Turn a rate into a given discount vector matching the times given.
-
-# Examples
+## Scalar
 ```julia-repl
 julia> discount_rate(0.05,1)
 0.9523809523809523
@@ -137,6 +138,15 @@ julia> discount_rate.(0.05,1:3) # function can be broadcasted
 
 ```
 """
+function discount_rate(ic::InterestCurve,time)
+    # as a general approach, convert Effective Annual Rates
+    # to continuously compounded rates for integration
+    # i = exp(δ) - 1
+    # δ = ln(1+i)
+    integral, err = quadgk(t -> log(1+interest_rate(ic,t)),0,time)
+    return 1/exp(integral)
+end
+
 function discount_rate(i, time)
     return  1 / ((1 + i) ^ time)
 end
@@ -189,33 +199,23 @@ end
 """
     irr()
 
-    A shorthand for `internal_rate_of_return`.
+    An alias for `internal_rate_of_return`.
 """
 irr = internal_rate_of_return
 
-
 """
-    pv(interest_rate::Real, cashflows::Vector)
+    present_value(interest, cashflows::Vector, timepoints)
 
-Discount the `cashflows` vector at the given decimal `interest_rate`. It is assumed that the cashflows are 
-periodic commisurate with the period of the interest rate (ie use an annual rate for 
-annual values in the vector, quarterly interest rate for quarterly cashflows). The first
-value of the `cashflows` vector is assumed to occur at the end of period 1.
-
-"""
-function present_value(i,v)
-    return present_value(i,v,[t for t in 1:length(v)])
-end
-
-"""
-    present_value(interest_rate::Real, cashflows::Vector, timepoints)
-
-Discount the `cashflows` vector at the given scalar or vector `interest_rate`,  with the cashflows occurring
+Discount the `cashflows` vector at the given `interest_interestrate`,  with the cashflows occurring
 at the times specified in `timepoints`. 
 
-```jldoctest
+The `interest` can be an `InterestCurve`, a single scalar, or a vector wrapped in an `InterestCurve`. 
+
+# Examples
+```julia-repl
 julia> present_value(0.1, [10,20],[0,1])
 28.18181818181818
+julia> present_value(InterestVector([0.1,0.2]), [10,20],[0,1])
 ```
 
 Example on how to use real dates using the [DayCounts.jl](https://github.com/JuliaFinance/DayCounts.jl) package
@@ -229,32 +229,33 @@ present_value(0.1, [10,20],times)
 # output
 28.18181818181818
 
-
 ```
 
 """
-function present_value(interest_rates::Array,cashflows,timepoints)
-    v = ones(length(timepoints))
-    v[1] = 1.0 / (1 + interest_rates[1]) ^ timepoints[1]
-    for t in 2:length(v)
-        v[t] = v[t-1] / (1 + interest_rates[t]) ^ (timepoints[t] - timepoints[t-1])
-    end
-    return sum(cashflows .* v)
+function present_value(ic::InterestCurve,cashflows,timepoints)
+    sum(discount_rate.(ic,timepoints) .* cashflows)
 end
 
-function present_value(interest_rate,cashflows,timepoints)
-    v = ones(length(timepoints))
-    v[1] = 1.0 / (1 + interest_rate) ^ timepoints[1]
-    for t in 2:length(v)
-        v[t] = v[t-1] / (1 + interest_rate) ^ (timepoints[t] - timepoints[t-1])
-    end
-    return sum(cashflows .* v)
+function present_value(interest,cashflows,timepoints)
+    sum(discount_rate.(interest,timepoints) .* cashflows)
+end
+
+"""
+    present_value(interest, cashflows::Vector)
+
+Assumes that cashflows happen at times 1,2,...,n.
+
+`interest` can be an `InterestCurve`, a single scalar, or a vector.
+
+"""
+function present_value(i,v)
+    return present_value(i,v,[t for t in 1:length(v)])
 end
 
 """
     pv()
 
-    A shorthand for `present_value`.
+    An alias for `present_value`.
 """
 pv = present_value
 

@@ -86,10 +86,6 @@ function duration(issue_date::Date, proj_date::Date)
     return years_between(issue_date,proj_date,true) + 1
 end
 
-
-
-
-
 export years_between, duration,
     irr, internal_rate_of_return, 
     pv, present_value,
