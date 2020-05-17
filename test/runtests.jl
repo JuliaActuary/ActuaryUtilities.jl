@@ -38,6 +38,11 @@ end
         cf = [100, 100]
         
         @test pv(0.05,cf) ≈ cf[1] / 1.05 + cf[2] / 1.05^2
+
+        # this vector came from Numpy Financial's test suite with target of 122.89, but that assumes payments are begin of period
+        # 117.04 comes from Excel verification with NPV function
+        @test isapprox( pv(0.05, [-15000, 1500, 2500, 3500, 4500, 6000]), 117.04, atol=1e-2)
+
     end
 
     @testset "pv with timepoints" begin
@@ -82,6 +87,19 @@ end
 
         @test isnothing(irr([100,100]))
 
+    end
+
+    @testset "numpy examples" begin
+
+        @test isapprox( irr([-150000, 15000, 25000, 35000, 45000, 60000])  ,  0.0524,     atol=1e-4)
+        @test isapprox( irr([-100, 0, 0, 74])                              , -0.0955,     atol=1e-4)
+        @test isapprox( irr([-100, 39, 59, 55, 20])                        ,  0.28095,    atol=1e-4)
+        @test isapprox( irr([-100, 100, 0, -7])                            , -0.0833,     atol=1e-4)
+        @test isapprox( irr([-100, 100, 0, 7])                             ,  0.06206,    atol=1e-4)
+
+        # this has multiple roots, of which 0.709559 and 0.0886 are both correct. With more robus IRR, would return the 
+        # one closer to zero
+        @test_broken isapprox( irr([-5, 10.5, 1, -8, 1])                          ,  0.0886,     atol=1e-4)
     end
 
     @testset "xirr with float times" begin
