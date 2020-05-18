@@ -153,10 +153,19 @@ end
 
 """
     internal_rate_of_return(cashflows::vector)
+    internal_rate_of_return(cashflows::Vector, timepoints::Vector)
     
-Calculate the internal_rate_of_return of a series of equally spaced cashflows, assuming the first 
-element occurs at time zero. First tries to find a positive rate in the interval `[0.0,1.0]`. If none is found,
+Calculate the internal_rate_of_return with given timepoints. If no timepoints given, will assume that a series of equally spaced cashflows, assuming the first 
+cashflow occurring at time zero. 
+
+First tries to find a positive rate in the interval `[0.0,1.0]`. If none is found,
 will extend search to [-1.0,1.0]. If still not found, will return `nothing`.
+
+# Example
+```julia-repl
+julia> internal_rate_of_return([-100,110],[0,1]) # e.g. cashflows at time 0 and 1
+0.10000000001652906
+```
 
 """
 function internal_rate_of_return(cashflows)
@@ -166,18 +175,6 @@ function internal_rate_of_return(cashflows)
     
 end
 
-"""
-    internal_rate_of_return(cashflows::Vector, timepoints::Vector)
-
-Calculate the internal_rate_of_return with given timepoints. 
-First tries to find a positive rate in the interval `[0.0,1.0]`. If none is found,
-will extend search to [-1.0,1.0]. If still not found, will return `nothing`.
-
-```jldoctest
-julia> internal_rate_of_return([-100,110],[0,1]) # e.g. cashflows at time 0 and 1
-0.10000000001652906
-```
-"""
 function internal_rate_of_return(cashflows,times)
     # Optim requires the optimizing variable to be an array, thus the i[1]
     f(i) = sum(cashflows .* [1/(1+i[1])^t for t in times])
@@ -205,9 +202,10 @@ irr = internal_rate_of_return
 
 """
     present_value(interest, cashflows::Vector, timepoints)
+    present_value(interest, cashflows::Vector)
 
 Discount the `cashflows` vector at the given `interest_interestrate`,  with the cashflows occurring
-at the times specified in `timepoints`. 
+at the times specified in `timepoints`. If no `timepoints` given, assumes that cashflows happen at times 1,2,...,n.
 
 The `interest` can be an `InterestCurve`, a single scalar, or a vector wrapped in an `InterestCurve`. 
 
@@ -240,14 +238,6 @@ function present_value(interest,cashflows,timepoints)
     sum(discount_rate.(interest,timepoints) .* cashflows)
 end
 
-"""
-    present_value(interest, cashflows::Vector)
-
-Assumes that cashflows happen at times 1,2,...,n.
-
-`interest` can be an `InterestCurve`, a single scalar, or a vector.
-
-"""
 function present_value(i,v)
     return present_value(i,v,[t for t in 1:length(v)])
 end
