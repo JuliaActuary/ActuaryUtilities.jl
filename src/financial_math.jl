@@ -386,7 +386,83 @@ Not yet generalized for `InterestCurve` arguments
 
 """
 function duration(::Modified,int,cfs,times)
-    return duration(Macaulay(),int,cfs,times) / (1+int)
+    return duration(int,i -> present_value(i,cfs,times))
+end
+
+function duration(int,valuation_function)
+    δV =  - ForwardDiff.derivative(i -> log(valuation_function(i)),int)
+end
+""" 
+    duration(int,cfs,times)
+    duration(int,valuation_function)
+
+The first method: Calculates the Modified duration, with a fixed int (e.g. `0.05`). `int` should be an annual effective interest rate, **not** a bond effective yield.
+
+The second method: given a function that returns a value or price for an input `i`, will calculate the duration.
+
+# Examples
+
+Using any given value function: 
+
+```julia-repl
+julia> lump_sum_value(amount,years,i) = amount / (1 + i ) ^ years
+julia> my_lump_sum_value(i) = lump_sum_value(100,5,i)
+julia> duration(0.03,my_lump_sum_value)
+4.854368932038835
+julia> convexity(0.03,my_lump_sum_value)
+28.277877274012617
+
+```
+
+
+"""
+function duration(int,cfs,times)
+    return duration(Modified(),int,cfs,times)
+end
+
+""" 
+    convexity(int,cfs,times)
+    convexity(int,valuation_function)
+
+The first method: Calculates the convexity, with a fixed int (e.g. `0.05`). `int` should be an annual effective interest rate, **not** a bond effective yield.
+
+
+The second method: given a function that returns a value or price for an input `i`, will calculate the convexity.
+
+# Examples
+
+Using vectors of cashflows and times
+```julia-repl
+julia> times = 1:5
+julia> cfs = [0,0,0,0,100]
+julia> duration(0.03,cfs,times)
+4.854368932038834
+julia> convexity(0.03,cfs,times)
+28.277877274012614
+
+```
+
+Using any given value function: 
+
+```julia-repl
+julia> lump_sum_value(amount,years,i) = amount / (1 + i ) ^ years
+julia> my_lump_sum_value(i) = lump_sum_value(100,5,i)
+julia> duration(0.03,my_lump_sum_value)
+4.854368932038835
+julia> convexity(0.03,my_lump_sum_value)
+28.277877274012617
+
+```
+
+"""
+function convexity(int,cfs,times)
+    return convexity(int, i -> present_value(i,cfs,times))
+end
+
+function convexity(int,valuation_function)
+    D(i) = duration(i,valuation_function)
+
+    return D(int) ^ 2 - ForwardDiff.derivative(D,int)
 end
 
 """ 
