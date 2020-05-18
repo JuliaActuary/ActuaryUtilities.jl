@@ -12,7 +12,6 @@ makedocs(;
     repo="https://github.com/JuliaActuary/ActuaryUtilities.jl/blob/{commit}{path}#L{line}",
     sitename="ActuaryUtilities.jl",
     authors="Alec Loudenback",
-    assets=String[],
 )
 
 deploydocs(;

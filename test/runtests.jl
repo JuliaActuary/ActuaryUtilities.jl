@@ -161,9 +161,40 @@ end
 
         @test duration(Macaulay(), 0.04,cfs,times) ≈ 1.777570320376649
         @test duration(Modified(), 0.04,cfs,times) ≈ 1.777570320376649 / (1 + 0.04)
+        @test duration(0.04,cfs,times) ≈ 1.777570320376649 / (1 + 0.04)
         @test duration(DV01(), 0.04,cfs,times) ≈ 1.777570320376649 / (1 + 0.04) * V / 100
 
     end
+
+    @testset "finpipe example" begin
+        # from https://www.finpipe.com/duration-macaulay-and-modified-duration-convexity/
+
+        cfs = zeros(10) .+ 3.75
+        cfs[10] += 100
+
+        times = 0.5:0.5:5.0
+        int = (1+0.075/2)^2 -1 # convert bond yield to effective yield
+
+        @test isapprox(present_value(int,cfs,times), 100.00, atol=1e-2)
+        @test isapprox(duration(Macaulay(),int,cfs,times), 4.26, atol=1e-2)
+    end
+
+    @testset "Primer example" begin
+        # from https://math.illinoisstate.edu/krzysio/Primer.pdf
+        # the duration tests are commented out because I think the paper is wrong on the duration?
+        cfs = [0,0,0,0,1.0e6]
+        times = 1:5
+
+        @test isapprox(present_value(0.04,cfs,times),821927.11,atol=1e-2)
+        # @test isapprox(duration(0.04,cfs,times),4.76190476,atol=1e-6)
+        @test isapprox(convexity(0.04,cfs,times),27.7366864,atol=1e-6)
+
+        # the same, but with a functional argument
+        value(i) = present_value(i,cfs,times)
+        # @test isapprox(duration(0.04,value),4.76190476,atol=1e-6)
+        @test isapprox(convexity(0.04,value),27.7366864,atol=1e-6)
+    end
+
 end
 
 

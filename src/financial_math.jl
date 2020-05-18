@@ -153,10 +153,19 @@ end
 
 """
     internal_rate_of_return(cashflows::vector)
+    internal_rate_of_return(cashflows::Vector, timepoints::Vector)
     
-Calculate the internal_rate_of_return of a series of equally spaced cashflows, assuming the first 
-element occurs at time zero. First tries to find a positive rate in the interval `[0.0,1.0]`. If none is found,
+Calculate the internal_rate_of_return with given timepoints. If no timepoints given, will assume that a series of equally spaced cashflows, assuming the first 
+cashflow occurring at time zero. 
+
+First tries to find a positive rate in the interval `[0.0,1.0]`. If none is found,
 will extend search to [-1.0,1.0]. If still not found, will return `nothing`.
+
+# Example
+```julia-repl
+julia> internal_rate_of_return([-100,110],[0,1]) # e.g. cashflows at time 0 and 1
+0.10000000001652906
+```
 
 """
 function internal_rate_of_return(cashflows)
@@ -166,18 +175,6 @@ function internal_rate_of_return(cashflows)
     
 end
 
-"""
-    internal_rate_of_return(cashflows::Vector, timepoints::Vector)
-
-Calculate the internal_rate_of_return with given timepoints. 
-First tries to find a positive rate in the interval `[0.0,1.0]`. If none is found,
-will extend search to [-1.0,1.0]. If still not found, will return `nothing`.
-
-```jldoctest
-julia> internal_rate_of_return([-100,110],[0,1]) # e.g. cashflows at time 0 and 1
-0.10000000001652906
-```
-"""
 function internal_rate_of_return(cashflows,times)
     # Optim requires the optimizing variable to be an array, thus the i[1]
     f(i) = sum(cashflows .* [1/(1+i[1])^t for t in times])
@@ -205,9 +202,10 @@ irr = internal_rate_of_return
 
 """
     present_value(interest, cashflows::Vector, timepoints)
+    present_value(interest, cashflows::Vector)
 
 Discount the `cashflows` vector at the given `interest_interestrate`,  with the cashflows occurring
-at the times specified in `timepoints`. 
+at the times specified in `timepoints`. If no `timepoints` given, assumes that cashflows happen at times 1,2,...,n.
 
 The `interest` can be an `InterestCurve`, a single scalar, or a vector wrapped in an `InterestCurve`. 
 
@@ -240,14 +238,6 @@ function present_value(interest,cashflows,timepoints)
     sum(discount_rate.(interest,timepoints) .* cashflows)
 end
 
-"""
-    present_value(interest, cashflows::Vector)
-
-Assumes that cashflows happen at times 1,2,...,n.
-
-`interest` can be an `InterestCurve`, a single scalar, or a vector.
-
-"""
 function present_value(i,v)
     return present_value(i,v,[t for t in 1:length(v)])
 end
@@ -295,8 +285,7 @@ Assumes that:
 - cashflows occur at the timepoint indicated at the corresponding `timepoints` position
 - cashflows occur at the end of the period
 - that the accumulation rate corresponds to the periodicity of the cashflows. 
-- If given a vector of 
-interest rates, the first rate is effectively never used, as it's treated as the accumulation 
+- If given a vector of interest rates, the first rate is effectively never used, as it's treated as the accumulation 
 rate between time zero and the first cashflow.
 
 Returns `nothing` if cashflow stream never breaks even.
@@ -365,38 +354,113 @@ struct Modified <: Duration end
 struct DV01 <: Duration end
 
 """ 
-    duration(::Macaulay,int,cfs,times)
+    duration(Macaulay(),interest_rate,cfs,times)
+    duration(Modified(),interest_rate,cfs,times)
+    duration(::DV01,interest_rate,cfs,times)
+    duration(interest_rate,cfs,times)             # Modified Duration
+    duration(interest_rate,valuation_function)    # modified Duration
 
-Calculates the Macaulay duration, with a fixed int (e.g. `0.05`). `int` should be an annual effective interest rate, **not** a bond effective yield.
+Calculates the Macaulay, Modified, or DV01 duration.
+- `interest_rate` should be a fixed effective yield (e.g. `0.05`).
 
-Not yet generalized for `InterestCurve` arguments.
+When not given `Modified()` or `Macaulay()` as an argument, will default to `Modified()`.
 
+# Examples
+
+Using vectors of cashflows and times
+```julia-repl
+julia> times = 1:5
+julia> cfs = [0,0,0,0,100]
+julia> duration(0.03,cfs,times)
+4.854368932038834
+julia> duration(Macaulay(),0.03,cfs,times)
+5.0
+julia> duration(Modified(),0.03,cfs,times)
+4.854368932038835
+julia> convexity(0.03,cfs,times)
+28.277877274012614
+
+```
+
+Using any given value function: 
+
+```julia-repl
+julia> lump_sum_value(amount,years,i) = amount / (1 + i ) ^ years
+julia> my_lump_sum_value(i) = lump_sum_value(100,5,i)
+julia> duration(0.03,my_lump_sum_value)
+4.854368932038835
+julia> convexity(0.03,my_lump_sum_value)
+28.277877274012617
+
+```
 """
-function duration(::Macaulay,int,cfs,times)
-    return sum(times .* present_value.(int,cfs,times) / present_value(int,cfs,times))
+function duration(::Macaulay,interest_rate,cfs,times)
+    return sum(times .* present_value.(interest_rate,cfs,times) / present_value(interest_rate,cfs,times))
+end
+function duration(::Modified,interest_rate,cfs,times)
+    return duration(interest_rate,i -> present_value(i,cfs,times))
 end
 
+function duration(interest_rate,valuation_function)
+    δV =  - ForwardDiff.derivative(i -> log(valuation_function(i)),interest_rate)
+end
+
+function duration(interest_rate,cfs,times)
+    return duration(Modified(),interest_rate,cfs,times)
+end
+
+function duration(::DV01,interest_rate,cfs,times)
+    return duration(DV01(),interest_rate,i->present_value(i,cfs,times))
+end
+
+function duration(::DV01,interest_rate,valuation_function)
+    return duration(interest_rate,valuation_function) * valuation_function(interest_rate) / 100
+end
 
 """ 
-    duration(::Modified,int,cfs,times)
+    convexity(interest_rate,cfs,times)
+    convexity(interest_rate,valuation_function)
 
-Calculates the Modified duration, with a fixed int (e.g. `0.05`). `int` should be an annual effective interest rate, **not** a bond effective yield.
+Calculates the convexity.
+    - `interest_rate` should be a fixed effective yield (e.g. `0.05`).
 
-Not yet generalized for `InterestCurve` arguments
+# Examples
+
+Using vectors of cashflows and times
+```julia-repl
+julia> times = 1:5
+julia> cfs = [0,0,0,0,100]
+julia> duration(0.03,cfs,times)
+4.854368932038834
+julia> duration(Macaulay(),0.03,cfs,times)
+5.0
+julia> duration(Modified(),0.03,cfs,times)
+4.854368932038835
+julia> convexity(0.03,cfs,times)
+28.277877274012614
+
+```
+
+Using any given value function: 
+
+```julia-repl
+julia> lump_sum_value(amount,years,i) = amount / (1 + i ) ^ years
+julia> my_lump_sum_value(i) = lump_sum_value(100,5,i)
+julia> duration(0.03,my_lump_sum_value)
+4.854368932038835
+julia> convexity(0.03,my_lump_sum_value)
+28.277877274012617
+
+```
 
 """
-function duration(::Modified,int,cfs,times)
-    return duration(Macaulay(),int,cfs,times) / (1+int)
+function convexity(interest_rate,cfs,times)
+    return convexity(interest_rate, i -> present_value(i,cfs,times))
 end
 
-""" 
-    duration(::DV01,int,cfs,times)
+function convexity(interest_rate,valuation_function)
+    D(i) = duration(i,valuation_function)
 
-Calculates the DV01, with a fixed int (e.g. `0.05`). `int` should be an annual effective interest rate, **not** a bond effective yield.
-
-Not yet generalized for `InterestCurve` arguments
-
-"""
-function duration(::DV01,int,cfs,times)
-    return (duration(Modified(),int,cfs,times) * present_value(int,cfs,times) ) / 100
+    return D(interest_rate) ^ 2 - ForwardDiff.derivative(D,interest_rate)
 end
+

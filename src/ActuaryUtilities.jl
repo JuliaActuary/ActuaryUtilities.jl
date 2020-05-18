@@ -1,6 +1,7 @@
 module ActuaryUtilities
 
 using Dates
+using ForwardDiff
 using Interpolations
 using Optim
 using QuadGK
@@ -91,6 +92,6 @@ export years_between, duration,
     pv, present_value,
     breakeven,
     InterestCurve,interest_rate,discount_rate,StepwiseInterp,LinearInterp,
-    Macaulay,Modified,DV01,duration
+    Macaulay,Modified,DV01,duration, convexity
 
 end # module
