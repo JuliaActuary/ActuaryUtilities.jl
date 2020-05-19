@@ -195,6 +195,16 @@ end
         @test isapprox(convexity(0.04,value),27.7366864,atol=1e-6)
     end
 
+    @testset "Quantlib" begin
+    # https://mhittesdorf.wordpress.com/2013/03/12/introduction-to-quantlib-duration-and-convexity/
+        cfs = [5,5,105]
+        times = 1:3
+        @test present_value(0.03,cfs,times) ≈ 105.6572227097894
+        @test duration(Macaulay(),0.03,cfs,times) ≈ 2.863504670671131
+        @test duration(0.03,cfs,times) ≈ 2.780101622010806
+        @test convexity(0.03,cfs,times) ≈ 10.62580548268594
+    end
+
 end
 
 
