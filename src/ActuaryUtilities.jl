@@ -35,18 +35,18 @@ julia> years_between(d1,d2) # using default `true` overlap
 1 
 ```
 """
-function years_between(d1::Date,d2::Date,overlap=true)
-    iy,im,id = Dates.year(d1), Dates.month(d1), Dates.day(d1)
-    vy,vm,vd = Dates.year(d2), Dates.month(d2), Dates.day(d2)
+function years_between(d1::Date, d2::Date, overlap = true)
+    iy, im, id = Dates.year(d1), Dates.month(d1), Dates.day(d1)
+    vy, vm, vd = Dates.year(d2), Dates.month(d2), Dates.day(d2)
     dur = vy - iy
     if vm == im
         if overlap
             if vd >= id
-                 dur += 1
+                dur += 1
             end
         else
             if vd > id
-                 dur += 1
+                dur += 1
             end
         end
     elseif vm > im
@@ -84,7 +84,7 @@ julia> duration(Date(2018,9,30),Date(2017,6,30))
 
 """
 function duration(issue_date::Date, proj_date::Date)
-    return years_between(issue_date,proj_date,true) + 1
+    return years_between(issue_date, proj_date, true) + 1
 end
 
 export years_between, duration,
