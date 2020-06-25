@@ -11,8 +11,8 @@ Optim = "429524aa-4258-5aef-a3af-852621145aeb"
 QuadGK = "1fd47b50-473d-5c70-9696-f719f8f3bcdc"
 
 [compat]
-Interpolations = "^0.12"
 ForwardDiff = "^0.10"
+Interpolations = "^0.12"
 Optim = "^0.20, 0.21"
 QuadGK = "^2"
 julia = "^1.1"
