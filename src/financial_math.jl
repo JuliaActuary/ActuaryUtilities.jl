@@ -155,11 +155,9 @@ end
     internal_rate_of_return(cashflows::vector)
     internal_rate_of_return(cashflows::Vector, timepoints::Vector)
     
-Calculate the internal_rate_of_return with given timepoints. If no timepoints given, will assume that a series of equally spaced cashflows, assuming the first 
-cashflow occurring at time zero. 
+Calculate the internal_rate_of_return with given timepoints. If no timepoints given, will assume that a series of equally spaced cashflows, assuming the first cashflow occurring at time zero. 
 
-First tries to find a positive rate in the interval `[0.0,1.0]`. If none is found,
-will extend search to [-1.0,1.0]. If still not found, will return `nothing`.
+First tries to find a rate in the interval `[-0.1,0.25]`. If none is found, will triple the search range until the range is [-1.5,1.65]. If none is still found, will return `nothing`.
 
 # Example
 ```julia-repl
@@ -176,21 +174,24 @@ function internal_rate_of_return(cashflows)
 end
 
 function internal_rate_of_return(cashflows,times)
-    # Optim requires the optimizing variable to be an array, thus the i[1]
-    f(i) = sum(cashflows .* [1/(1+i[1])^t for t in times])
-    result = optimize(x -> f(x)^2, 0.0,1.0)
+    f(i) =  sum(@views cashflows .* [1/(1+i[1])^t for t in times])
+    loss_func = x -> f(x)^2
+    result = irr_root(loss_func)
+end
+
+function irr_root(f,low=-.1,high=0.25)
+    range = high - low
+    
+    # short circuit if the range has gotten too wide
+    range > 3.2 && return nothing
+
+    result = optimize(f, low,high)
+
     if abs(f(result.minimizer)) < 1.0e-3 # arbitrary that seems to work
         return result.minimizer
     else
-        # try finding a negative irr
-        result = optimize(x -> f(x)^2, -1.0,1.0)
-        if abs(f(result.minimizer)) < 1.0e-3 # arbitrary that seems to work
-            return result.minimizer
-        else
-            return nothing
-        end
+        return irr_root(f,low - range, high + range)
     end
-    
 end
 
 """
@@ -463,4 +464,3 @@ function convexity(interest_rate,valuation_function)
 
     return D(interest_rate) ^ 2 - ForwardDiff.derivative(D,interest_rate)
 end
-
