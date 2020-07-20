@@ -32,6 +32,15 @@ include("financial_math.jl")
     end
 end
 
+
+@testset "accum_offset" begin
+    @test all(accum_offset([0.9, 0.8, 0.7]) .== [1.0,0.9,1.0 * 0.9 * 0.8])
+    @test all(accum_offset([0.9, 0.8, 0.7],op=+) .== [1.0,1.9,2.7])
+    @test all(accum_offset([0.9, 0.8, 0.7],op=+,init=2) .== [2.0,2.9,3.7])
+
+    @test all(accum_offset([1, 2, 3]) .== [1,1,2])
+end
+
 @testset "financial calcs" begin
 
     @testset "pv" begin
