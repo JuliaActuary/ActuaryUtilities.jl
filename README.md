@@ -11,13 +11,14 @@ A collection of common functions/manipulations used in Actuarial Calculations.
 Some of the functions included:
 
 - `duration`:
-    - Calculate the duration given an issue date and date (a.k.a. policy duration)
-    - Calculate the `Macaulay`, `Modified`, or `DV01` durations for a set of cashflows
+  - Calculate the duration given an issue date and date (a.k.a. policy duration)
+  - Calculate the `Macaulay`, `Modified`, or `DV01` durations for a set of cashflows
 - `convexity` for price sensitivity
 - `present_value` or `pv` to calculate the present value of a set of cashflows
 - `discount_rate` for a given fixed rate or `InterestCurve`
 - `internal_rate_of_return` or `irr` to calculate the IRR given cashflows (including at timepoints like Excel's `XIRR`)
 - `breakeven` to calculate the breakeven time for a set of cashflows
+- `accum_offset` to calculate accumulations like survivorship from a mortality vector
 
 ### Documentation
 Click the docs badges above for more details and examples.

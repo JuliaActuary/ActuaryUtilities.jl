@@ -32,6 +32,15 @@ include("financial_math.jl")
     end
 end
 
+
+@testset "accum_offset" begin
+    @test all(accum_offset([0.9, 0.8, 0.7]) .== [1.0,0.9,1.0 * 0.9 * 0.8])
+    @test all(accum_offset([0.9, 0.8, 0.7],op=+) .== [1.0,1.9,2.7])
+    @test all(accum_offset([0.9, 0.8, 0.7],op=+,init=2) .== [2.0,2.9,3.7])
+
+    @test all(accum_offset([1, 2, 3]) .== [1,1,2])
+end
+
 @testset "financial calcs" begin
 
     @testset "pv" begin
@@ -97,8 +106,7 @@ end
         @test isapprox(irr([-100, 100, 0, -7]), -0.0833,     atol = 1e-4)
         @test isapprox(irr([-100, 100, 0, 7]),  0.06206,    atol = 1e-4)
 
-        # this has multiple roots, of which 0.709559 and 0.0886 are both correct. With more robus IRR, would return the 
-        # one closer to zero
+        # this has multiple roots, of which 0.709559 and 0.0886. Want to find the one closer to zero
         @test isapprox(irr([-5, 10.5, 1, -8, 1]),  0.0886,     atol = 1e-4)
     end
 
