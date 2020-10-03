@@ -5,6 +5,7 @@ using ForwardDiff
 using Interpolations
 using Optim
 using QuadGK
+using Yields
 
 include("financial_math.jl")
 

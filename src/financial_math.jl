@@ -1,156 +1,3 @@
-struct InterestCurve
-    rates
-    times
-    interpolation_method
-    interp_func
-end
-
-struct StepwiseInterp end
-struct LinearInterp end
-
-"""
-    InterestCurve(rates,times,interpolation_method)
-
-Creates an InterestCurve object:
-- `rates` are annual effective forward interest rates
-- `times` are the end of the period for which the 
-- `interpolation_method` is either option below (with `StepwiseInterp()` as the default)
-    - `StepwiseInterp()` which is an *ActuaryUtilities.jl* provided type which will use the given `rate` for the period up to the given `time`.
-        - For example, with `rates= [0.05,0.1]` and `times=[1,2]` then `0.05` will be used for the period `(0,1]` and `0.1` will be used for the period `(1,2]`.
-    - `LinearInterp()`, which linearly interpolates between `times` and is flat outside the boundaries of `times`.
-
-"""
-function InterestCurve(rates,times,interpolation_method::LinearInterp)
-    f(time) = LinearInterpolation(times,rates,extrapolation_bc = Interpolations.Flat())(time)
-    return InterestCurve(rates,times,interpolation_method,f)
-
-end
-
-function InterestCurve(rates)
-    return InterestCurve(rates,1:length(rates),StepwiseInterp())
-end
-function InterestCurve(rates,times)
-    return InterestCurve(rates,times,StepwiseInterp())
-end
-
-function InterestCurve(rates,times,interpolation_method::StepwiseInterp)
-    f(time) = time > last(times) ? last(rates) : rates[findfirst(t -> t >= time,times)]
-    return InterestCurve(rates,times,interpolation_method,f)
-
-end
-
-
-# make interest curve broadcastable so that you can broadcast over multiple`time`s in `interest_rate`
-Base.Broadcast.broadcastable(ic::InterestCurve) = Ref(ic) 
-
-
-"""
-interest_rate(interest,time)
-
-Return the interest rate at `time`. 
-
-`interest` can be:
-    - an `InterestCurve`
-    - a vector wrapped in an interest curve
-    - a scalar rate
-
-# Examples
-
-## InterestCurve
-```julia-repl
-julia> ic = InterestCurve([0.01,0.05,0.05,0.1],[1,2,3,4])
-julia> ic = InterestCurve([0.01,0.05,0.05,0.1])  # this is equivalent to the line above
-
-julia> interest_rate(ic,1)
-0.01
-
-julia> interest_rate.(ic,0:4) # function is broadcastable
-5-element Array{Float64,1}:
- 0.01
- 0.01
- 0.05
- 0.05
- 0.1
-```
-
-## Scalar
-```julia-repl
-julia> interest_rate(0.05,1)
-0.05
-
-julia> interest_rate.(0.05,1:3) # function can be broadcasted
-3-element Array{Float64,1}:
-0.05
-0.05
-0.05
-```
-"""
-function interest_rate(ic::InterestCurve,time)
-    return ic.interp_func(time)
-end
-
-function interest_rate(i,time)
-    return i
-end
-
-"""
-    discount_rate(interest,time)
-
-Return the discount rate at `time`. 
-
-`interest` can be:
-    - a `InterestCurve`
-    - a vector wrapped in an interest curve
-    - a scalar rate
-
-Internally, if not a scalar argument, this method will use the interpolated interest rate to use an integral approxmation to the accumulated force of interest. This generalizes well. For more performance on repeated calls, use an `InterestCurve` instead of a vector.
-
-# Examples
-
-## InterestCurve
-
-```julia-repl
-julia> ic = InterestCurve([0.01,0.05,0.05,0.1],[1,2,3,4])
-julia> ic = InterestCurve([0.01,0.05,0.05,0.1])  # this is equivalent to the line above
-
-julia> discount_rate(ic,1)
-0.9900990099009901
-
-julia> discount_rate.(ic,0:4) # function is broadcastable
-5-element Array{Float64,1}:
- 1.0
- 0.9900990099009901
- 0.9613215887833819
- 0.9155443705701612
- 0.8517459660161829
-```
-
-## Scalar
-```julia-repl
-julia> discount_rate(0.05,1)
-0.9523809523809523
-
-julia> discount_rate.(0.05,1:3) # function can be broadcasted
-3-element Array{Float64,1}:
- 0.9523809523809523
- 0.9070294784580498
- 0.863837598531476
-
-```
-"""
-function discount_rate(ic::InterestCurve,time)
-    # as a general approach, convert Effective Annual Rates
-    # to continuously compounded rates for integration
-    # i = exp(δ) - 1
-    # δ = ln(1+i)
-    integral, err = quadgk(t -> log(1+interest_rate(ic,t)),0,time)
-    return 1/exp(integral)
-end
-
-function discount_rate(i, time)
-    return  1 / ((1 + i) ^ time)
-end
-
 """
     internal_rate_of_return(cashflows::vector)
     internal_rate_of_return(cashflows::Vector, timepoints::Vector)
@@ -231,16 +78,33 @@ present_value(0.1, [10,20],times)
 ```
 
 """
-function present_value(ic::InterestCurve,cashflows,timepoints)
-    sum(discount_rate.(ic,timepoints) .* cashflows)
+function present_value(yc::T,cashflows,timepoints) where {T <: Yields.AbstractYield}
+    sum(discount.(yc,timepoints) .* cashflows)
 end
 
-function present_value(interest,cashflows,timepoints)
-    sum(discount_rate.(interest,timepoints) .* cashflows)
+function present_value(yc::T,cashflows) where {T <: Yields.AbstractYield}
+    sum(discount.(yc,1:length(cashflows)) .* cashflows)
 end
 
 function present_value(i,v)
-    return present_value(i,v,[t for t in 1:length(v)])
+    yc = Yields.Constant(i)
+    return sum(discount(yc,t) * v[t] for t in 1:length(v))
+end
+
+function present_value(i,v,times)
+    return present_value(Yields.Constant(i),v,times)
+end
+
+# Interest Given is an array, assume forwards.
+function present_value(i::AbstractArray,v)
+    yc = Yields.Forward(i)
+    return sum(discount(yc,t) * v[t] for t in 1:length(v))
+end
+
+# Interest Given is an array, assume forwards.
+function present_value(i::AbstractArray,v,times)
+    yc = Yields.Forward(i,times)
+    return sum(discount(yc,t) * v[t] for t in times)
 end
 
 """
