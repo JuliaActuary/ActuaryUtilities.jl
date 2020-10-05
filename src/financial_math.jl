@@ -104,7 +104,7 @@ end
 # Interest Given is an array, assume forwards.
 function present_value(i::AbstractArray,v,times)
     yc = Yields.Forward(i,times)
-    return sum(discount(yc,t) * v[t] for t in times)
+    return sum(discount(yc,t) * v[i] for (i,t) in enumerate(times))
 end
 
 """
