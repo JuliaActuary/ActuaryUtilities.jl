@@ -2,7 +2,6 @@ using ActuaryUtilities
 
 using Dates
 using Test
-using Interpolations
 
 import DayCounts
 

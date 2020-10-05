@@ -2,7 +2,6 @@ module ActuaryUtilities
 
 using Dates
 using ForwardDiff
-using Interpolations
 using Optim
 using QuadGK
 using Yields
