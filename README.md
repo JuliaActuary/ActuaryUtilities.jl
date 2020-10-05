@@ -14,8 +14,7 @@ Some of the functions included:
   - Calculate the duration given an issue date and date (a.k.a. policy duration)
   - Calculate the `Macaulay`, `Modified`, or `DV01` durations for a set of cashflows
 - `convexity` for price sensitivity
-- `present_value` or `pv` to calculate the present value of a set of cashflows
-- `discount_rate` for a given fixed rate or `InterestCurve`
+- Flexible interest rate options via the [`Yields.jl`](https://github.com/JuliaActuary/Yields.jl) package.
 - `internal_rate_of_return` or `irr` to calculate the IRR given cashflows (including at timepoints like Excel's `XIRR`)
 - `breakeven` to calculate the breakeven time for a set of cashflows
 - `accum_offset` to calculate accumulations like survivorship from a mortality vector

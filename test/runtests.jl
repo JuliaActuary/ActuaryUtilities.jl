@@ -2,11 +2,8 @@ using ActuaryUtilities
 
 using Dates
 using Test
-using Interpolations
 
 import DayCounts
-
-include("financial_math.jl")
 
 @testset "Temporal functions" begin
     @testset "years_between" begin
@@ -62,17 +59,19 @@ end
 
     @testset "pv with vector discount rates" begin
         cf = [100, 100]
-        @test pv(InterestCurve([0.0,0.05]), cf) ≈ 100 / 1.0 + 100 / 1.05
-        @test pv(InterestCurve([0.05,0.0]), cf) ≈ 100 / 1.05 + 100 / 1.05
-        @test pv(InterestCurve([0.05,0.1]), cf) ≈ 100 / 1.05 + 100 / 1.05 / 1.1
+        @test pv([0.0,0.05], cf) ≈ 100 / 1.0 + 100 / 1.05
+        @test pv(ActuaryUtilities.Yields.Forward([0.0,0.05]), cf) ≈ 100 / 1.0 + 100 / 1.05
+        @test pv([0.05,0.0], cf) ≈ 100 / 1.05 + 100 / 1.05
+        @test pv([0.05,0.1], cf) ≈ 100 / 1.05 + 100 / 1.05 / 1.1
 
         ts = [0.5,1]
-        @test pv(InterestCurve([0.0,0.05], ts), cf, ts) ≈ 100 / 1.0 + 100 / 1.05^0.5 
-        @test pv(InterestCurve([0.05,0.0], ts), cf, ts) ≈ 100 / 1.05^0.5 + 100 / 1.05^0.5 
-        @test pv(InterestCurve([0.05,0.1], ts), cf, ts) ≈ 100 / 1.05^0.5 + 100 / (1.05^0.5) / (1.1^0.5)
+        @test pv(ActuaryUtilities.Yields.Forward([0.0,0.05], ts), cf, ts) ≈ 100 / 1.0 + 100 / 1.05^0.5 
+        @test pv(ActuaryUtilities.Yields.Forward([0.05,0.0], ts), cf, ts) ≈ 100 / 1.05^0.5 + 100 / 1.05^0.5 
+        @test pv(ActuaryUtilities.Yields.Forward([0.05,0.1], ts), cf, ts) ≈ 100 / 1.05^0.5 + 100 / (1.05^0.5) / (1.1^0.5)
 
-
-
+        #without explicit Yields constructor
+        @test pv([0.0,0.05], cf, ts) ≈ 100 / 1.0 + 100 / 1.05^0.5 
+        
     end
 
 
