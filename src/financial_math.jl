@@ -116,13 +116,15 @@ pv = present_value
 
 
 """
-    breakeven(accumulation_rate, cashflows::Vector)
+    breakeven(yield, cashflows::Vector)
+    breakeven(yield, cashflows::Vector,times::Vector)
 
-Calculate the time when the accumulated cashflows breakeven.
-Assumes that:
-- cashflows evenly spaced with the first one occuring at time zero 
+Calculate the time when the accumulated cashflows breakeven given the yield.
+
+Assumptions:
+
 - cashflows occur at the end of the period
-- that the accumulation rate correponds to the periodicity of the cashflows.
+- cashflows evenly spaced with the first one occuring at time zero if `times` not given
 
 Returns `nothing` if cashflow stream never breaks even.
 
@@ -138,78 +140,41 @@ julia> breakeven(0.10, [-10,-15,2,3,4,8]) # returns the `nothing` value
 
 ```
 """
+function breakeven(y::T,cashflows::Vector,timepoints::Vector) where {T<:Yields.AbstractYield}
+    accum = zero(eltype(cashflows))
+    last_neg = nothing
+
+    accum += cashflows[1]
+    if accum >= 0 && isnothing(last_neg)
+        last_neg = timepoints[1]
+    end
+
+    for i in 2:length(cashflows)
+        # accumulate the flow from each timepoint to the next
+        accum *= accumulate(y,timepoints[i-1],timepoints[i])
+        accum += cashflows[i]
+
+        if accum >= 0 && isnothing(last_neg)
+            last_neg = timepoints[i]
+        elseif accum < 0
+            last_neg = nothing
+        end
+    end
+
+    return last_neg
+
+end
+
+function breakeven(y::T,cfs,times) where {T<:Real}
+    return breakeven(Yields.Constant(y),cfs,times)
+end
+
+function breakeven(y::Vector{T},cfs,times) where {T<:Real}
+    return breakeven(Yields.Forward(y),cfs,times)
+end
+
 function breakeven(i,cashflows::Vector)
     return breakeven(i,cashflows,[t for t in 0:length(cashflows)-1])
-end
-
-"""
-    breakeven(accumulation_rate, cashflows::Vector,timepoints::Vector)
-
-Calculate the time when the accumulated cashflows breakeven.
-Assumes that:
-- cashflows occur at the timepoint indicated at the corresponding `timepoints` position
-- cashflows occur at the end of the period
-- that the accumulation rate corresponds to the periodicity of the cashflows. 
-- If given a vector of interest rates, the first rate is effectively never used, as it's treated as the accumulation 
-rate between time zero and the first cashflow.
-
-Returns `nothing` if cashflow stream never breaks even.
-
-```jldoctest; setup = :(times = [0,1,2,3,4,5])
-julia> times = [0,1,2,3,4,5];
-
-julia> breakeven(0.10, [-10,1,2,3,4,8],times)
-5
-
-julia> breakeven(0.10, [-10,15,2,3,4,8],times)
-1
-
-julia> breakeven(0.10, [-10,-15,2,3,4,8],times) # returns the `nothing` value
-```
-
-"""
-function breakeven(i::Vector,cashflows::Vector, timepoints::Vector)
-    accum = cashflows[1]
-    last_neg = nothing
-
-
-    for t in 2:length(cashflows)
-        timespan = timepoints[t] - timepoints[t-1]
-        accum *= (1+i[t]) ^ timespan
-        accum += cashflows[t]
-        
-        # keep last negative timepoint, but if 
-        # we go negative then go back to `nothing`
-        if accum >= 0.0 && isnothing(last_neg)
-            last_neg = timepoints[t]
-        elseif accum < 0.0
-            last_neg = nothing
-        end
-    end
-
-    return last_neg
-
-end
-function breakeven(i,cashflows::Vector,timepoints::Vector)
-    accum = cashflows[1]
-    last_neg = nothing
-
-
-    for t in 2:length(cashflows)
-        timespan = timepoints[t] - timepoints[t-1]
-        accum *= (1+i) ^ timespan
-        accum += cashflows[t]
-        
-        # keep last negative timepoint, but if 
-        # we go negative then go back to `nothing`
-        if accum >= 0.0 && isnothing(last_neg)
-            last_neg = timepoints[t]
-        elseif accum < 0.0
-            last_neg = nothing
-        end
-    end
-    return last_neg
-
 end
 
 abstract type Duration end
