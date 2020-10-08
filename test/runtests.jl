@@ -135,27 +135,27 @@ end
 @testset "Breakeven time" begin
 
     @testset "basic" begin
-        @test breakeven([-10,1,2,3,4,8], 0.10) == 5
-        @test breakeven([-10,15,2,3,4,8], 0.10) == 1
-        @test breakeven([-10,15,2,3,4,8], 0.10) == 1
-        @test isnothing(breakeven([-10,-15,2,3,4,8], 0.10))
+        @test breakeven(0.10, [-10,1,2,3,4,8]) == 5
+        @test breakeven(0.10, [-10,15,2,3,4,8]) == 1
+        @test breakeven(0.10, [-10,15,2,3,4,8]) == 1
+        @test isnothing(breakeven(0.10, [-10,-15,2,3,4,8]))
     end
 
     @testset "basic with vector interest" begin
-        @test breakeven([-10,1,2,3,4], [1,2,3,4,5], 0.0) == 5
+        @test breakeven(0.0,[-10,1,2,3,4], [1,2,3,4,5]) == 5
         # 
-        @test isnothing(breakeven([-10,1,2,3,4], [1,2,3,4,5], [0.0,0.0,0.0,0.0,0.1]))
-        @test breakeven([-10,1,2,3,4], [1,2,3,4,5], [0.0,0.0,0.0,0.0,-0.5]) == 5
-        @test breakeven([-10,1,2,3,4], [1,2,3,4,5], [0.0,0.0,0.0,-0.9,-0.5]) == 4
-        @test breakeven([-10,1,12,3,4], [1,2,3,4,5], [0.1,0.1,0.2,0.1,0.1]) == 3
+        @test isnothing(breakeven([0.0,0.0,0.0,0.0,0.1], [-10,1,2,3,4], [1,2,3,4,5]))
+        @test breakeven([0.0,0.0,0.0,0.0,-0.5], [-10,1,2,3,4], [1,2,3,4,5]) == 5
+        @test breakeven([0.0,0.0,0.0,-0.9,-0.5],[-10,1,2,3,4], [1,2,3,4,5]) == 4
+        @test breakeven([0.1,0.1,0.2,0.1,0.1], [-10,1,12,3,4], [1,2,3,4,5]) == 3
     end
 
     @testset "timepoints" begin
         times = [t for t in 0:5]
-        @test breakeven([-10,1,2,3,4,8], times, 0.10) == 5
-        @test breakeven([-10,15,2,3,4,8], times, 0.10) == 1
-        @test breakeven([-10,15,2,3,4,8], times, 0.10) == 1
-        @test isnothing(breakeven([-10,-15,2,3,4,8], times, 0.10))
+        @test breakeven(0.10,[-10,1,2,3,4,8], times) == 5
+        @test breakeven(0.10,[-10,15,2,3,4,8], times) == 1
+        @test breakeven(0.10,[-10,15,2,3,4,8], times) == 1
+        @test isnothing(breakeven(0.10,[-10,-15,2,3,4,8], times))
     end
 end
 

@@ -116,10 +116,10 @@ pv = present_value
 
 
 """
-    breakeven(cashflows::Vector,accumulation_rate::Real)
+    breakeven(accumulation_rate, cashflows::Vector)
 
 Calculate the time when the accumulated cashflows breakeven.
-Assumes that :
+Assumes that:
 - cashflows evenly spaced with the first one occuring at time zero 
 - cashflows occur at the end of the period
 - that the accumulation rate correponds to the periodicity of the cashflows.
@@ -127,23 +127,23 @@ Assumes that :
 Returns `nothing` if cashflow stream never breaks even.
 
 ```jldoctest
-julia> breakeven([-10,1,2,3,4,8],0.10)
+julia> breakeven(0.10, [-10,1,2,3,4,8])
 5
 
-julia> breakeven([-10,15,2,3,4,8],0.10)
+julia> breakeven(0.10, [-10,15,2,3,4,8])
 1
 
-julia> breakeven([-10,-15,2,3,4,8],0.10) # returns the `nothing` value
+julia> breakeven(0.10, [-10,-15,2,3,4,8]) # returns the `nothing` value
 
 
 ```
 """
-function breakeven(cashflows::Vector,i)
-    return breakeven(cashflows,[t for t in 0:length(cashflows)-1],i)
+function breakeven(i,cashflows::Vector)
+    return breakeven(i,cashflows,[t for t in 0:length(cashflows)-1])
 end
 
 """
-    breakeven(cashflows::Vector,timepoints::Vector, accumulation_rate)
+    breakeven(accumulation_rate, cashflows::Vector,timepoints::Vector)
 
 Calculate the time when the accumulated cashflows breakeven.
 Assumes that:
@@ -158,17 +158,17 @@ Returns `nothing` if cashflow stream never breaks even.
 ```jldoctest; setup = :(times = [0,1,2,3,4,5])
 julia> times = [0,1,2,3,4,5];
 
-julia> breakeven([-10,1,2,3,4,8],times,0.10)
+julia> breakeven(0.10, [-10,1,2,3,4,8],times)
 5
 
-julia> breakeven([-10,15,2,3,4,8],times,0.10)
+julia> breakeven(0.10, [-10,15,2,3,4,8],times)
 1
 
-julia> breakeven([-10,-15,2,3,4,8],times,0.10) # returns the `nothing` value
+julia> breakeven(0.10, [-10,-15,2,3,4,8],times) # returns the `nothing` value
 ```
 
 """
-function breakeven(cashflows::Vector,timepoints::Vector, i::Vector)
+function breakeven(i::Vector,cashflows::Vector, timepoints::Vector)
     accum = cashflows[1]
     last_neg = nothing
 
@@ -190,7 +190,7 @@ function breakeven(cashflows::Vector,timepoints::Vector, i::Vector)
     return last_neg
 
 end
-function breakeven(cashflows::Vector,timepoints::Vector, i)
+function breakeven(i,cashflows::Vector,timepoints::Vector)
     accum = cashflows[1]
     last_neg = nothing
 
