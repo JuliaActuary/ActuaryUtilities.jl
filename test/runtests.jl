@@ -138,6 +138,7 @@ end
         @test breakeven(0.10, [-10,1,2,3,4,8]) == 5
         @test breakeven(0.10, [-10,15,2,3,4,8]) == 1
         @test breakeven(0.10, [-10,15,2,3,4,8]) == 1
+        @test breakeven(0.10, [10,15,2,3,4,8]) == 0
         @test isnothing(breakeven(0.10, [-10,-15,2,3,4,8]))
     end
 
