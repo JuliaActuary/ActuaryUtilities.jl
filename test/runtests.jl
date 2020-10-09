@@ -3,6 +3,8 @@ using ActuaryUtilities
 using Dates
 using Test
 
+const Yields = ActuaryUtilities.Yields
+
 import DayCounts
 
 @testset "Temporal functions" begin
@@ -171,7 +173,9 @@ end
         @test duration(Modified(), 0.04, cfs, times) ≈ 1.777570320376649 / (1 + 0.04)
         @test duration(0.04, cfs, times) ≈ 1.777570320376649 / (1 + 0.04)
         @test duration(DV01(), 0.04, cfs, times) ≈ 1.777570320376649 / (1 + 0.04) * V / 100
-
+        
+        @test duration(Yields.Constant(0.04), cfs, times) ≈ 1.777570320376649 / (1 + 0.04)
+        @test duration(Yields.Forward([0.04,0.04]), cfs, times) ≈ 1.777570320376649 / (1 + 0.04)
     end
 
     @testset "finpipe example" begin
