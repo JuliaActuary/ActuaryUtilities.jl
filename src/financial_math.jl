@@ -227,12 +227,21 @@ julia> convexity(0.03,my_lump_sum_value)
 function duration(::Macaulay,yield,cfs,times)
     return sum(times .* present_value.(yield,cfs,times) / present_value(yield,cfs,times))
 end
+
 function duration(::Modified,yield,cfs,times)
     return duration(yield,i -> present_value(i,cfs,times))
 end
 
 function duration(yield,valuation_function)
     δV =  - ForwardDiff.derivative(i -> log(valuation_function(i)),yield)
+end
+
+function duration(yield::Yields.Constant,valuation_function)
+    δV =  - ForwardDiff.derivative(i -> log(valuation_function(i)),yield.rate)
+end
+
+function duration(yield::Yields.YieldCurve,valuation_function)
+    δV =  - ForwardDiff.derivative(i -> log(valuation_function(i+yield)),0.0)
 end
 
 function duration(yield,cfs,times)

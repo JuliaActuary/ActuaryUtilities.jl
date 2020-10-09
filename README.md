@@ -5,6 +5,7 @@
 ![CI](https://github.com/JuliaActuary/ActuaryUtilities.jl/workflows/CI/badge.svg)
 [![Codecov](https://codecov.io/gh/JuliaActuary/ActuaryUtilities.jl/branch/master/graph/badge.svg)](https://codecov.io/gh/JuliaActuary/ActuaryUtilities.jl)
 
+## Features
 
 A collection of common functions/manipulations used in Actuarial Calculations.
 
@@ -20,7 +21,27 @@ Some of the functions included:
 - `accum_offset` to calculate accumulations like survivorship from a mortality vector
 
 ### Documentation
-Click the docs badges above for more details and examples.
+
+Full documentation is [available here](https://JuliaActuary.github.io/ActuaryUtilities.jl/stable/).
+
+### Examples
+
+Financial maths for a simple set of cashflows:
+
+```julia-repl
+
+bond_cfs = [5, 5, 105]
+times    = [1, 2, 3]
+
+discount_rate = 0.03
+
+present_value(discount_rate, cfs, times)           # 105.65
+duration(Macaulay(), discount_rate, cfs, times)    #   2.86
+duration(discount_rate, cfs, times)                #   2.78
+convexity(discount_rate, cfs, times)               #  10.62
+```
+
+
 
 ### Useful tips
 
