@@ -224,35 +224,35 @@ julia> convexity(0.03,my_lump_sum_value)
 
 ```
 """
-function duration(::Macaulay,interest_rate,cfs,times)
-    return sum(times .* present_value.(interest_rate,cfs,times) / present_value(interest_rate,cfs,times))
+function duration(::Macaulay,yield,cfs,times)
+    return sum(times .* present_value.(yield,cfs,times) / present_value(yield,cfs,times))
 end
-function duration(::Modified,interest_rate,cfs,times)
-    return duration(interest_rate,i -> present_value(i,cfs,times))
-end
-
-function duration(interest_rate,valuation_function)
-    δV =  - ForwardDiff.derivative(i -> log(valuation_function(i)),interest_rate)
+function duration(::Modified,yield,cfs,times)
+    return duration(yield,i -> present_value(i,cfs,times))
 end
 
-function duration(interest_rate,cfs,times)
-    return duration(Modified(),interest_rate,cfs,times)
+function duration(yield,valuation_function)
+    δV =  - ForwardDiff.derivative(i -> log(valuation_function(i)),yield)
 end
 
-function duration(::DV01,interest_rate,cfs,times)
-    return duration(DV01(),interest_rate,i->present_value(i,cfs,times))
+function duration(yield,cfs,times)
+    return duration(Modified(),yield,cfs,times)
 end
 
-function duration(::DV01,interest_rate,valuation_function)
-    return duration(interest_rate,valuation_function) * valuation_function(interest_rate) / 100
+function duration(::DV01,yield,cfs,times)
+    return duration(DV01(),yield,i->present_value(i,cfs,times))
+end
+
+function duration(::DV01,yield,valuation_function)
+    return duration(yield,valuation_function) * valuation_function(yield) / 100
 end
 
 """ 
-    convexity(interest_rate,cfs,times)
-    convexity(interest_rate,valuation_function)
+    convexity(yield,cfs,times)
+    convexity(yield,valuation_function)
 
 Calculates the convexity.
-    - `interest_rate` should be a fixed effective yield (e.g. `0.05`).
+    - `yield` should be a fixed effective yield (e.g. `0.05`).
 
 # Examples
 
@@ -284,12 +284,12 @@ julia> convexity(0.03,my_lump_sum_value)
 ```
 
 """
-function convexity(interest_rate,cfs,times)
-    return convexity(interest_rate, i -> present_value(i,cfs,times))
+function convexity(yield,cfs,times)
+    return convexity(yield, i -> present_value(i,cfs,times))
 end
 
-function convexity(interest_rate,valuation_function)
+function convexity(yield,valuation_function)
     D(i) = duration(i,valuation_function)
 
-    return D(interest_rate) ^ 2 - ForwardDiff.derivative(D,interest_rate)
+    return D(yield) ^ 2 - ForwardDiff.derivative(D,yield)
 end
