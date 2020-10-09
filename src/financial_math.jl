@@ -116,73 +116,47 @@ pv = present_value
 
 
 """
-    breakeven(cashflows::Vector,accumulation_rate::Real)
+    breakeven(yield, cashflows::Vector)
+    breakeven(yield, cashflows::Vector,times::Vector)
 
-Calculate the time when the accumulated cashflows breakeven.
-Assumes that :
-- cashflows evenly spaced with the first one occuring at time zero 
+Calculate the time when the accumulated cashflows breakeven given the yield.
+
+Assumptions:
+
 - cashflows occur at the end of the period
-- that the accumulation rate correponds to the periodicity of the cashflows.
+- cashflows evenly spaced with the first one occuring at time zero if `times` not given
 
 Returns `nothing` if cashflow stream never breaks even.
 
 ```jldoctest
-julia> breakeven([-10,1,2,3,4,8],0.10)
+julia> breakeven(0.10, [-10,1,2,3,4,8])
 5
 
-julia> breakeven([-10,15,2,3,4,8],0.10)
+julia> breakeven(0.10, [-10,15,2,3,4,8])
 1
 
-julia> breakeven([-10,-15,2,3,4,8],0.10) # returns the `nothing` value
+julia> breakeven(0.10, [-10,-15,2,3,4,8]) # returns the `nothing` value
 
 
 ```
 """
-function breakeven(cashflows::Vector,i)
-    return breakeven(cashflows,[t for t in 0:length(cashflows)-1],i)
-end
-
-"""
-    breakeven(cashflows::Vector,timepoints::Vector, accumulation_rate)
-
-Calculate the time when the accumulated cashflows breakeven.
-Assumes that:
-- cashflows occur at the timepoint indicated at the corresponding `timepoints` position
-- cashflows occur at the end of the period
-- that the accumulation rate corresponds to the periodicity of the cashflows. 
-- If given a vector of interest rates, the first rate is effectively never used, as it's treated as the accumulation 
-rate between time zero and the first cashflow.
-
-Returns `nothing` if cashflow stream never breaks even.
-
-```jldoctest; setup = :(times = [0,1,2,3,4,5])
-julia> times = [0,1,2,3,4,5];
-
-julia> breakeven([-10,1,2,3,4,8],times,0.10)
-5
-
-julia> breakeven([-10,15,2,3,4,8],times,0.10)
-1
-
-julia> breakeven([-10,-15,2,3,4,8],times,0.10) # returns the `nothing` value
-```
-
-"""
-function breakeven(cashflows::Vector,timepoints::Vector, i::Vector)
-    accum = cashflows[1]
+function breakeven(y::T,cashflows::Vector,timepoints::Vector) where {T<:Yields.AbstractYield}
+    accum = zero(eltype(cashflows))
     last_neg = nothing
 
+    accum += cashflows[1]
+    if accum >= 0 && isnothing(last_neg)
+        last_neg = timepoints[1]
+    end
 
-    for t in 2:length(cashflows)
-        timespan = timepoints[t] - timepoints[t-1]
-        accum *= (1+i[t]) ^ timespan
-        accum += cashflows[t]
-        
-        # keep last negative timepoint, but if 
-        # we go negative then go back to `nothing`
-        if accum >= 0.0 && isnothing(last_neg)
-            last_neg = timepoints[t]
-        elseif accum < 0.0
+    for i in 2:length(cashflows)
+        # accumulate the flow from each timepoint to the next
+        accum *= accumulate(y,timepoints[i-1],timepoints[i])
+        accum += cashflows[i]
+
+        if accum >= 0 && isnothing(last_neg)
+            last_neg = timepoints[i]
+        elseif accum < 0
             last_neg = nothing
         end
     end
@@ -190,26 +164,17 @@ function breakeven(cashflows::Vector,timepoints::Vector, i::Vector)
     return last_neg
 
 end
-function breakeven(cashflows::Vector,timepoints::Vector, i)
-    accum = cashflows[1]
-    last_neg = nothing
 
+function breakeven(y::T,cfs,times) where {T<:Real}
+    return breakeven(Yields.Constant(y),cfs,times)
+end
 
-    for t in 2:length(cashflows)
-        timespan = timepoints[t] - timepoints[t-1]
-        accum *= (1+i) ^ timespan
-        accum += cashflows[t]
-        
-        # keep last negative timepoint, but if 
-        # we go negative then go back to `nothing`
-        if accum >= 0.0 && isnothing(last_neg)
-            last_neg = timepoints[t]
-        elseif accum < 0.0
-            last_neg = nothing
-        end
-    end
-    return last_neg
+function breakeven(y::Vector{T},cfs,times) where {T<:Real}
+    return breakeven(Yields.Forward(y),cfs,times)
+end
 
+function breakeven(i,cashflows::Vector)
+    return breakeven(i,cashflows,[t for t in 0:length(cashflows)-1])
 end
 
 abstract type Duration end
@@ -259,35 +224,35 @@ julia> convexity(0.03,my_lump_sum_value)
 
 ```
 """
-function duration(::Macaulay,interest_rate,cfs,times)
-    return sum(times .* present_value.(interest_rate,cfs,times) / present_value(interest_rate,cfs,times))
+function duration(::Macaulay,yield,cfs,times)
+    return sum(times .* present_value.(yield,cfs,times) / present_value(yield,cfs,times))
 end
-function duration(::Modified,interest_rate,cfs,times)
-    return duration(interest_rate,i -> present_value(i,cfs,times))
-end
-
-function duration(interest_rate,valuation_function)
-    δV =  - ForwardDiff.derivative(i -> log(valuation_function(i)),interest_rate)
+function duration(::Modified,yield,cfs,times)
+    return duration(yield,i -> present_value(i,cfs,times))
 end
 
-function duration(interest_rate,cfs,times)
-    return duration(Modified(),interest_rate,cfs,times)
+function duration(yield,valuation_function)
+    δV =  - ForwardDiff.derivative(i -> log(valuation_function(i)),yield)
 end
 
-function duration(::DV01,interest_rate,cfs,times)
-    return duration(DV01(),interest_rate,i->present_value(i,cfs,times))
+function duration(yield,cfs,times)
+    return duration(Modified(),yield,cfs,times)
 end
 
-function duration(::DV01,interest_rate,valuation_function)
-    return duration(interest_rate,valuation_function) * valuation_function(interest_rate) / 100
+function duration(::DV01,yield,cfs,times)
+    return duration(DV01(),yield,i->present_value(i,cfs,times))
+end
+
+function duration(::DV01,yield,valuation_function)
+    return duration(yield,valuation_function) * valuation_function(yield) / 100
 end
 
 """ 
-    convexity(interest_rate,cfs,times)
-    convexity(interest_rate,valuation_function)
+    convexity(yield,cfs,times)
+    convexity(yield,valuation_function)
 
 Calculates the convexity.
-    - `interest_rate` should be a fixed effective yield (e.g. `0.05`).
+    - `yield` should be a fixed effective yield (e.g. `0.05`).
 
 # Examples
 
@@ -319,12 +284,12 @@ julia> convexity(0.03,my_lump_sum_value)
 ```
 
 """
-function convexity(interest_rate,cfs,times)
-    return convexity(interest_rate, i -> present_value(i,cfs,times))
+function convexity(yield,cfs,times)
+    return convexity(yield, i -> present_value(i,cfs,times))
 end
 
-function convexity(interest_rate,valuation_function)
+function convexity(yield,valuation_function)
     D(i) = duration(i,valuation_function)
 
-    return D(interest_rate) ^ 2 - ForwardDiff.derivative(D,interest_rate)
+    return D(yield) ^ 2 - ForwardDiff.derivative(D,yield)
 end
