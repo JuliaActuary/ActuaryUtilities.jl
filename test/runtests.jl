@@ -46,6 +46,7 @@ end
         cf = [100, 100]
         
         @test pv(0.05, cf) ≈ cf[1] / 1.05 + cf[2] / 1.05^2
+        @test price(0.05, cf) ≈ pv(0.05, cf)
 
         # this vector came from Numpy Financial's test suite with target of 122.89, but that assumes payments are begin of period
         # 117.04 comes from Excel verification with NPV function
@@ -73,6 +74,10 @@ end
 
         #without explicit Yields constructor
         @test pv([0.0,0.05], cf, ts) ≈ 100 / 1.0 + 100 / 1.05^0.5 
+
+        @test price([0.0,0.05], cf, ts) ≈ pv([0.0,0.05], cf, ts)
+        @test price([0.0,0.05], -1 .* cf, ts) ≈ abs(pv([0.0,0.05], cf, ts))
+
         
     end
 
@@ -175,6 +180,7 @@ end
         @test duration(DV01(), 0.04, cfs, times) ≈ 1.777570320376649 / (1 + 0.04) * V / 100
         
         @test duration(Yields.Constant(0.04), cfs, times) ≈ 1.777570320376649 / (1 + 0.04)
+        @test duration(Yields.Constant(0.04), -1 .* cfs, times) ≈ 1.777570320376649 / (1 + 0.04)
         @test duration(Yields.Forward([0.04,0.04]), cfs, times) ≈ 1.777570320376649 / (1 + 0.04)
     end
 

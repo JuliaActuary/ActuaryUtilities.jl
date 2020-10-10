@@ -116,6 +116,18 @@ pv = present_value
 
 
 """
+    price(...)
+
+The absolute value of the `present_value(...)`. 
+
+# Extended help
+
+Using `price` can be helpful if the directionality of the value doesn't matter. For example, in the common usage, duration is more interested in the change in price than present value, so `price` is used there.
+"""
+price(x1,x2) = present_value(x1,x2) |> abs
+price(x1,x2,x3) = present_value(x1,x2,x3) |> abs
+
+"""
     breakeven(yield, cashflows::Vector)
     breakeven(yield, cashflows::Vector,times::Vector)
 
@@ -225,11 +237,11 @@ julia> convexity(0.03,my_lump_sum_value)
 ```
 """
 function duration(::Macaulay,yield,cfs,times)
-    return sum(times .* present_value.(yield,cfs,times) / present_value(yield,cfs,times))
+    return sum(times .* price.(yield,cfs,times) / price(yield,cfs,times))
 end
 
 function duration(::Modified,yield,cfs,times)
-    return duration(yield,i -> present_value(i,cfs,times))
+    return duration(yield,i -> price(i,cfs,times))
 end
 
 function duration(yield,valuation_function)
@@ -249,7 +261,7 @@ function duration(yield,cfs,times)
 end
 
 function duration(::DV01,yield,cfs,times)
-    return duration(DV01(),yield,i->present_value(i,cfs,times))
+    return duration(DV01(),yield,i->price(i,cfs,times))
 end
 
 function duration(::DV01,yield,valuation_function)
@@ -294,7 +306,7 @@ julia> convexity(0.03,my_lump_sum_value)
 
 """
 function convexity(yield,cfs,times)
-    return convexity(yield, i -> present_value(i,cfs,times))
+    return convexity(yield, i -> price(i,cfs,times))
 end
 
 function convexity(yield,valuation_function)

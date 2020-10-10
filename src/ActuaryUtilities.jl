@@ -140,10 +140,9 @@ end
 
 export years_between, duration,
     irr, internal_rate_of_return, 
-    pv, present_value,
+    pv, present_value, price,
     breakeven,
     accum_offset,
-    InterestCurve,interest_rate,discount_rate,StepwiseInterp,LinearInterp,
     Macaulay,Modified,DV01,duration, convexity
 
 end # module
