@@ -20,13 +20,13 @@ Some of the functions included:
 - `breakeven` to calculate the breakeven time for a set of cashflows
 - `accum_offset` to calculate accumulations like survivorship from a mortality vector
 
-### Documentation
+## Documentation
 
 Full documentation is [available here](https://JuliaActuary.github.io/ActuaryUtilities.jl/stable/).
 
-### Examples
+## Examples
 
-Financial maths for a simple set of cashflows:
+### Quickstart 
 
 ```julia-repl
 
@@ -41,8 +41,14 @@ duration(discount_rate, cfs, times)                #   2.78
 convexity(discount_rate, cfs, times)               #  10.62
 ```
 
+### Interactive, basic cashflow analysis
+
+See [JuliaActuary.org for instructions](https://juliaactuary.org/tutorials/cashflowanalysis/) on running this example.
+
+[![Simple cashflow analysis with ActuaryUtilities.jl](https://user-images.githubusercontent.com/711879/95857181-d646a280-0d20-11eb-8300-a4c226021334.gif)](https://juliaactuary.org/tutorials/cashflowanalysis/)
 
 
-### Useful tips
+
+## Useful tips
 
 Functions often use a mix of interest_rates, cashflows, and timepoints. When calling functions, the general order of the arguments is 1) interest rates, 2) cashflows, and 3) timepoints. 
