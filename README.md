@@ -28,8 +28,7 @@ Full documentation is [available here](https://JuliaActuary.github.io/ActuaryUti
 
 ### Quickstart 
 
-```julia-repl
-
+```julia
 bond_cfs = [5, 5, 105]
 times    = [1, 2, 3]
 
