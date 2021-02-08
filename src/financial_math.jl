@@ -32,21 +32,6 @@ function internal_rate_of_return(cashflows,times)
     end
 end
 
-function irr_root(f,low=-.1,high=0.25)
-    range = high - low
-    
-    # short circuit if the range has gotten too wide
-    range > 3.2 && return nothing
-
-    result = optimize(f, low,high)
-
-    if abs(f(result.minimizer)) < 1.0e-3 # arbitrary that seems to work
-        return result.minimizer
-    else
-        return irr_root(f,low - range, high + range)
-    end
-end
-
 """
     irr()
 
