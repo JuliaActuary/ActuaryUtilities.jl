@@ -2,12 +2,13 @@ module ActuaryUtilities
 
 using Dates
 using ForwardDiff
-using Optim
+import Optim
 using QuadGK
 using Yields
 
 include("financial_math.jl")
-
+include("precompile.jl")
+_precompile_()
 
 """
     Years_Between(d1::Date, d2::Date)
