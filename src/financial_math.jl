@@ -23,7 +23,13 @@ end
 function internal_rate_of_return(cashflows,times)
     f(i) =  sum(@views cashflows .* [1/(1+i[1])^t for t in times])
     loss_func = x -> f(x)^2
-    result = irr_root(loss_func)
+    res = Optim.optimize(loss_func, [0.1], Optim.Newton())
+    if Optim.converged(res) 
+        min = Optim.minimizer(res)[1]
+        abs(min) < 5 ? min : nothing
+    else
+        return nothing
+    end
 end
 
 function irr_root(f,low=-.1,high=0.25)

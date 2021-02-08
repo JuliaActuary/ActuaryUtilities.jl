@@ -2,7 +2,7 @@ module ActuaryUtilities
 
 using Dates
 using ForwardDiff
-using Optim
+import Optim
 using QuadGK
 using Yields
 
