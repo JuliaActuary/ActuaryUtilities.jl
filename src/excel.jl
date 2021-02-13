@@ -1,6 +1,11 @@
 using CSV
 using Tables
 
+"""
+    xlclip()
+
+Copy Excel-copied data from the clipboard into a Julia vector or matrix (depending on shape). Single column or row are converted to Julia `Vector`s.
+"""
 function xlclip()
     xlclip_reader(InteractiveUtils.clipboard())
 end
@@ -17,6 +22,13 @@ function xlclip_reader(str)
     end
 end
 
+"""
+    xlclip()
+
+Copy Julia array to the clipboard in an Excel-friendly format.
+
+Vectors will be copied as Excel columns; to copy a vector `v` to a row for Excel, you can transpose it: `xlclip(v')`
+"""
 function xlclip(data)
     InteractiveUtils.clipboard(xlclip_writer(data)) # drop the trailing newline
 end

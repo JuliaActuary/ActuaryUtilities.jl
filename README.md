@@ -20,6 +20,17 @@ Some of the functions included:
 - `breakeven` to calculate the breakeven time for a set of cashflows
 - `accum_offset` to calculate accumulations like survivorship from a mortality vector
 
+### Excel Utilities
+
+You can also copy/paste to/from Excel:
+
+![Copying to and from Excel](https://user-images.githubusercontent.com/711879/107859226-9e9a5500-6dfd-11eb-999f-5da5c7e5b8a6.gif)
+
+- `xlcopy()` copies and parses Excel content on the clipboard
+- `xlcopy(data)` will copy Julia data into your clipboard for pasting into Excel.
+
+Also note related packages, such as [XLSX.jl](https://felipenoris.github.io/XLSX.jl/stable/) for working with Excel files.
+
 ## Documentation
 
 Full documentation is [available here](https://JuliaActuary.github.io/ActuaryUtilities.jl/stable/).
