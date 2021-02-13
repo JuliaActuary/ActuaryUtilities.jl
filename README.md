@@ -9,10 +9,8 @@
 
 A collection of common functions/manipulations used in Actuarial Calculations.
 
-Some of the functions included:
-
+### Financial Maths
 - `duration`:
-  - Calculate the duration given an issue date and date (a.k.a. policy duration)
   - Calculate the `Macaulay`, `Modified`, or `DV01` durations for a set of cashflows
 - `convexity` for price sensitivity
 - Flexible interest rate options via the [`Yields.jl`](https://github.com/JuliaActuary/Yields.jl) package.
@@ -20,6 +18,11 @@ Some of the functions included:
 - `breakeven` to calculate the breakeven time for a set of cashflows
 - `accum_offset` to calculate accumulations like survivorship from a mortality vector
 
+### Insurance mechanics
+
+- `duration`:
+  - Calculate the duration given an issue date and date (a.k.a. policy duration)
+  
 ### Excel Utilities
 
 You can also copy/paste to/from Excel:
