@@ -5,10 +5,12 @@ using ForwardDiff
 import Optim
 using QuadGK
 using Yields
+import InteractiveUtils
 
 include("financial_math.jl")
+include("excel.jl")
 include("precompile.jl")
-_precompile_()
+
 
 """
     Years_Between(d1::Date, d2::Date)
@@ -144,6 +146,9 @@ export years_between, duration,
     pv, present_value, price,
     breakeven,
     accum_offset,
-    Macaulay,Modified,DV01,duration, convexity
+    Macaulay,Modified,DV01,duration, convexity,
+    xlclip
+
+_precompile_()
 
 end # module

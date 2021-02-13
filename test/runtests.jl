@@ -7,6 +7,8 @@ const Yields = ActuaryUtilities.Yields
 
 import DayCounts
 
+include("excel.jl")
+
 @testset "Temporal functions" begin
     @testset "years_between" begin
         @test years_between(Date(2018, 9, 30), Date(2018, 9, 30)) == 0
