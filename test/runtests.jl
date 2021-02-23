@@ -107,6 +107,7 @@ end
         # test the unsolvable
 
         @test isnothing(irr([100,100]))
+        @test isnothing(irr([-1e8,0.,0.,0.],0:3))
 
     end
 
