@@ -228,6 +228,10 @@ end
         @test duration(Macaulay(), 0.03, cfs, times) ≈ 2.863504670671131
         @test duration(0.03, cfs, times) ≈ 2.780101622010806
         @test convexity(0.03, cfs, times) ≈ 10.62580548268594
+
+        # test omitting the times argument
+        @test duration(0.03, cfs, times) ≈ 2.780101622010806
+        @test convexity(0.03, cfs, times) ≈ 10.62580548268594
     end
 
 end
