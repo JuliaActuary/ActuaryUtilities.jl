@@ -213,7 +213,7 @@ end
         @test isapprox(present_value(0.04, cfs, times), 821927.11, atol = 1e-2)
         # @test isapprox(duration(0.04,cfs,times),4.76190476,atol=1e-6)
         @test isapprox(convexity(0.04, cfs, times), 27.7366864, atol = 1e-6)
-
+        @test isapprox(convexity(0.04, cfs), 27.7366864, atol = 1e-6)
         # the same, but with a functional argument
         value(i) = present_value(i, cfs, times)
         # @test isapprox(duration(0.04,value),4.76190476,atol=1e-6)
@@ -230,8 +230,8 @@ end
         @test convexity(0.03, cfs, times) ≈ 10.62580548268594
 
         # test omitting the times argument
-        @test duration(0.03, cfs, times) ≈ 2.780101622010806
-        @test convexity(0.03, cfs, times) ≈ 10.62580548268594
+        @test duration(0.03, cfs) ≈ 2.780101622010806
+        @test convexity(0.03, cfs) ≈ 10.62580548268594
     end
 
 end

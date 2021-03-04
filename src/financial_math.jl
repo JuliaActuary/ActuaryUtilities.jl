@@ -283,6 +283,7 @@ end
 
 Calculates the convexity.
     - `yield` should be a fixed effective yield (e.g. `0.05`).
+    - `times` may be omitted and it will assume `cfs` are evenly spaced beginning at the end of the first period.
 
 # Examples
 
@@ -315,6 +316,10 @@ julia> convexity(0.03,my_lump_sum_value)
 
 """
 function convexity(yield,cfs,times)
+    return convexity(yield, i -> price(i,cfs,times))
+end
+function convexity(yield,cfs::A) where {A <: AbstractArray}
+    times = 1:length(cfs)
     return convexity(yield, i -> price(i,cfs,times))
 end
 
