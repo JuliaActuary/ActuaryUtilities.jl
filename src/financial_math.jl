@@ -202,8 +202,9 @@ struct DV01 <: Duration end
     duration(interest_rate,cfs,times)             # Modified Duration
     duration(interest_rate,valuation_function)    # modified Duration
 
-Calculates the Macaulay, Modified, or DV01 duration.
+Calculates the Macaulay, Modified, or DV01 duration. `times` may be ommitted and the valuation will assume evenly spaced cashflows starting at the end of the first period.
 - `interest_rate` should be a fixed effective yield (e.g. `0.05`).
+
 
 When not given `Modified()` or `Macaulay()` as an argument, will default to `Modified()`.
 
@@ -259,9 +260,17 @@ end
 function duration(yield,cfs,times)
     return duration(Modified(),yield,cfs,times)
 end
+function duration(yield,cfs::A) where {A <: AbstractArray}
+    times = 1:length(cfs)
+    return duration(Modified(),yield,cfs,times)
+end
 
 function duration(::DV01,yield,cfs,times)
     return duration(DV01(),yield,i->price(i,cfs,times))
+end
+function duration(d::Duration,yield,cfs)
+    times = 1:length(cfs)
+    return duration(d,yield,cfs,times)
 end
 
 function duration(::DV01,yield,valuation_function)
@@ -274,6 +283,7 @@ end
 
 Calculates the convexity.
     - `yield` should be a fixed effective yield (e.g. `0.05`).
+    - `times` may be omitted and it will assume `cfs` are evenly spaced beginning at the end of the first period.
 
 # Examples
 
@@ -306,6 +316,10 @@ julia> convexity(0.03,my_lump_sum_value)
 
 """
 function convexity(yield,cfs,times)
+    return convexity(yield, i -> price(i,cfs,times))
+end
+function convexity(yield,cfs::A) where {A <: AbstractArray}
+    times = 1:length(cfs)
     return convexity(yield, i -> price(i,cfs,times))
 end
 
