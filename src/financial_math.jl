@@ -238,11 +238,11 @@ julia> convexity(0.03,my_lump_sum_value)
 ```
 """
 function duration(::Macaulay,yield,cfs,times)
-    return sum(times .* price.(yield,cfs,times) / price(yield,cfs,times))
+    return sum(times .* price.(yield,vec(cfs),times) / price(yield,vec(cfs),times))
 end
 
 function duration(::Modified,yield,cfs,times)
-    return duration(yield,i -> price(i,cfs,times))
+    return duration(yield,i -> price(i,vec(cfs),times))
 end
 
 function duration(yield,valuation_function)
@@ -258,19 +258,19 @@ function duration(yield::Yields.YieldCurve,valuation_function)
 end
 
 function duration(yield,cfs,times)
-    return duration(Modified(),yield,cfs,times)
+    return duration(Modified(),yield,vec(cfs),times)
 end
 function duration(yield,cfs::A) where {A <: AbstractArray}
     times = 1:length(cfs)
-    return duration(Modified(),yield,cfs,times)
+    return duration(Modified(),yield,vec(cfs),times)
 end
 
 function duration(::DV01,yield,cfs,times)
-    return duration(DV01(),yield,i->price(i,cfs,times))
+    return duration(DV01(),yield,i->price(i,vec(cfs),times))
 end
 function duration(d::Duration,yield,cfs)
     times = 1:length(cfs)
-    return duration(d,yield,cfs,times)
+    return duration(d,yield,vec(cfs),times)
 end
 
 function duration(::DV01,yield,valuation_function)
@@ -316,11 +316,11 @@ julia> convexity(0.03,my_lump_sum_value)
 
 """
 function convexity(yield,cfs,times)
-    return convexity(yield, i -> price(i,cfs,times))
+    return convexity(yield, i -> price(i,vec(cfs),times))
 end
 function convexity(yield,cfs::A) where {A <: AbstractArray}
     times = 1:length(cfs)
-    return convexity(yield, i -> price(i,cfs,times))
+    return convexity(yield, i -> price(i,vec(cfs),times))
 end
 
 function convexity(yield,valuation_function)

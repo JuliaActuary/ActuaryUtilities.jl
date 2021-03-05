@@ -174,7 +174,7 @@ end
     end
 end
 
-@testset "duration" begin
+@testset "duration and convexity" begin
     
     @testset "wikipedia example" begin
         times = [0.5,1,1.5,2]
@@ -233,6 +233,21 @@ end
         @test duration(Macaulay(), 0.03, cfs) ≈ 2.863504670671131
         @test duration(0.03, cfs) ≈ 2.780101622010806
         @test convexity(0.03, cfs) ≈ 10.62580548268594
+
+
+        # test a single matrix dimension
+        cfs = [5 0 0
+               0 5 105]
+
+        @test duration(0.03, sum(cfs,dims=1), times) ≈ 2.780101622010806
+
+        cfs = [5 0
+               5 0 
+               0 105]
+
+        @test duration(0.03, sum(cfs,dims=2), times) ≈ 2.780101622010806
+
+
     end
 
 end
