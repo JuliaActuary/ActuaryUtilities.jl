@@ -189,6 +189,10 @@ end
         @test duration(Yields.Constant(0.04), cfs, times) ≈ 1.777570320376649 / (1 + 0.04)
         @test duration(Yields.Constant(0.04), -1 .* cfs, times) ≈ 1.777570320376649 / (1 + 0.04)
         @test duration(Yields.Forward([0.04,0.04]), cfs, times) ≈ 1.777570320376649 / (1 + 0.04)
+
+        # test that dispatch resolves the ambiguity between duration(Yield,vec) and duration(Yield, function)
+        @test duration(Yields.Constant(0.03),cfs) > 0
+        @test convexity(Yields.Constant(0.03),cfs) > 0
     end
 
     @testset "finpipe example" begin

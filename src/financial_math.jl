@@ -259,9 +259,13 @@ end
 function duration(yield,cfs,times)
     return duration(Modified(),yield,vec(cfs),times)
 end
-function duration(yield,cfs::A) where {A <: AbstractArray}
+function duration(yield::Y,cfs::A) where {Y <: Yields.AbstractYield,A <: AbstractArray}
     times = 1:length(cfs)
     return duration(Modified(),yield,vec(cfs),times)
+end
+
+function duration(yield::R,cfs) where {R <: Real}
+    return duration(Yields.Constant(yield),cfs)
 end
 
 function duration(::DV01,yield,cfs,times)
