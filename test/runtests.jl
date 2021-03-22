@@ -54,6 +54,11 @@ end
         # 117.04 comes from Excel verification with NPV function
         @test isapprox(pv(0.05, [-15000, 1500, 2500, 3500, 4500, 6000]), 117.04, atol = 1e-2)
 
+        cfs = ones(3)
+        @test present_values(Yields.Constant(0.0),cfs) == [3,2,1]
+        pvs = present_values(Yields.Constant(0.1),cfs) 
+        @test pvs[3] ≈ 1 / 1.1
+        @test pvs[2] ≈ (1 / 1.1 + 1) / 1.1
     end
 
     @testset "pv with timepoints" begin

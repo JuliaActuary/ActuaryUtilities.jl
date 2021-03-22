@@ -116,6 +116,39 @@ pv = present_value
 
 
 """
+    present_value(interest, cashflows::Vector, timepoints)
+    present_value(interest, cashflows::Vector)
+
+Efficiently calculate a vector representing the present value of the given cashflows at each period prior to the given timepoint.
+
+!!! note
+
+    If your source directory is not accessible through Julia's LOAD_PATH, you might wish to
+    add the following line at the top of make.jl
+
+    ```julia
+    push!(LOAD_PATH,"../src/")
+    ```
+
+# Examples
+```julia-repl
+julia> present_values(0.00, [1,1,1])
+28.18181818181818
+julia> present_value(InterestVector([0.1,0.2]), [10,20],[0,1])
+```
+
+"""
+function present_values(interest,cashflows)
+    pvs = similar(cashflows)
+    pvs[end] = Yields.discount(interest,lastindex(cashflows)-1,lastindex(cashflows)) * cashflows[end]
+    for (t,cf) in Iterators.reverse(enumerate(cashflows[1:end-1]))
+        pvs[t] = Yields.discount(interest,t-1,t) * (cf+pvs[t+1])
+end
+
+return pvs
+end
+
+"""
     price(...)
 
 The absolute value of the `present_value(...)`. 
