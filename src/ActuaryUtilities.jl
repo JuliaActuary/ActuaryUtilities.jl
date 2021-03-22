@@ -143,7 +143,7 @@ end
 
 export years_between, duration,
     irr, internal_rate_of_return, 
-    pv, present_value, price,
+    pv, present_value, price, present_values,
     breakeven,
     accum_offset,
     Macaulay,Modified,DV01,duration, convexity,
