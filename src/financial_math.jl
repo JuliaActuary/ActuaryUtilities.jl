@@ -4,11 +4,13 @@
     
 Calculate the internal_rate_of_return with given timepoints. If no timepoints given, will assume that a series of equally spaced cashflows, assuming the first cashflow occurring at time zero. 
 
-First tries to find a rate in the interval `[-0.1,0.25]`. If none is found, will triple the search range until the range is [-1.5,1.65]. If none is still found, will return `nothing`.
+Returns the root found closest to zero in the range `[-2,2]`.
 
 # Example
 ```julia-repl
 julia> internal_rate_of_return([-100,110],[0,1]) # e.g. cashflows at time 0 and 1
+0.10000000001652906
+julia> internal_rate_of_return([-100,110]) # implied the same as above
 0.10000000001652906
 ```
 
@@ -21,24 +23,20 @@ function internal_rate_of_return(cashflows)
 end
 
 function internal_rate_of_return(cashflows,times)
+    radius = 2.
     f(i) =  sum(@views cashflows .* [1/(1+i[1])^t for t in times])
-    loss_func = x -> f(x)^2
-    res = Optim.optimize(loss_func, [0.0], Optim.Newton())
-
-
-    if Optim.converged(res) 
-        min = Optim.minimizer(res)[1]
-
-        # check if function does change signs at location
-        if f(min+.001) * f(min - .001) <= 0 
-            return min
-        else
-            return nothing
-        end
-
-    else
+    roots = Roots.find_zeros(f,-radius,radius)
+    
+    # short circuit and return nothing if no roots found
+    isempty(roots) && return nothing
+    # find and return the one nearest zero
+    min = findmin(abs.(roots))
+    if abs(min[1]) >= radius
         return nothing
+    else 
+        return roots[min[2]]
     end
+
 end
 
 """
