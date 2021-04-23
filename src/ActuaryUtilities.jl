@@ -2,10 +2,10 @@ module ActuaryUtilities
 
 using Dates
 using ForwardDiff
-import Optim
 using QuadGK
 using Yields
 import InteractiveUtils
+import Roots
 
 include("financial_math.jl")
 include("excel.jl")
