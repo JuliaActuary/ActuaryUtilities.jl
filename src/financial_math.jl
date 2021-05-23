@@ -186,7 +186,7 @@ function breakeven(y::T, cashflows::Vector, timepoints::Vector) where {T <: Yiel
 
     for i in 2:length(cashflows)
         # accumulate the flow from each timepoint to the next
-        accum *= accumulate(y, timepoints[i - 1], timepoints[i])
+        accum *= Yields.accumulation(y, timepoints[i - 1], timepoints[i])
         accum += cashflows[i]
 
         if accum >= 0 && isnothing(last_neg)
