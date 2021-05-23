@@ -124,7 +124,11 @@ Efficiently calculate a vector representing the present value of the given cashf
 ```julia-repl
 julia> present_values(0.00, [1,1,1])
 [3,2,1]
-julia> present_value(Yields.Forward([0.1,0.2]), [10,20],[0,1])
+
+julia> present_values(Yields.Forward([0.1,0.2]), [10,20],[0,1])
+2-element Vector{Float64}:
+ 28.18181818181818
+ 18.18181818181818
 ```
 
 """
@@ -137,6 +141,33 @@ function present_values(interest, cashflows)
 
     return pvs
 end
+
+
+function present_values(interest,cashflows,times)
+    present_values_accumulator(interest,cashflows,times)
+end
+
+function present_values_accumulator(interest,cashflows,times,pvs=[0.0])
+    from_time = length(times) == 1 ? 0. : times[end-1]
+    pv = discount(interest,from_time,last(times)) *(first(pvs) + last(cashflows))
+    pvs = pushfirst!(pvs,pv)
+
+    if length(cashflows) > 1
+
+        new_cfs = @view cashflows[1:end-1]
+        new_times = @view times[1:end-1]
+        return present_values_accumulator(interest,new_cfs,new_times,pvs)
+    else
+        # last discount and return
+        return pvs[1:end-1] # end-1 get rid of trailing 0.0
+    end
+end
+
+# if given a vector of rates, assume that it should be a forward discount yield
+function present_values(y::Vector{T}, cfs, times) where {T <: Real}
+    return present_values(Yields.Forward(y), cfs, times)
+end
+
 
 """
     price(...)

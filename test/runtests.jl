@@ -59,6 +59,14 @@ end
         pvs = present_values(Yields.Constant(0.1),cfs) 
         @test pvs[3] ≈ 1 / 1.1
         @test pvs[2] ≈ (1 / 1.1 + 1) / 1.1
+
+
+
+        @test all(present_values(0.00, [1,1,1]) ≈ [3,2,1])
+        @test all(present_values(0.00, [1,1,1],[0,1,2]) ≈ [3,2,1])
+        @test all(present_values(0.00, [1,1,1],[1,2,3]) ≈ [3,2,1])
+        @test all(present_values(Yields.Forward([0.1,0.2]), [10,20],[0,1]) ≈  [28.18181818181818,18.18181818181818])
+        @test all(present_values([0.1,0.2], [10,20],[0,1]) ≈  [28.18181818181818,18.18181818181818])
     end
 
     @testset "pv with timepoints" begin
