@@ -18,14 +18,14 @@ julia> internal_rate_of_return([-100,110]) # implied the same as above
 function internal_rate_of_return(cashflows)
     
 
-    return internal_rate_of_return(cashflows,[t for t in 0:(length(cashflows)-1)])
+    return internal_rate_of_return(cashflows, [t for t in 0:(length(cashflows) - 1)])
     
 end
 
-function internal_rate_of_return(cashflows,times)
+function internal_rate_of_return(cashflows, times)
     radius = 2.
-    f(i) =  sum(@views cashflows .* [1/(1+i[1])^t for t in times])
-    roots = Roots.find_zeros(f,-radius,radius)
+    f(i) =  sum(@views cashflows .* [1 / (1 + i[1])^t for t in times])
+    roots = Roots.find_zeros(f, -radius, radius)
     
     # short circuit and return nothing if no roots found
     isempty(roots) && return nothing
@@ -77,33 +77,33 @@ present_value(0.1, [10,20],times)
 ```
 
 """
-function present_value(yc::T,cashflows,timepoints) where {T <: Yields.AbstractYield}
-    sum(discount.(yc,timepoints) .* cashflows)
+function present_value(yc::T, cashflows, timepoints) where {T <: Yields.AbstractYield}
+    sum(discount.(yc, timepoints) .* cashflows)
 end
 
-function present_value(yc::T,cashflows) where {T <: Yields.AbstractYield}
-    sum(discount.(yc,1:length(cashflows)) .* cashflows)
+function present_value(yc::T, cashflows) where {T <: Yields.AbstractYield}
+    sum(discount.(yc, 1:length(cashflows)) .* cashflows)
 end
 
-function present_value(i,v)
+function present_value(i, v)
     yc = Yields.Constant(i)
-    return sum(discount(yc,t) * v[t] for t in 1:length(v))
+    return sum(discount(yc, t) * v[t] for t in 1:length(v))
 end
 
-function present_value(i,v,times)
-    return present_value(Yields.Constant(i),v,times)
+function present_value(i, v, times)
+    return present_value(Yields.Constant(i), v, times)
 end
 
 # Interest Given is an array, assume forwards.
-function present_value(i::AbstractArray,v)
+function present_value(i::AbstractArray, v)
     yc = Yields.Forward(i)
-    return sum(discount(yc,t) * v[t] for t in 1:length(v))
+    return sum(discount(yc, t) * v[t] for t in 1:length(v))
 end
 
 # Interest Given is an array, assume forwards.
-function present_value(i::AbstractArray,v,times)
-    yc = Yields.Forward(i,times)
-    return sum(discount(yc,t) * v[i] for (i,t) in enumerate(times))
+function present_value(i::AbstractArray, v, times)
+    yc = Yields.Forward(i, times)
+    return sum(discount(yc, t) * v[i] for (i, t) in enumerate(times))
 end
 
 """
@@ -128,14 +128,14 @@ julia> present_value(Yields.Forward([0.1,0.2]), [10,20],[0,1])
 ```
 
 """
-function present_values(interest,cashflows)
+function present_values(interest, cashflows)
     pvs = similar(cashflows)
-    pvs[end] = Yields.discount(interest,lastindex(cashflows)-1,lastindex(cashflows)) * cashflows[end]
-    for (t,cf) in Iterators.reverse(enumerate(cashflows[1:end-1]))
-        pvs[t] = Yields.discount(interest,t-1,t) * (cf+pvs[t+1])
-end
+    pvs[end] = Yields.discount(interest, lastindex(cashflows) - 1, lastindex(cashflows)) * cashflows[end]
+    for (t, cf) in Iterators.reverse(enumerate(cashflows[1:end - 1]))
+        pvs[t] = Yields.discount(interest, t - 1, t) * (cf + pvs[t + 1])
+    end
 
-return pvs
+    return pvs
 end
 
 """
@@ -147,8 +147,8 @@ The absolute value of the `present_value(...)`.
 
 Using `price` can be helpful if the directionality of the value doesn't matter. For example, in the common usage, duration is more interested in the change in price than present value, so `price` is used there.
 """
-price(x1,x2) = present_value(x1,x2) |> abs
-price(x1,x2,x3) = present_value(x1,x2,x3) |> abs
+price(x1,x2) = present_value(x1, x2) |> abs
+price(x1,x2,x3) = present_value(x1, x2, x3) |> abs
 
 """
     breakeven(yield, cashflows::Vector)
@@ -175,7 +175,7 @@ julia> breakeven(0.10, [-10,-15,2,3,4,8]) # returns the `nothing` value
 
 ```
 """
-function breakeven(y::T,cashflows::Vector,timepoints::Vector) where {T<:Yields.AbstractYield}
+function breakeven(y::T, cashflows::Vector, timepoints::Vector) where {T <: Yields.AbstractYield}
     accum = zero(eltype(cashflows))
     last_neg = nothing
 
@@ -186,7 +186,7 @@ function breakeven(y::T,cashflows::Vector,timepoints::Vector) where {T<:Yields.A
 
     for i in 2:length(cashflows)
         # accumulate the flow from each timepoint to the next
-        accum *= accumulate(y,timepoints[i-1],timepoints[i])
+        accum *= accumulate(y, timepoints[i - 1], timepoints[i])
         accum += cashflows[i]
 
         if accum >= 0 && isnothing(last_neg)
@@ -200,16 +200,16 @@ function breakeven(y::T,cashflows::Vector,timepoints::Vector) where {T<:Yields.A
 
 end
 
-function breakeven(y::T,cfs,times) where {T<:Real}
-    return breakeven(Yields.Constant(y),cfs,times)
+function breakeven(y::T, cfs, times) where {T <: Real}
+    return breakeven(Yields.Constant(y), cfs, times)
 end
 
-function breakeven(y::Vector{T},cfs,times) where {T<:Real}
-    return breakeven(Yields.Forward(y),cfs,times)
+function breakeven(y::Vector{T}, cfs, times) where {T <: Real}
+    return breakeven(Yields.Forward(y), cfs, times)
 end
 
-function breakeven(i,cashflows::Vector)
-    return breakeven(i,cashflows,[t for t in 0:length(cashflows)-1])
+function breakeven(i, cashflows::Vector)
+    return breakeven(i, cashflows, [t for t in 0:length(cashflows) - 1])
 end
 
 abstract type Duration end
@@ -260,47 +260,47 @@ julia> convexity(0.03,my_lump_sum_value)
 
 ```
 """
-function duration(::Macaulay,yield,cfs,times)
-    return sum(times .* price.(yield,vec(cfs),times) / price(yield,vec(cfs),times))
+function duration(::Macaulay, yield, cfs, times)
+    return sum(times .* price.(yield, vec(cfs), times) / price(yield, vec(cfs), times))
 end
 
-function duration(::Modified,yield,cfs,times)
-    D(i) = price(i,vec(cfs),times)
-    return duration(yield,D)
+function duration(::Modified, yield, cfs, times)
+    D(i) = price(i, vec(cfs), times)
+    return duration(yield, D)
 end
 
-function duration(yield,valuation_function)
-    D(i) = log(valuation_function(i+yield))
-    δV =  - ForwardDiff.derivative(D,0.0)
+function duration(yield, valuation_function)
+    D(i) = log(valuation_function(i + yield))
+    δV =  - ForwardDiff.derivative(D, 0.0)
 end
 
-function duration(yield::Y,valuation_function) where {Y <: Yields.AbstractYield}
-    D(i) = log(valuation_function(i+yield))
-    δV =  - ForwardDiff.derivative(D,0.0)
+function duration(yield::Y, valuation_function) where {Y <: Yields.AbstractYield}
+    D(i) = log(valuation_function(i + yield))
+    δV =  - ForwardDiff.derivative(D, 0.0)
 end
 
-function duration(yield,cfs,times)
-    return duration(Modified(),yield,vec(cfs),times)
+function duration(yield, cfs, times)
+    return duration(Modified(), yield, vec(cfs), times)
 end
-function duration(yield::Y,cfs::A) where {Y <: Yields.AbstractYield,A <: AbstractArray}
+function duration(yield::Y, cfs::A) where {Y <: Yields.AbstractYield,A <: AbstractArray}
     times = 1:length(cfs)
-    return duration(Modified(),yield,vec(cfs),times)
+    return duration(Modified(), yield, vec(cfs), times)
 end
 
-function duration(yield::R,cfs) where {R <: Real}
-    return duration(Yields.Constant(yield),cfs)
+function duration(yield::R, cfs) where {R <: Real}
+    return duration(Yields.Constant(yield), cfs)
 end
 
-function duration(::DV01,yield,cfs,times)
-    return duration(DV01(),yield,i->price(i,vec(cfs),times))
+function duration(::DV01, yield, cfs, times)
+    return duration(DV01(), yield, i -> price(i, vec(cfs), times))
 end
-function duration(d::Duration,yield,cfs)
+function duration(d::Duration, yield, cfs)
     times = 1:length(cfs)
-    return duration(d,yield,vec(cfs),times)
+    return duration(d, yield, vec(cfs), times)
 end
 
-function duration(::DV01,yield,valuation_function)
-    return duration(yield,valuation_function) * valuation_function(yield) / 100
+function duration(::DV01, yield, valuation_function)
+    return duration(yield, valuation_function) * valuation_function(yield) / 100
 end
 
 """ 
@@ -341,17 +341,17 @@ julia> convexity(0.03,my_lump_sum_value)
 ```
 
 """
-function convexity(yield,cfs,times)
-    return convexity(yield, i -> price(i,vec(cfs),times))
+function convexity(yield, cfs, times)
+    return convexity(yield, i -> price(i, vec(cfs), times))
 end
 
-function convexity(yield,cfs::A) where {A <: AbstractArray}
+function convexity(yield, cfs::A) where {A <: AbstractArray}
     times = 1:length(cfs)
-    return convexity(yield, i -> price(i,vec(cfs),times))
+    return convexity(yield, i -> price(i, vec(cfs), times))
 end
 
-function convexity(yield,valuation_function)
+function convexity(yield, valuation_function)
     v(x) = abs(valuation_function(yield + x[1]))
-    ∂²P = ForwardDiff.hessian(v,[0.0])
+    ∂²P = ForwardDiff.hessian(v, [0.0])
     return ∂²P[1] / v([0.0])  
 end
