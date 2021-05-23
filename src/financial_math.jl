@@ -59,7 +59,8 @@ The `interest` can be an `InterestCurve`, a single scalar, or a vector wrapped i
 ```julia-repl
 julia> present_value(0.1, [10,20],[0,1])
 28.18181818181818
-julia> present_value(InterestVector([0.1,0.2]), [10,20],[0,1])
+julia> present_value(Yields.Forward([0.1,0.2]), [10,20],[0,1])
+28.18181818181818 # same as above, because first cashflow is at time zero
 ```
 
 Example on how to use real dates using the [DayCounts.jl](https://github.com/JuliaFinance/DayCounts.jl) package
@@ -122,8 +123,8 @@ Efficiently calculate a vector representing the present value of the given cashf
 # Examples
 ```julia-repl
 julia> present_values(0.00, [1,1,1])
-28.18181818181818
-julia> present_value(InterestVector([0.1,0.2]), [10,20],[0,1])
+[3,2,1]
+julia> present_value(Yields.Forward([0.1,0.2]), [10,20],[0,1])
 ```
 
 """
