@@ -59,6 +59,14 @@ end
         pvs = present_values(Yields.Constant(0.1),cfs) 
         @test pvs[3] ≈ 1 / 1.1
         @test pvs[2] ≈ (1 / 1.1 + 1) / 1.1
+
+
+
+        @test all(present_values(0.00, [1,1,1]) ≈ [3,2,1])
+        @test all(present_values(0.00, [1,1,1],[0,1,2]) ≈ [3,2,1])
+        @test all(present_values(0.00, [1,1,1],[1,2,3]) ≈ [3,2,1])
+        @test all(present_values(Yields.Forward([0.1,0.2]), [10,20],[0,1]) ≈  [28.18181818181818,18.18181818181818])
+        @test all(present_values([0.1,0.2], [10,20],[0,1]) ≈  [28.18181818181818,18.18181818181818])
     end
 
     @testset "pv with timepoints" begin
@@ -193,8 +201,8 @@ end
         @test duration(DV01(), 0.04, cfs, times) ≈ 1.777570320376649 / (1 + 0.04) * V / 100
         
         @test duration(Yields.Constant(0.04), cfs, times) ≈ 1.777570320376649 / (1 + 0.04)
-        @test duration(Yields.Constant(0.04), -1 .* cfs, times) ≈ 1.777570320376649 / (1 + 0.04)
-        @test duration(Yields.Forward([0.04,0.04]), cfs, times) ≈ 1.777570320376649 / (1 + 0.04)
+        @test duration(Yields.Constant(0.04), -1 .* cfs, times) ≈ 1.777570320376649 / (1 + 0.04) atol=0.00001
+        @test duration(Yields.Forward([0.04,0.04]), cfs, times) ≈ 1.777570320376649 / (1 + 0.04) atol=0.00001
 
         # test that dispatch resolves the ambiguity between duration(Yield,vec) and duration(Yield, function)
         @test duration(Yields.Constant(0.03),cfs) > 0
