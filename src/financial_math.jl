@@ -119,15 +119,6 @@ pv = present_value
 
 Efficiently calculate a vector representing the present value of the given cashflows at each period prior to the given timepoint.
 
-!!! note
-
-    If your source directory is not accessible through Julia's LOAD_PATH, you might wish to
-    add the following line at the top of make.jl
-
-    ```julia
-    push!(LOAD_PATH,"../src/")
-    ```
-
 # Examples
 ```julia-repl
 julia> present_values(0.00, [1,1,1])
