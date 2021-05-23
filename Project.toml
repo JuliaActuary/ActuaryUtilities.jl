@@ -1,7 +1,7 @@
 name = "ActuaryUtilities"
 uuid = "bdd23359-8b1c-4f88-b89b-d11982a786f4"
 authors = ["Alec Loudenback"]
-version = "1.2.4"
+version = "1.2.5"
 
 [deps]
 CSV = "336ed68f-0bac-5ca0-87d4-7b16caf5d00b"
