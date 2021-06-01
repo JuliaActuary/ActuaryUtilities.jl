@@ -25,14 +25,19 @@ A collection of common functions/manipulations used in Actuarial Calculations.
   
 ### Excel Utilities
 
-You can also copy/paste to/from Excel:
+Copying data to/and from the clipboard was previsouly built-in to ActuaryUtilities vesions `1.3` and lower. The features have been moved to [ClipData](https://github.com/pdeffebach/ClipData.jl). Usage to copy tabular data (e.g. from spreadsheets):
 
-![Copying to and from Excel](https://user-images.githubusercontent.com/711879/107859226-9e9a5500-6dfd-11eb-999f-5da5c7e5b8a6.gif)
+```julia
+using ClipData
+cliptable() # copy data from the clipboard with headers
+cliptable(data) # copy tabular data to the clipboard for spreadsheet usage
+clipdata() # copy array/matrix (headerless) data to Julia
+clipdata(data) # copy array data to the clipboard
+```
 
-- `xlcopy()` copies and parses Excel content on the clipboard
-- `xlcopy(data)` will copy Julia data into your clipboard for pasting into Excel.
+The old `xlclip` does the same thing `clipdata()` does.
 
-Also note related packages, such as [XLSX.jl](https://felipenoris.github.io/XLSX.jl/stable/) for working with Excel files.
+https://user-images.githubusercontent.com/711879/116340294-8c954500-a7a4-11eb-9159-cc9dc3fda80a.mp4
 
 ## Documentation
 
