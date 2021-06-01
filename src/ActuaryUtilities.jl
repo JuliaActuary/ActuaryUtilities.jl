@@ -4,11 +4,9 @@ using Dates
 using ForwardDiff
 using QuadGK
 using Yields
-import InteractiveUtils
 import Roots
 
 include("financial_math.jl")
-include("excel.jl")
 include("precompile.jl")
 
 
@@ -146,9 +144,7 @@ export years_between, duration,
     pv, present_value, price, present_values,
     breakeven,
     accum_offset,
-    Macaulay,Modified,DV01,duration, convexity,
-    xlclip
-
+    Macaulay,Modified,DV01,duration, convexity
 _precompile_()
 
 end # module
