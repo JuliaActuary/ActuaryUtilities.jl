@@ -47,8 +47,3 @@ end
 [CTE](@ref)
 """
 ConditionalTailExpectation = CTE
-"""
-Expected Shortfall
-"""
-function ES(v,p,rev=false)
-end
