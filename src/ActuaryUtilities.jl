@@ -5,8 +5,10 @@ using ForwardDiff
 using QuadGK
 using Yields
 import Roots
+import StatsBase
 
 include("financial_math.jl")
+include("risk_measures.jl")
 include("precompile.jl")
 
 
@@ -144,7 +146,8 @@ export years_between, duration,
     pv, present_value, price, present_values,
     breakeven,
     accum_offset,
-    Macaulay,Modified,DV01,duration, convexity
+    Macaulay,Modified,DV01,duration, convexity,
+    VaR,ValueAtRisk,CTE,ConditionalTailExpectation,ExpectedShortfall
 _precompile_()
 
 end # module
