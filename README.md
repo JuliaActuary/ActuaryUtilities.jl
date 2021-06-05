@@ -10,6 +10,7 @@
 A collection of common functions/manipulations used in Actuarial Calculations.
 
 ### Financial Maths
+
 - `duration`:
   - Calculate the `Macaulay`, `Modified`, or `DV01` durations for a set of cashflows
 - `convexity` for price sensitivity
@@ -17,6 +18,11 @@ A collection of common functions/manipulations used in Actuarial Calculations.
 - `internal_rate_of_return` or `irr` to calculate the IRR given cashflows (including at timepoints like Excel's `XIRR`)
 - `breakeven` to calculate the breakeven time for a set of cashflows
 - `accum_offset` to calculate accumulations like survivorship from a mortality vector
+
+### Risk Measures
+
+- Calculate risk measures for a given vector of risks: 
+  - `CTE` for the Conditiona Tail Expectation or `VaR` for the percentile/Value at Risk.
 
 ### Insurance mechanics
 
