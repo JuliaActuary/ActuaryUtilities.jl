@@ -66,10 +66,10 @@ irr_newton(cashflows) = irr_newton(cashflows,0:length(cashflows)-1)
 
 function irr_newton(cashflows, times)
     # use newton's method with hand-coded derivative
-    f(i) =  sum(cf / (1+i)^t for (cf,t) in zip(cashflows,times))
-    f′(i) = sum(-t*cf / (1+i)^(t+1) for (cf,t) in zip(cashflows,times) if t > 0)
-    # return Roots.find_zero((f,f′), 0.0, Roots.Newton(),trace=true)
-    return Roots.newton(f,f′,0.0,trace=true)
+    f(r) =  sum(cf * exp(-r*t) for (cf,t) in zip(cashflows,times))
+    f′(r) = sum(-t*cf * exp(-r*t) for (cf,t) in zip(cashflows,times) if t > 0)
+    r = Roots.newton(f,f′,0.0)
+    return exp(r)-1
 
 end
 
