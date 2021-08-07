@@ -103,10 +103,16 @@ end
         
         # per Excel (example comes from Excel help text)
         @test isapprox(irr(v[1:2]), -0.8285714285714, atol = 0.001)
-        @test isapprox(irr(v[1:3]), -0.4435069413346, atol = 0.001)
+        @test isapprox(ActuaryUtilities.irr_robust(v[1:2]), -0.8285714285714, atol = 0.001)
+        
+        @test isapprox(ActuaryUtilities.irr_newton(v[1:3]), -1.385064487236688, atol = 0.001)
+        @test isapprox(ActuaryUtilities.irr_robust(v[1:3]), -0.4435069413346, atol = 0.001)
         @test isapprox(irr(v[1:4]), -0.1821374641455, atol = 0.001)
         @test isapprox(irr(v[1:5]), -0.0212448482734, atol = 0.001)
         @test isapprox(irr(v[1:6]),  0.0866309480365, atol = 0.001)
+
+        @test_throws MethodError irr("hello") 
+
 
         # much more challenging to solve b/c of the overflow below zero
         cfs = [t % 10 == 0 ? -10 : 1.5 for t in 0:99]
@@ -162,7 +168,7 @@ end
         times = map(d->DayCounts.yearfrac(dates[1], d, DayCounts.Thirty360()), dates)
     # per Excel (example comes from Excel help text)
         @test isapprox(irr(v[1:2], times[1:2]), -0.8285714285714, atol = 0.001)
-        @test isapprox(irr(v[1:3], times[1:3]), -0.4435069413346, atol = 0.001)
+        @test isapprox(ActuaryUtilities.irr_robust(v[1:3], times[1:3]), -0.4435069413346, atol = 0.001)
         @test isapprox(irr(v[1:4], times[1:4]), -0.1821374641455, atol = 0.001)
         @test isapprox(irr(v[1:5], times[1:5]), -0.0212448482734, atol = 0.001)
         @test isapprox(irr(v[1:6], times[1:6]),  0.0866309480365, atol = 0.001)
