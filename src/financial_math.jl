@@ -4,7 +4,7 @@
     
 Calculate the internal_rate_of_return with given timepoints. If no timepoints given, will assume that a series of equally spaced cashflows, assuming the first cashflow occurring at time zero. 
 
-Returns the root found closest to zero in the range `[-2,2]`.
+Returns the root found closest to zero in the range `[-0.99,2]`.
 
 # Example
 ```julia-repl
@@ -23,19 +23,17 @@ function internal_rate_of_return(cashflows)
 end
 
 function internal_rate_of_return(cashflows, times)
-    radius = 2.
     f(i) =  sum(@views cashflows .* [1 / (1 + i[1])^t for t in times])
-    roots = Roots.find_zeros(f, -radius, radius)
+
+    # lower bound at -.99 because otherwise we can start taking the root of a negative number
+    # when a time is fractional. 
+    roots = Roots.find_zeros(f, -0.99, 2)
     
     # short circuit and return nothing if no roots found
     isempty(roots) && return nothing
     # find and return the one nearest zero
     min = findmin(abs.(roots))
-    if abs(min[1]) >= radius
-        return nothing
-    else 
-        return roots[min[2]]
-    end
+    return roots[min[2]]
 
 end
 

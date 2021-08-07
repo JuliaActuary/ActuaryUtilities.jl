@@ -118,10 +118,20 @@ end
         @test irr(cfs,0:50) ≈ 0.3176680627111823
 
 
-        @test irr([100,100]) ≈ -1.
+        @test irr([-100,100]) ≈ 0.
+        @test isnothing(irr([100,100])) # answer is -1, but search range won't find it
         
         # test the unsolvable
         @test isnothing(irr([-1e8,0.,0.,0.],0:3))
+
+    end
+
+    @testset "irr with fractional time" begin
+        irr1 = irr([-10,5,5,5],[0,1,2,3])
+        @test irr1 ≈ irr([-10,5,5,5])
+        irr2 = irr([-10,5,5,5],[0,1,2,3] ./ 2)
+
+        @test (1+irr1)^2-1 ≈ irr2 
 
     end
 
