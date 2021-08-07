@@ -4,7 +4,9 @@
     
 Calculate the internal_rate_of_return with given timepoints. If no timepoints given, will assume that a series of equally spaced cashflows, assuming the first cashflow occurring at time zero. 
 
-Returns the root found closest to zero in the range `[-0.99,2]`.
+Will try to return a root within the range [-2,2]. If the fast solver does not find one matching this condition, then a more robust search will be performed over the [.99,2] range.
+
+The solution returned will be in the range [-2,2], but may not be the one nearest zero. For a slightly slower, but more robust version, call `ActuaryUtilities.irr_robust(cashflows,timepoints)` directly.
 
 # Example
 ```julia-repl
@@ -18,11 +20,35 @@ julia> internal_rate_of_return([-100,110]) # implied the same as above
 function internal_rate_of_return(cashflows)
     
 
-    return internal_rate_of_return(cashflows, [t for t in 0:(length(cashflows) - 1)])
+    return internal_rate_of_return(cashflows, 0:length(cashflows)-1)
     
 end
 
-function internal_rate_of_return(cashflows, times)
+function internal_rate_of_return(cashflows,times)
+    # first try to quickly solve with newton's method, otherwise 
+    # revert to a more robust method
+    lower,upper = -2.,2.
+    
+    v = try 
+        irr_newton(cashflows,times)
+    catch e
+        if isa(e,Roots.ConvergenceFailed)
+            return irr_robust(cashflows,times)
+        else
+            throw(e)
+        end
+    end
+    
+    if v <= upper && v >= lower
+        return v
+    else
+        return irr_robust(cashflows,times)
+    end
+end
+
+irr_robust(cashflows) = irr_robust(cashflows,0:length(cashflows)-1)
+
+function irr_robust(cashflows, times)
     f(i) =  sum(cf / (1+i)^t for (cf,t) in zip(cashflows,times))
     # lower bound at -.99 because otherwise we can start taking the root of a negative number
     # when a time is fractional. 
@@ -31,8 +57,19 @@ function internal_rate_of_return(cashflows, times)
     # short circuit and return nothing if no roots found
     isempty(roots) && return nothing
     # find and return the one nearest zero
-    min = findmin(abs.(roots))
-    return roots[min[2]]
+    min_i = argmin(roots)
+    return roots[min_i]
+
+end
+
+irr_newton(cashflows) = irr_newton(cashflows,0:length(cashflows)-1)
+
+function irr_newton(cashflows, times)
+    # use newton's method with hand-coded derivative
+    f(i) =  sum(cf / (1+i)^t for (cf,t) in zip(cashflows,times))
+    f′(i) = sum(-t*cf / (1+i)^(t+1) for (cf,t) in zip(cashflows,times) if t > 0)
+    # return Roots.find_zero((f,f′), 0.0, Roots.Newton(),trace=true)
+    return Roots.newton(f,f′,0.0,trace=true)
 
 end
 
