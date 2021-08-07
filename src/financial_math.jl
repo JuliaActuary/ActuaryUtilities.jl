@@ -23,8 +23,7 @@ function internal_rate_of_return(cashflows)
 end
 
 function internal_rate_of_return(cashflows, times)
-    f(i) =  sum(@views cashflows .* [1 / (1 + i[1])^t for t in times])
-
+    f(i) =  sum(cf / (1+i)^t for (cf,t) in zip(cashflows,times))
     # lower bound at -.99 because otherwise we can start taking the root of a negative number
     # when a time is fractional. 
     roots = Roots.find_zeros(f, -0.99, 2)
