@@ -68,7 +68,8 @@ function irr_newton(cashflows, times)
     # use newton's method with hand-coded derivative
     f(r) =  sum(cf * exp(-r*t) for (cf,t) in zip(cashflows,times))
     f′(r) = sum(-t*cf * exp(-r*t) for (cf,t) in zip(cashflows,times) if t > 0)
-    r = Roots.newton(f,f′,0.0)
+    # r = Roots.solve(Roots.ZeroProblem((f,f′), 0.0), Roots.Newton())
+    r = Roots.newton(x->(f(x),f(x)/f′(x)),0.0)
     return exp(r)-1
 
 end
