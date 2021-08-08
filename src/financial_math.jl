@@ -32,7 +32,7 @@ function internal_rate_of_return(cashflows,times)
     v = try 
         irr_newton(cashflows,times)
     catch e
-        if isa(e,Roots.ConvergenceFailed)
+        if isa(e,Roots.ConvergenceFailed) || sprint(showerror, e) =="No convergence"
             return irr_robust(cashflows,times)
         else
             throw(e)
