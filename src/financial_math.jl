@@ -113,11 +113,11 @@ present_value(0.1, [10,20],times)
 
 """
 function present_value(yc::T, cashflows, timepoints) where {T <: Yields.AbstractYield}
-    sum(discount.(yc, timepoints) .* cashflows)
+    sum(discount(yc,t) * cf for (t,cf) in zip(timepoints, cashflows))
 end
 
 function present_value(yc::T, cashflows) where {T <: Yields.AbstractYield}
-    sum(discount.(yc, 1:length(cashflows)) .* cashflows)
+    present_value(yc,cashflows,1:length(cashflows))
 end
 
 function present_value(i, x)
@@ -140,13 +140,13 @@ end
 # Interest Given is an array, assume forwards.
 function present_value(i::AbstractArray, v)
     yc = Yields.Forward(i)
-    return sum(discount(yc, t) * v[t] for t in 1:length(v))
+    return sum(discount(yc, t) * cf for (t,cf) in zip(1:length(v),v))
 end
 
 # Interest Given is an array, assume forwards.
 function present_value(i::AbstractArray, v, times)
     yc = Yields.Forward(i, times)
-    return sum(discount(yc, t) * v[i] for (i, t) in enumerate(times))
+    return sum(discount(yc, t) * cf for (cf, t) in zip(v,times))
 end
 
 """
