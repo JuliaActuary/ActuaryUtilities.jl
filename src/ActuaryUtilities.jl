@@ -9,7 +9,12 @@ import StatsBase
 
 include("financial_math.jl")
 include("risk_measures.jl")
-include("precompile.jl")
+
+# https://timholy.github.io/SnoopCompile.jl/stable/snoopi_deep_parcel/
+if Base.VERSION >= v"1.4.2"
+    include("precompile.jl")
+    _precompile_()
+end
 
 
 """
