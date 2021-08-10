@@ -120,9 +120,17 @@ function present_value(yc::T, cashflows) where {T <: Yields.AbstractYield}
     sum(discount.(yc, 1:length(cashflows)) .* cashflows)
 end
 
-function present_value(i, v)
-    yc = Yields.Constant(i)
-    return sum(discount(yc, t) * v[t] for t in 1:length(v))
+function present_value(i, x)
+    
+    v = 1.0
+    v_factor = 1/(1+i)
+    pv = 0.0
+
+    for (t,cf) in zip(1:length(x),x)
+        v *= v_factor
+        pv += v * cf
+    end
+    return pv 
 end
 
 function present_value(i, v, times)
