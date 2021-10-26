@@ -103,7 +103,7 @@ A shortcut for the common operation wherein a vector is scanned with an operatio
 
 This is a common pattern when calculating things like survivorship given a mortality vector and you want the first value of the resulting vector to be `1.0`, and the second value to be `1.0 * x[1]`, etc.
 
-Three keyword arguments:
+Two keyword arguments:
 
 - `op` is the binary (two argument) operator you want to use, such as `*` or `+`
 - `init` is the initial value in the returned array
