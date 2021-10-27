@@ -62,9 +62,11 @@ end
 
 
 
-        @test all(present_values(0.00, [1,1,1]) ≈ [3,2,1])
-        @test all(present_values(0.00, [1,1,1],[0,1,2]) ≈ [3,2,1])
-        @test all(present_values(0.00, [1,1,1],[1,2,3]) ≈ [3,2,1])
+        @test all(present_values(0.00, [1,1,1]) .≈ [3,2,1])
+        @test all(present_values(0.00, [1,1,1],[0,1,2]) .≈ [3,2,1])
+        @test all(present_values(0.00, [1,1,1],[1,2,3]) .≈ [3,2,1])
+        @test all(present_values(0.00, [1,1,1],[1,2,3]) .≈ [3,2,1])
+        @test all(present_values(0.01, [1,2,3]) .≈ [ 5.862461552497766,4.921086168022744,2.9702970297029707])
         @test all(present_values(Yields.Forward([0.1,0.2]), [10,20],[0,1]) ≈  [28.18181818181818,18.18181818181818])
         @test all(present_values([0.1,0.2], [10,20],[0,1]) ≈  [28.18181818181818,18.18181818181818])
     end
