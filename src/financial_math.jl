@@ -176,7 +176,7 @@ julia> present_values(Yields.Forward([0.1,0.2]), [10,20],[0,1])
 
 """
 function present_values(interest, cashflows)
-    pvs = similar(cashflows)
+    pvs = Vector{Float64}(undef,length(cashflows))
     pvs[end] = Yields.discount(interest, lastindex(cashflows) - 1, lastindex(cashflows)) * cashflows[end]
     for (t, cf) in Iterators.reverse(enumerate(cashflows[1:end - 1]))
         pvs[t] = Yields.discount(interest, t - 1, t) * (cf + pvs[t + 1])

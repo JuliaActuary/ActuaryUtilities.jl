@@ -153,6 +153,5 @@ export years_between, duration,
     accum_offset,
     Macaulay,Modified,DV01,duration, convexity,
     VaR,ValueAtRisk,CTE,ConditionalTailExpectation,ExpectedShortfall
-_precompile_()
 
 end # module
