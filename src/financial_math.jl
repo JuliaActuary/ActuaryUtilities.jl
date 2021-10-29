@@ -295,9 +295,9 @@ struct DV01 <: Duration end
 """ 
     duration(Macaulay(),interest_rate,cfs,times)
     duration(Modified(),interest_rate,cfs,times)
-    duration(::DV01,interest_rate,cfs,times)
+    duration(DV01(),interest_rate,cfs,times)
     duration(interest_rate,cfs,times)             # Modified Duration
-    duration(interest_rate,valuation_function)    # modified Duration
+    duration(interest_rate,valuation_function)    # Modified Duration
 
 Calculates the Macaulay, Modified, or DV01 duration. `times` may be ommitted and the valuation will assume evenly spaced cashflows starting at the end of the first period.
 - `interest_rate` should be a fixed effective yield (e.g. `0.05`).
