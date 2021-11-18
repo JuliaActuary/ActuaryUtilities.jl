@@ -123,7 +123,7 @@ end
 function present_value(i, x)
     
     v = 1.0
-    v_factor = 1/(1+i)
+    v_factor = discount(i,0,1)
     pv = 0.0
 
     for (t,cf) in zip(1:length(x),x)
