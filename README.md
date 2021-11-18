@@ -32,7 +32,7 @@ A collection of common functions/manipulations used in Actuarial Calculations.
   
 ### Excel Utilities
 
-Copying data to/and from the clipboard was previsouly built-in to ActuaryUtilities vesions `1.3` and lower. The features have been moved to [ClipData](https://github.com/pdeffebach/ClipData.jl). Usage to copy tabular data (e.g. from spreadsheets):
+Copying data to/and from the clipboard was previously built-in to ActuaryUtilities vesions `1.3` and lower. The features have been moved to [ClipData](https://github.com/pdeffebach/ClipData.jl). Usage to copy tabular data (e.g. from spreadsheets):
 
 ```julia
 using ClipData
