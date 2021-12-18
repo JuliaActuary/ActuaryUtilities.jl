@@ -55,7 +55,7 @@ Full documentation is [available here](https://JuliaActuary.github.io/ActuaryUti
 ### Quickstart 
 
 ```julia
-bond_cfs = [5, 5, 105]
+cfs = [5, 5, 105]
 times    = [1, 2, 3]
 
 discount_rate = 0.03
