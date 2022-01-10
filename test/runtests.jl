@@ -8,6 +8,7 @@ const Yields = ActuaryUtilities.Yields
 import DayCounts
 
 include("risk_measures.jl")
+include("derivatives.jl")
 
 @testset "Temporal functions" begin
     @testset "years_between" begin
