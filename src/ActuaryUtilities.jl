@@ -9,6 +9,7 @@ import StatsBase
 
 include("financial_math.jl")
 include("risk_measures.jl")
+include("derivatives.jl")
 
 # https://timholy.github.io/SnoopCompile.jl/stable/snoopi_deep_parcel/
 if Base.VERSION >= v"1.4.2"
@@ -152,6 +153,7 @@ export years_between, duration,
     breakeven,
     accum_offset,
     Macaulay,Modified,DV01,duration, convexity,
-    VaR,ValueAtRisk,CTE,ConditionalTailExpectation,ExpectedShortfall
+    VaR,ValueAtRisk,CTE,ConditionalTailExpectation,ExpectedShortfall,
+    eurocall, europut
 
 end # module
