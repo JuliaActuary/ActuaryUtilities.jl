@@ -18,6 +18,8 @@ A collection of common functions/manipulations used in Actuarial Calculations.
 - `internal_rate_of_return` or `irr` to calculate the IRR given cashflows (including at timepoints like Excel's `XIRR`)
 - `breakeven` to calculate the breakeven time for a set of cashflows
 - `accum_offset` to calculate accumulations like survivorship from a mortality vector
+
+#### Options Pricing
 - `eurocall` and `europut` for Black-Scholes option prices
 
 ### Risk Measures
