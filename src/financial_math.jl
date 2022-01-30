@@ -429,3 +429,31 @@ function convexity(yield, valuation_function)
     ∂²P = ForwardDiff.hessian(v, [0.0])
     return ∂²P[1] / v([0.0])  
 end
+
+"""
+    moic(cashflows<:AbstractArray)
+
+The multiple on invested capital ("moic") is the un-discounted sum of distributions divided by the sum of the contributions. The function assumes that negative numbers in the array represent contributions and positive numbers represent distributions.
+
+# Examples
+
+```julia-repl
+julia> moic([-10,20,30])
+5.0
+```
+
+"""
+function moic(cfs::T) where {T<:AbstractArray}
+    invested = zero(eltype(cfs))
+    returned = zero(eltype(cfs))
+    for i = 1:length(cfs)
+        @inbounds cf = cfs[i]
+        if cf > 0
+            returned += cf
+        else
+            invested += -cf
+        end
+    end
+
+    return returned / invested
+end

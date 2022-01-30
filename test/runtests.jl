@@ -210,6 +210,20 @@ end
     end
 end
 
+@testset "moic" begin
+
+    # https://bankingprep.com/multiple-on-invested-capital/
+    ex1 = [-100;[t == 200 ? 100 * 1.067^t : 0 for t in 1:200]]
+    @test moic(ex1) ≈ 429421.59914697794
+    
+
+    ex2 = ex1[end] *= 0.5
+    @test moic(ex1) ≈ 429421.59914697794 * 0.5
+
+
+end
+
+
 @testset "duration and convexity" begin
     
     @testset "wikipedia example" begin
