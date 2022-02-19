@@ -1,12 +1,10 @@
 """
-    internal_rate_of_return(cashflows::vector)
-    internal_rate_of_return(cashflows::Vector, timepoints::Vector)
+    internal_rate_of_return(cashflows::vector)::Yields.Rate
+    internal_rate_of_return(cashflows::Vector, timepoints::Vector)::Yields.Rate
     
-Calculate the internal_rate_of_return with given timepoints. If no timepoints given, will assume that a series of equally spaced cashflows, assuming the first cashflow occurring at time zero. 
+Calculate the internal_rate_of_return with given timepoints. If no timepoints given, will assume that a series of equally spaced cashflows, assuming the first cashflow occurring at time zero and subsequent elements at time 1, 2, 3, ..., n. 
 
-Will try to return a root within the range [-2,2]. If the fast solver does not find one matching this condition, then a more robust search will be performed over the [.99,2] range.
-
-The solution returned will be in the range [-2,2], but may not be the one nearest zero. For a slightly slower, but more robust version, call `ActuaryUtilities.irr_robust(cashflows,timepoints)` directly.
+Returns a Yields.Rate type with periodic compounding once per period (e.g. annual effective if the `timepoints` given represent years). Get the scalar rate by calling `Yields.rate()` on the result.
 
 # Example
 ```julia-repl
@@ -16,6 +14,10 @@ julia> internal_rate_of_return([-100,110]) # implied the same as above
 0.10000000001652906
 ```
 
+# Solver notes
+Will try to return a root within the range [-2,2]. If the fast solver does not find one matching this condition, then a more robust search will be performed over the [.99,2] range.
+
+The solution returned will be in the range [-2,2], but may not be the one nearest zero. For a slightly slower, but more robust version, call `ActuaryUtilities.irr_robust(cashflows,timepoints)` directly.
 """
 function internal_rate_of_return(cashflows)
     
@@ -30,7 +32,7 @@ function internal_rate_of_return(cashflows,times)
     lower,upper = -2.,2.
     
     v = try 
-        irr_newton(cashflows,times)
+        return irr_newton(cashflows,times)
     catch e
         if isa(e,Roots.ConvergenceFailed) || sprint(showerror, e) =="No convergence"
             return irr_robust(cashflows,times)
@@ -58,7 +60,7 @@ function irr_robust(cashflows, times)
     isempty(roots) && return nothing
     # find and return the one nearest zero
     min_i = argmin(roots)
-    return roots[min_i]
+    return Yields.Periodic(roots[min_i],1)
 
 end
 
@@ -70,12 +72,13 @@ function irr_newton(cashflows, times)
     f′(r) = sum(-t*cf * exp(-r*t) for (cf,t) in zip(cashflows,times) if t > 0)
     # r = Roots.solve(Roots.ZeroProblem((f,f′), 0.0), Roots.Newton())
     r = Roots.newton(x->(f(x),f(x)/f′(x)),0.0)
-    return exp(r)-1
+    return Yields.Periodic(exp(r)-1,1)
 
 end
 
 """
-    irr()
+    irr(cashflows::vector)
+    irr(cashflows::Vector, timepoints::Vector)
 
     An alias for `internal_rate_of_return`.
 """
