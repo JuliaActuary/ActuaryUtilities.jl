@@ -13,7 +13,7 @@ StatsBase = "2913bbd2-ae8a-5f71-8c99-4fb6c76f3a91"
 Yields = "d7e99b2f-e7f3-4d9e-9f01-2338fc023ad3"
 
 [compat]
-Distributions = "0.20,0.21,0.22,0.23,0.24,0.25"
+Distributions = "0.23,0.24,0.25"
 ForwardDiff = "^0.10"
 QuadGK = "^2"
 Roots = "^1.0"
