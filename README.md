@@ -5,6 +5,20 @@
 ![CI](https://github.com/JuliaActuary/ActuaryUtilities.jl/workflows/CI/badge.svg)
 [![Codecov](https://codecov.io/gh/JuliaActuary/ActuaryUtilities.jl/branch/master/graph/badge.svg)](https://codecov.io/gh/JuliaActuary/ActuaryUtilities.jl)
 
+## Quickstart
+
+```julia
+cfs = [5, 5, 105]
+times    = [1, 2, 3]
+
+discount_rate = 0.03
+
+present_value(discount_rate, cfs, times)           # 105.65
+duration(Macaulay(), discount_rate, cfs, times)    #   2.86
+duration(discount_rate, cfs, times)                #   2.78
+convexity(discount_rate, cfs, times)               #  10.62
+```
+
 ## Features
 
 A collection of common functions/manipulations used in Actuarial Calculations.
@@ -19,13 +33,13 @@ A collection of common functions/manipulations used in Actuarial Calculations.
 - `breakeven` to calculate the breakeven time for a set of cashflows
 - `accum_offset` to calculate accumulations like survivorship from a mortality vector
 
-#### Options Pricing
+### Options Pricing
 - `eurocall` and `europut` for Black-Scholes option prices
 
 ### Risk Measures
 
-- Calculate risk measures for a given vector of risks: 
-  - `CTE` for the Conditiona Tail Expectation, or 
+- Calculate risk measures for a given vector of risks:
+  - `CTE` for the Conditiona Tail Expectation, or
   - `VaR` for the percentile/Value at Risk.
 
 ### Insurance mechanics
@@ -33,41 +47,49 @@ A collection of common functions/manipulations used in Actuarial Calculations.
 - `duration`:
   - Calculate the duration given an issue date and date (a.k.a. policy duration)
   
-### Excel Utilities
 
-Copying data to/and from the clipboard was previously built-in to ActuaryUtilities vesions `1.3` and lower. The features have been moved to [ClipData](https://github.com/pdeffebach/ClipData.jl). Usage to copy tabular data (e.g. from spreadsheets):
+### Typed Rates
 
-```julia
-using ClipData
-cliptable() # copy data from the clipboard with headers
-cliptable(data) # copy tabular data to the clipboard for spreadsheet usage
-clipdata() # copy array/matrix (headerless) data to Julia
-clipdata(data) # copy array data to the clipboard
+- functions which return a rate/yield will return a `Yields.Rate` object. E.g. `irr(cashflows)` will return a `Rate(0.05,Periodic(1))` instead of just a `0.05` (`float64`) to convey the compounding frequency. This uses (and is fully compatible with) Yields.jl and can be used anywhere you would otherwise use a simple floating point rate.
+
+A couple of other notes:
+
+- `rate(...)` will return the untyped rate from a `Yields.Rate` struct:
+
+```julia-repl
+julia> r = Yields.Rate(0.05,Yields.Periodic(1));
+
+julia> rate(r) 
+0.05
 ```
 
-The old `xlclip` does the same thing `clipdata()` does.
+- You can still pass a simple floating point rate to various methods. E.g. these two are the same (the default compounding convention is periodic once per period):
 
-https://user-images.githubusercontent.com/711879/116340294-8c954500-a7a4-11eb-9159-cc9dc3fda80a.mp4
+```julia
+discount(0.05,cashflows)
+
+r = Yields.Rate(0.05,Yields.Periodic(1));
+discount(r,cashflows)
+```
+
+- convert between rates with:
+
+```julia
+using Yields
+
+r = Yields.Rate(0.05,Yields.Periodic(1));
+
+convert(Yields.Periodic(2),  r)   # convert to compounded twice per timestep
+convert(Yields.Continuous(2),r)   # convert to compounded twice per timestep
+```
+
+For more, see the [Yields.jl](https://github.com/JuliaActuary/Yields.jl) which provides a rich and flexible API for rates and curves to use.
 
 ## Documentation
 
 Full documentation is [available here](https://JuliaActuary.github.io/ActuaryUtilities.jl/stable/).
 
 ## Examples
-
-### Quickstart 
-
-```julia
-cfs = [5, 5, 105]
-times    = [1, 2, 3]
-
-discount_rate = 0.03
-
-present_value(discount_rate, cfs, times)           # 105.65
-duration(Macaulay(), discount_rate, cfs, times)    #   2.86
-duration(discount_rate, cfs, times)                #   2.78
-convexity(discount_rate, cfs, times)               #  10.62
-```
 
 ### Interactive, basic cashflow analysis
 
@@ -79,4 +101,4 @@ See [JuliaActuary.org for instructions](https://juliaactuary.org/tutorials/cashf
 
 ## Useful tips
 
-Functions often use a mix of interest_rates, cashflows, and timepoints. When calling functions, the general order of the arguments is 1) interest rates, 2) cashflows, and 3) timepoints. 
+Functions often use a mix of interest_rates, cashflows, and timepoints. When calling functions, the general order of the arguments is 1) interest rates, 2) cashflows, and 3) timepoints.
