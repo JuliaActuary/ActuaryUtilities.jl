@@ -39,7 +39,7 @@ A collection of common functions/manipulations used in Actuarial Calculations.
 ### Risk Measures
 
 - Calculate risk measures for a given vector of risks:
-  - `CTE` for the Conditiona Tail Expectation, or
+  - `CTE` for the Conditional Tail Expectation, or
   - `VaR` for the percentile/Value at Risk.
 
 ### Insurance mechanics
