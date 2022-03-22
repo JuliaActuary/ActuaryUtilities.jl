@@ -294,7 +294,12 @@ abstract type Duration end
 struct Macaulay <: Duration end
 struct Modified <: Duration end
 struct DV01 <: Duration end
-struct KeyRate{T} <: Duration 
+
+abstract type KeyRateDuration <: Duration end
+struct KeyRatePar{T} <: KeyRateDuration 
+    timepoint::T
+end
+struct KeyRateZero{T} <: KeyRateDuration 
     timepoint::T
 end
 
@@ -479,8 +484,16 @@ References:
 
 
 """
-function duration(keyrate::KeyRate, curve, cashflows, timepoints, krd_points; shift = 0.0001)
-    last_time = maximum(timepoints)
+function duration(keyrate::KeyRateDuration, curve, cashflows, timepoints, krd_points; shift = 0.0001)
+    new_curve = _krd_new_curve(keyrate,curve,krd_points)
+    price = pv(curve, cashflows, timepoints)
+    price_shock = pv(new_curve, cashflows, timepoints)
+
+    return -(price_shock - price) / (shift * price)
+
+end
+
+function _krd_new_curve(keyrate::KeyRateZero,curve,krd_points;shift)
     curve_times = krd_points
     zeros = Yields.zero.(curve, curve_times)
 
@@ -490,20 +503,29 @@ function duration(keyrate::KeyRate, curve, cashflows, timepoints, krd_points; sh
 
     new_curve = Yields.Zero(zeros, curve_times)
 
-    price = pv(curve, cashflows, timepoints)
-    price_shock = pv(new_curve, cashflows, timepoints)
-
-    return -(price_shock - price) / shift
-
+    return new_curve
 end
 
-function duration(keyrate::KeyRate, curve, cashflows, timepoints; shift = 0.0001)
+function _krd_new_curve(keyrate::KeyRatePar,curve,krd_points;shift)
+    curve_times = krd_points
+    zeros = Yields.par.(curve, curve_times)
+
+    zero_index = findfirst(==(keyrate.timepoint), curve_times)
+
+    zeros[zero_index] += shift
+
+    new_curve = Yields.Par(zeros, curve_times)
+
+    return new_curve
+end
+
+function duration(keyrate::KeyRateDuration, curve, cashflows, timepoints; shift = 0.0001)
     krd_points = 1:maximum(timepoints)
     return duration(keyrate, curve, cashflows, timepoints, krd_points; shift)
 
 end
 
-function duration(keyrate::KeyRate, curve, cashflows; shift = 0.0001)
+function duration(keyrate::KeyRateDuration, curve, cashflows; shift = 0.0001)
     timepoints = eachindex(cashflows)
     krd_points = 1:maximum(timepoints)
     return duration(keyrate, curve, cashflows, timepoints, krd_points; shift)
