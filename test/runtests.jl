@@ -7,6 +7,7 @@ const Yields = ActuaryUtilities.Yields
 
 import DayCounts
 
+include("test_utils.jl")
 include("risk_measures.jl")
 include("derivatives.jl")
 
@@ -305,6 +306,26 @@ end
         @test duration(0.03, sum(cfs,dims=2), times) ≈ 2.780101622010806
 
 
+    end
+
+    @testset "Key Rate Durations" begin
+
+        @testset "FEH123" begin
+            # http://www.financialexamhelp123.com/key-rate-duration/
+
+            #test some curve properties
+
+            c = Yields.Constant(0.04)
+
+            cn = ActuaryUtilities._krd_new_curve(KeyRatePar(5),c,1:10;shift=0.005)
+
+            @test Yields.par(cn,5) ≈ Yields.par(c,5) + 0.005
+            @test Yields.spot(cn,4) ≈ Yields.Periodic(0.04,1)            
+            @test Yields.spot(cn,5)             
+
+
+
+        end
     end
 
 end
