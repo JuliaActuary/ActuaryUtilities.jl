@@ -481,15 +481,18 @@ in practice, but that the zero curve produces more consistent results. Future ve
 
 References: 
 - [Quant Finance Stack Exchange: To compute key rate duration, shall I use par curve or zero curve?](https://quant.stackexchange.com/questions/33891/to-compute-key-rate-duration-shall-i-use-par-curve-or-zero-curve)
-
+- (Financial Exam Help 123](http://www.financialexamhelp123.com/key-rate-duration/)
 
 """
 function duration(keyrate::KeyRateDuration, curve, cashflows, timepoints, krd_points; shift = 0.0001)
-    new_curve = _krd_new_curve(keyrate,curve,krd_points)
+    curve_up = _krd_new_curve(keyrate,curve,krd_points;shift)
+    curve_down = _krd_new_curve(keyrate,curve,krd_points;shift=-shift)
     price = pv(curve, cashflows, timepoints)
-    price_shock = pv(new_curve, cashflows, timepoints)
+    price_up = pv(curve_up, cashflows, timepoints)
+    price_down = pv(curve_down, cashflows, timepoints)
+    
 
-    return -(price_shock - price) / (shift * price)
+    return (price_down - price_up) / (2*shift*price)
 
 end
 
