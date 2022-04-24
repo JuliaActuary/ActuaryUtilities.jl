@@ -484,14 +484,14 @@ end
 
 
 """
-    duration(keyrate::KeyRate,curve,cashflows; shift=0.01)    
-    duration(keyrate::KeyRate,curve,cashflows,timepoints; shift=0.01)
-    duration(keyrate::KeyRate,curve,cashflows,timepoints,krd_points; shift=0.01)
+    duration(keyrate::KeyRateDuration,curve,cashflows)    
+    duration(keyrate::KeyRateDuration,curve,cashflows,timepoints)
+    duration(keyrate::KeyRateDuration,curve,cashflows,timepoints,krd_points)
 
-Calculate the key rate duration by shifting the **zero** (not par) curve by the kwarg `shift` at the timepoint specified by a KeyRate(time).
+Calculate the key rate duration by shifting the **zero** (not par) curve by the kwarg `shift` at the timepoint specified by a KeyRateDuration(time).
 
 The approach is to carve up the curve into `krd_points` (default is the unit steps between `1` and  the last timepoint of the casfhlows). The 
-zero rate corresponding to the timepoint within the `KeyRate` is shifted by `shift` and a new curve is created from the new spot rates. This means that the 
+zero rate corresponding to the timepoint within the `KeyRateDuration` is shifted by `shift` (specified by the `KeyRateZero` or `KeyRatePar` constructors. A new curve is created from the shifted rates. This means that the 
 "width" of the shifted section is ± 1 time period, unless specific points are specified via `krd_points`.
 
 The `curve` may be any Yields.jl curve (e.g. does not have to be a curve constructed via `Yields.Zero(...)`).

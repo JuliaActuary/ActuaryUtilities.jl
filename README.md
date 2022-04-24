@@ -27,7 +27,7 @@ A collection of common functions/manipulations used in Actuarial Calculations.
 
 - `duration`:
   - Calculate the `Macaulay`, `Modified`, or `DV01` durations for a set of cashflows
-  - Calculate the `KeyRate(time)` duration (note: API may change for this in future)
+  - Calculate the `KeyRate(time)` (a.k.a. `KeyRateZero`)duration or `KeyRatePar(time)` duration
 - `convexity` for price sensitivity
 - Flexible interest rate options via the [`Yields.jl`](https://github.com/JuliaActuary/Yields.jl) package.
 - `internal_rate_of_return` or `irr` to calculate the IRR given cashflows (including at timepoints like Excel's `XIRR`)
