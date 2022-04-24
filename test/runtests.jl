@@ -309,22 +309,28 @@ end
     end
 
     @testset "Key Rate Durations" begin
+        default_shift = 0.001
+
+        @test KeyRate(5) == KeyRateZero(5)
+        @test KeyRate(5) == KeyRateZero(5,default_shift)
+        @test KeyRatePar(5) == KeyRatePar(5,default_shift)
+        
+        c = Yields.Constant(Yields.Periodic(0.04,2))
+
+        cp = ActuaryUtilities._krd_new_curve(KeyRatePar(5),c,1:10)
+        cz = ActuaryUtilities._krd_new_curve(KeyRateZero(5),c,1:10)
+
+        # test some relationships between par and zero curve
+        @test Yields.par(cp,5) ≈ Yields.par(c,5) + default_shift atol = 0.0002 # 0.001 is the default shift
+        @test Yields.par(cp,4) ≈ Yields.Periodic(0.04,2) atol = 0.0001           
+        @test Yields.zero(cp,5) > Yields.par(cp,5)
+        @test Yields.zero(cp,6) < Yields.par(cp,6)
 
         @testset "FEH123" begin
             # http://www.financialexamhelp123.com/key-rate-duration/
 
             #test some curve properties
 
-            c = Yields.Constant(Yields.Periodic(0.04,2))
-
-            # cn = curve, new
-            cn = ActuaryUtilities._krd_new_curve(KeyRatePar(5),c,1:10)
-
-            # test some relationships between par and zero curve
-            @test Yields.par(cn,5) ≈ Yields.par(c,5) + 0.001 atol = 0.0002 # 0.001 is the default shift
-            @test Yields.par(cn,4) ≈ Yields.Periodic(0.04,2) atol = 0.0001           
-            @test Yields.zero(cn,5) > Yields.par(cn,5)
-            @test Yields.zero(cn,6) < Yields.par(cn,6)
 
             bond = parbond(0.04,5)
 
@@ -333,8 +339,14 @@ end
             @test duration(KeyRatePar(3),c,bond.cfs,bond.times) ≈ 0.0 atol = 0.002
             @test duration(KeyRatePar(4),c,bond.cfs,bond.times) ≈ 0.0 atol = 0.002
             @test duration(KeyRatePar(5),c,bond.cfs,bond.times) ≈ 4.45 atol = 0.05
-
-
+            
+            bond =(times=[1,2,3,4,5],cfs=[0,0,0,0,100])
+            @test duration(KeyRateZero(1),c,bond.cfs,bond.times) ≈ 0.0 
+            @test duration(KeyRateZero(2),c,bond.cfs,bond.times) ≈ 0.0 
+            @test duration(KeyRateZero(3),c,bond.cfs,bond.times) ≈ 0.0 
+            @test duration(KeyRateZero(4),c,bond.cfs,bond.times) ≈ 0.0 
+            @test duration(KeyRateZero(5),c,bond.cfs,bond.times) ≈ duration(c,bond.cfs,bond.times) atol = 0.1
+            
 
 
 
