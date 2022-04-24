@@ -549,7 +549,7 @@ function _krd_new_curve(keyrate::KeyRateZero,curve,krd_points)
 
     zero_index = findfirst(==(keyrate.timepoint), curve_times)
 
-    target_rate = pars[zero_index]
+    target_rate = zeros[zero_index]
 
     zeros[zero_index] += Yields.Rate(shift,target_rate.compounding)
 
