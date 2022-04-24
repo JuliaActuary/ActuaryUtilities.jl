@@ -318,10 +318,10 @@ end
             c = Yields.Constant(Yields.Periodic(0.04,2))
 
             # cn = curve, new
-            cn = ActuaryUtilities._krd_new_curve(KeyRatePar(5),c,1:10;shift=0.005)
+            cn = ActuaryUtilities._krd_new_curve(KeyRatePar(5),c,1:10)
 
             # test some relationships between par and zero curve
-            @test Yields.par(cn,5) ≈ Yields.par(c,5) + 0.005 atol = 0.0002
+            @test Yields.par(cn,5) ≈ Yields.par(c,5) + 0.001 atol = 0.0002 # 0.001 is the default shift
             @test Yields.par(cn,4) ≈ Yields.Periodic(0.04,2) atol = 0.0001           
             @test Yields.zero(cn,5) > Yields.par(cn,5)
             @test Yields.zero(cn,6) < Yields.par(cn,6)

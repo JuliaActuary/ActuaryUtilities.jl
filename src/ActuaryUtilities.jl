@@ -152,7 +152,7 @@ export years_between, duration,
     pv, present_value, price, present_values,
     breakeven,moic,
     accum_offset,
-    Macaulay,Modified,DV01,KeyRatePar,KeyRateZero,duration, convexity,
+    Macaulay,Modified,DV01,KeyRatePar,KeyRateZero,KeyRate,duration, convexity,
     VaR,ValueAtRisk,CTE,ConditionalTailExpectation,ExpectedShortfall,
     eurocall, europut
 

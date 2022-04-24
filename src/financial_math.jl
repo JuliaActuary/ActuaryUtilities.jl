@@ -296,12 +296,53 @@ struct Modified <: Duration end
 struct DV01 <: Duration end
 
 abstract type KeyRateDuration <: Duration end
-struct KeyRatePar{T} <: KeyRateDuration 
+
+
+"""
+    KeyRatePar(timepoint,shift=0.001) <: KeyRateDuration
+
+Shift the par curve by the given amount at the given timepoint. Use in conjunction with `duration` to calculate the key rate duration. 
+
+Unlike other duration statistics which are computed using analytic derivatives, `KeyRateDuration`s are computed via a shift-and-compute the yield curve approach.
+
+`KeyRatePar` is more commonly reported (than [`KayRateZero`](@ref)) in the fixed income markets, even though the latter has more analytically attractive properties. See the discussion of KeyRateDuration in the Yields.jl docs.
+
+"""
+struct KeyRatePar{T,R} <: KeyRateDuration 
     timepoint::T
+    shift::R
+    KeyRatePar(timepoint, shift=.001) = new{typeof(timepoint),typeof(shift)}(timepoint,shift)
 end
-struct KeyRateZero{T} <: KeyRateDuration 
+
+"""
+    KeyRateZero(timepoint,shift=0.001) <: KeyRateDuration
+
+Shift the par curve by the given amount at the given timepoint. Use in conjunction with `duration` to calculate the key rate duration.
+
+Unlike other duration statistics which are computed using analytic derivatives, `KeyRateDuration` is computed via a shift-and-compute the yield curve approach.
+
+`KeyRateZero` is less commonly reported (than [`KayRatePar`](@ref)) in the fixed income markets, even though the latter has more analytically attractive properties. See the discussion of KeyRateDuration in the Yields.jl docs.
+"""
+struct KeyRateZero{T,R} <: KeyRateDuration 
     timepoint::T
+    shift::R
+    KeyRateZero(timepoint, shift=.001) = new{typeof(timepoint),typeof(shift)}(timepoint,shift)
 end
+
+"""
+    KeyRate(timepoints,shift=0.001)
+
+A convenience constructor for [`KeyRateZero`](@ref). 
+
+## Extended Help
+[`KeyRateZero`](@ref) is chosen as the default constructor because it has more attractive properties than [`KeyRatePar`](@ref):
+
+- rates after the key `timepoint` remain unaffected by the `shift`
+  - e.g. this causes a 6-year zero coupon bond would have a negative duration if the 5-year par rate was used
+
+
+"""
+KeyRate = KeyRateZero
 
 """ 
     duration(Macaulay(),interest_rate,cfs,times)
@@ -484,9 +525,10 @@ References:
 - (Financial Exam Help 123](http://www.financialexamhelp123.com/key-rate-duration/)
 
 """
-function duration(keyrate::KeyRateDuration, curve, cashflows, timepoints, krd_points; shift = 0.0001)
-    curve_up = _krd_new_curve(keyrate,curve,krd_points;shift)
-    curve_down = _krd_new_curve(keyrate,curve,krd_points;shift=-shift)
+function duration(keyrate::KeyRateDuration, curve, cashflows, timepoints, krd_points)
+    shift = keyrate.shift
+    curve_up = _krd_new_curve(keyrate,curve,krd_points)
+    curve_down = _krd_new_curve(opposite(keyrate),curve,krd_points)
     price = pv(curve, cashflows, timepoints)
     price_up = pv(curve_up, cashflows, timepoints)
     price_down = pv(curve_down, cashflows, timepoints)
@@ -496,8 +538,13 @@ function duration(keyrate::KeyRateDuration, curve, cashflows, timepoints, krd_po
 
 end
 
-function _krd_new_curve(keyrate::KeyRateZero,curve,krd_points;shift)
+opposite(kr::KeyRateZero) = KeyRateZero(kr.timepoint,-kr.shift)
+opposite(kr::KeyRatePar) = KeyRatePar(kr.timepoint,-kr.shift)
+
+function _krd_new_curve(keyrate::KeyRateZero,curve,krd_points)
     curve_times = krd_points
+    shift = keyrate.shift
+
     zeros = Yields.zero.(curve, curve_times)
 
     zero_index = findfirst(==(keyrate.timepoint), curve_times)
@@ -511,8 +558,10 @@ function _krd_new_curve(keyrate::KeyRateZero,curve,krd_points;shift)
     return new_curve
 end
 
-function _krd_new_curve(keyrate::KeyRatePar,curve,krd_points;shift)
+function _krd_new_curve(keyrate::KeyRatePar,curve,krd_points)
     curve_times = krd_points
+    shift = keyrate.shift
+
     pars = Yields.par.(curve, curve_times)
 
     zero_index = findfirst(==(keyrate.timepoint), curve_times)
@@ -525,16 +574,16 @@ function _krd_new_curve(keyrate::KeyRatePar,curve,krd_points;shift)
     return new_curve
 end
 
-function duration(keyrate::KeyRateDuration, curve, cashflows, timepoints; shift = 0.0001)
+function duration(keyrate::KeyRateDuration, curve, cashflows, timepoints)
     krd_points = 1:maximum(timepoints)
-    return duration(keyrate, curve, cashflows, timepoints, krd_points; shift)
+    return duration(keyrate, curve, cashflows, timepoints, krd_points)
 
 end
 
-function duration(keyrate::KeyRateDuration, curve, cashflows; shift = 0.0001)
+function duration(keyrate::KeyRateDuration, curve, cashflows)
     timepoints = eachindex(cashflows)
     krd_points = 1:maximum(timepoints)
-    return duration(keyrate, curve, cashflows, timepoints, krd_points; shift)
+    return duration(keyrate, curve, cashflows, timepoints, krd_points)
 
 end
 
