@@ -295,6 +295,55 @@ struct Macaulay <: Duration end
 struct Modified <: Duration end
 struct DV01 <: Duration end
 
+abstract type KeyRateDuration <: Duration end
+
+
+"""
+    KeyRatePar(timepoint,shift=0.001) <: KeyRateDuration
+
+Shift the par curve by the given amount at the given timepoint. Use in conjunction with `duration` to calculate the key rate duration. 
+
+Unlike other duration statistics which are computed using analytic derivatives, `KeyRateDuration`s are computed via a shift-and-compute the yield curve approach.
+
+`KeyRatePar` is more commonly reported (than [`KayRateZero`](@ref)) in the fixed income markets, even though the latter has more analytically attractive properties. See the discussion of KeyRateDuration in the Yields.jl docs.
+
+"""
+struct KeyRatePar{T,R} <: KeyRateDuration 
+    timepoint::T
+    shift::R
+    KeyRatePar(timepoint, shift=.001) = new{typeof(timepoint),typeof(shift)}(timepoint,shift)
+end
+
+"""
+    KeyRateZero(timepoint,shift=0.001) <: KeyRateDuration
+
+Shift the par curve by the given amount at the given timepoint. Use in conjunction with `duration` to calculate the key rate duration.
+
+Unlike other duration statistics which are computed using analytic derivatives, `KeyRateDuration` is computed via a shift-and-compute the yield curve approach.
+
+`KeyRateZero` is less commonly reported (than [`KayRatePar`](@ref)) in the fixed income markets, even though the latter has more analytically attractive properties. See the discussion of KeyRateDuration in the Yields.jl docs.
+"""
+struct KeyRateZero{T,R} <: KeyRateDuration 
+    timepoint::T
+    shift::R
+    KeyRateZero(timepoint, shift=.001) = new{typeof(timepoint),typeof(shift)}(timepoint,shift)
+end
+
+"""
+    KeyRate(timepoints,shift=0.001)
+
+A convenience constructor for [`KeyRateZero`](@ref). 
+
+## Extended Help
+[`KeyRateZero`](@ref) is chosen as the default constructor because it has more attractive properties than [`KeyRatePar`](@ref):
+
+- rates after the key `timepoint` remain unaffected by the `shift`
+  - e.g. this causes a 6-year zero coupon bond would have a negative duration if the 5-year par rate was used
+
+
+"""
+KeyRate = KeyRateZero
+
 """ 
     duration(Macaulay(),interest_rate,cfs,times)
     duration(Modified(),interest_rate,cfs,times)
@@ -431,6 +480,111 @@ function convexity(yield, valuation_function)
     v(x) = abs(valuation_function(yield + x[1]))
     ∂²P = ForwardDiff.hessian(v, [0.0])
     return ∂²P[1] / v([0.0])  
+end
+
+
+"""
+    duration(keyrate::KeyRateDuration,curve,cashflows)    
+    duration(keyrate::KeyRateDuration,curve,cashflows,timepoints)
+    duration(keyrate::KeyRateDuration,curve,cashflows,timepoints,krd_points)
+
+Calculate the key rate duration by shifting the **zero** (not par) curve by the kwarg `shift` at the timepoint specified by a KeyRateDuration(time).
+
+The approach is to carve up the curve into `krd_points` (default is the unit steps between `1` and  the last timepoint of the casfhlows). The 
+zero rate corresponding to the timepoint within the `KeyRateDuration` is shifted by `shift` (specified by the `KeyRateZero` or `KeyRatePar` constructors. A new curve is created from the shifted rates. This means that the 
+"width" of the shifted section is ± 1 time period, unless specific points are specified via `krd_points`.
+
+The `curve` may be any Yields.jl curve (e.g. does not have to be a curve constructed via `Yields.Zero(...)`).
+
+!!! Experimental: Due to the paucity of examples in the literature, this feature does not have unit tests like the rest of JuliaActuary functionality. Additionally, the API may change in a future major/minor version update.
+
+# Examples
+
+
+```julia-repl
+julia> riskfree_maturities = [0.5, 1.0, 1.5, 2.0];
+
+julia> riskfree    = [0.05, 0.058, 0.064,0.068];
+
+julia> rf_curve = Yields.Zero(riskfree,riskfree_maturities);
+
+julia> cfs = [10,10,10,10,10];
+
+julia> duration(KeyRate(1),rf_curve,cfs)
+8.932800152336995
+
+```
+
+# Extended Help
+
+Key Rate Duration is not a well specified topic in the literature and in practice. The reference below suggest that shocking the par curve is more common 
+in practice, but that the zero curve produces more consistent results. Future versions may support shifting the par curve.
+
+References: 
+- [Quant Finance Stack Exchange: To compute key rate duration, shall I use par curve or zero curve?](https://quant.stackexchange.com/questions/33891/to-compute-key-rate-duration-shall-i-use-par-curve-or-zero-curve)
+- (Financial Exam Help 123](http://www.financialexamhelp123.com/key-rate-duration/)
+
+"""
+function duration(keyrate::KeyRateDuration, curve, cashflows, timepoints, krd_points)
+    shift = keyrate.shift
+    curve_up = _krd_new_curve(keyrate,curve,krd_points)
+    curve_down = _krd_new_curve(opposite(keyrate),curve,krd_points)
+    price = pv(curve, cashflows, timepoints)
+    price_up = pv(curve_up, cashflows, timepoints)
+    price_down = pv(curve_down, cashflows, timepoints)
+    
+
+    return (price_down - price_up) / (2*shift*price)
+
+end
+
+opposite(kr::KeyRateZero) = KeyRateZero(kr.timepoint,-kr.shift)
+opposite(kr::KeyRatePar) = KeyRatePar(kr.timepoint,-kr.shift)
+
+function _krd_new_curve(keyrate::KeyRateZero,curve,krd_points)
+    curve_times = krd_points
+    shift = keyrate.shift
+
+    zeros = Yields.zero.(curve, curve_times)
+
+    zero_index = findfirst(==(keyrate.timepoint), curve_times)
+
+    target_rate = zeros[zero_index]
+
+    zeros[zero_index] += Yields.Rate(shift,target_rate.compounding)
+
+    new_curve = Yields.Zero(zeros, curve_times)
+
+    return new_curve
+end
+
+function _krd_new_curve(keyrate::KeyRatePar,curve,krd_points)
+    curve_times = krd_points
+    shift = keyrate.shift
+
+    pars = Yields.par.(curve, curve_times)
+
+    zero_index = findfirst(==(keyrate.timepoint), curve_times)
+
+    target_rate = pars[zero_index]
+    pars[zero_index] += Yields.Rate(shift,target_rate.compounding)
+
+    new_curve = Yields.Par(pars, curve_times)
+
+    return new_curve
+end
+
+function duration(keyrate::KeyRateDuration, curve, cashflows, timepoints)
+    krd_points = 1:maximum(timepoints)
+    return duration(keyrate, curve, cashflows, timepoints, krd_points)
+
+end
+
+function duration(keyrate::KeyRateDuration, curve, cashflows)
+    timepoints = eachindex(cashflows)
+    krd_points = 1:maximum(timepoints)
+    return duration(keyrate, curve, cashflows, timepoints, krd_points)
+
 end
 
 """
