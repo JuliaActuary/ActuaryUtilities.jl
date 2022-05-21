@@ -20,10 +20,7 @@ Will try to return a root within the range [-2,2]. If the fast solver does not f
 The solution returned will be in the range [-2,2], but may not be the one nearest zero. For a slightly slower, but more robust version, call `ActuaryUtilities.irr_robust(cashflows,timepoints)` directly.
 """
 function internal_rate_of_return(cashflows)
-    
-
     return internal_rate_of_return(cashflows, 0:length(cashflows)-1)
-    
 end
 
 function internal_rate_of_return(cashflows,times)
@@ -129,7 +126,7 @@ function present_value(i, x)
     v_factor = discount(i,0,1)
     pv = 0.0
 
-    for (t,cf) in zip(1:length(x),x)
+    for (t,cf) in enumerate(x)
         v *= v_factor
         pv += v * cf
     end
@@ -143,7 +140,7 @@ end
 # Interest Given is an array, assume forwards.
 function present_value(i::AbstractArray, v)
     yc = Yields.Forward(i)
-    return sum(discount(yc, t) * cf for (t,cf) in zip(1:length(v),v))
+    return sum(discount(yc, t) * cf for (t,cf) in enumerate(v))
 end
 
 # Interest Given is an array, assume forwards.
@@ -601,16 +598,7 @@ julia> moic([-10,20,30])
 
 """
 function moic(cfs::T) where {T<:AbstractArray}
-    invested = zero(eltype(cfs))
-    returned = zero(eltype(cfs))
-    for i = 1:length(cfs)
-        @inbounds cf = cfs[i]
-        if cf > 0
-            returned += cf
-        else
-            invested += -cf
-        end
-    end
-
+    returned = sum(cf for cf in cfs if cf > 0)
+    invested = -sum(cf for cf in cfs if cf < 0)
     return returned / invested
 end
