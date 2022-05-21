@@ -335,9 +335,9 @@ end
             bond = parbond(0.04,5)
 
             @test duration(KeyRatePar(1),c,bond.cfs,bond.times) ≈ 0.0 atol = 0.01
-            @test duration(KeyRatePar(2),c,bond.cfs,bond.times) ≈ 0.0 atol = 0.002
-            @test duration(KeyRatePar(3),c,bond.cfs,bond.times) ≈ 0.0 atol = 0.002
-            @test duration(KeyRatePar(4),c,bond.cfs,bond.times) ≈ 0.0 atol = 0.002
+            @test duration(KeyRatePar(2),c,bond.cfs,bond.times) ≈ 0.0 atol = 0.01
+            @test duration(KeyRatePar(3),c,bond.cfs,bond.times) ≈ 0.0 atol = 0.01
+            @test duration(KeyRatePar(4),c,bond.cfs,bond.times) ≈ 0.0 atol = 0.01
             @test duration(KeyRatePar(5),c,bond.cfs,bond.times) ≈ 4.45 atol = 0.05
             
             bond =(times=[1,2,3,4,5],cfs=[0,0,0,0,100])
