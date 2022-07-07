@@ -229,6 +229,15 @@ end
 
 
 @testset "duration and convexity" begin
+
+    # per issue #74
+    @testset "generators" begin
+        g = (10 for t in 1:10)
+        v = collect(g)
+        i = Yields.Constant(0.04)
+        @test duration(0.04,g) ≈ duration(0.04,v)
+        @test duration(i,g) ≈ duration(i,v)
+    end
     
     @testset "wikipedia example" begin
         times = [0.5,1,1.5,2]
