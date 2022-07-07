@@ -384,20 +384,15 @@ julia> convexity(0.03,my_lump_sum_value)
 ```
 """
 function duration(::Macaulay, yield, cfs, times)
-    return sum(times .* price.(yield, vec(cfs), times) / price(yield, vec(cfs), times))
+    return sum(times .* price.(yield, cfs, times) / price(yield, cfs, times))
 end
 
 function duration(::Modified, yield, cfs, times)
-    D(i) = price(i, vec(cfs), times)
+    D(i) = price(i, cfs, times)
     return duration(yield, D)
 end
 
-function duration(yield, valuation_function)
-    D(i) = log(valuation_function(i + yield))
-    δV =  - ForwardDiff.derivative(D, 0.0)
-end
-
-function duration(yield::Y, valuation_function) where {Y <: Yields.AbstractYield}
+function duration(yield::Y, valuation_function::T) where {Y<:Yields.AbstractYield,T<:Function}
     D(i) = log(valuation_function(i + yield))
     δV =  - ForwardDiff.derivative(D, 0.0)
 end
@@ -405,9 +400,9 @@ end
 function duration(yield, cfs, times)
     return duration(Modified(), yield, vec(cfs), times)
 end
-function duration(yield::Y, cfs::A) where {Y <: Yields.AbstractYield,A <: AbstractArray}
+function duration(yield::Y, cfs) where {Y <: Yields.AbstractYield}
     times = 1:length(cfs)
-    return duration(Modified(), yield, vec(cfs), times)
+    return duration(Modified(), yield, cfs, times)
 end
 
 function duration(yield::R, cfs) where {R <: Real}
