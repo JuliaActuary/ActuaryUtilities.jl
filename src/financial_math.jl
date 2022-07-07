@@ -397,11 +397,6 @@ function duration(yield::Y, valuation_function::T) where {Y<:Yields.AbstractYiel
     δV =  - ForwardDiff.derivative(D, 0.0)
 end
 
-# function duration(yield::Y, valuation_function) where {Y <: Yields.AbstractYield}
-#     D(i) = log(valuation_function(i + yield))
-#     δV =  - ForwardDiff.derivative(D, 0.0)
-# end
-
 function duration(yield, cfs, times)
     return duration(Modified(), yield, vec(cfs), times)
 end
