@@ -460,15 +460,15 @@ julia> convexity(0.03,my_lump_sum_value)
 
 """
 function convexity(yield, cfs, times)
-    return convexity(yield, i -> price(i, vec(cfs), times))
+    return convexity(yield, i -> price(i, cfs, times))
 end
 
-function convexity(yield, cfs::A) where {A <: AbstractArray}
+function convexity(yield,cfs)
     times = 1:length(cfs)
-    return convexity(yield, i -> price(i, vec(cfs), times))
+    return convexity(yield, i -> price(i, cfs, times))
 end
 
-function convexity(yield, valuation_function)
+function convexity(yield, valuation_function::T) where {T<:Function}
     v(x) = abs(valuation_function(yield + x[1]))
     ∂²P = ForwardDiff.hessian(v, [0.0])
     return ∂²P[1] / v([0.0])  
