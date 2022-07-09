@@ -237,6 +237,7 @@ end
         i = Yields.Constant(0.04)
         @test duration(0.04,g) ≈ duration(0.04,v)
         @test duration(i,g) ≈ duration(i,v)
+        @test convexity(0.04,g) ≈ convexity(0.04,v)
     end
     
     @testset "wikipedia example" begin
