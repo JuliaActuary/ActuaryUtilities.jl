@@ -10,6 +10,7 @@ import StatsBase
 include("financial_math.jl")
 include("risk_measures.jl")
 include("derivatives.jl")
+include("cashflows.jl")
 
 # https://timholy.github.io/SnoopCompile.jl/stable/snoopi_deep_parcel/
 if Base.VERSION >= v"1.4.2"
@@ -154,6 +155,7 @@ export years_between, duration,
     accum_offset,
     Macaulay,Modified,DV01,KeyRatePar,KeyRateZero,KeyRate,duration, convexity,
     VaR,ValueAtRisk,CTE,ConditionalTailExpectation,ExpectedShortfall,
-    eurocall, europut
+    eurocall, europut,
+    Cashflow
 
 end # module
