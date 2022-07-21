@@ -250,6 +250,20 @@ end
         @test duration(0.04, cfs, times) ≈ 1.777570320376649 / (1 + 0.04)
         @test duration(DV01(), 0.04, cfs, times) ≈ 1.777570320376649 / (1 + 0.04) * V / 100
         
+        # test with a Rate
+        r = Yields.Periodic(0.04,1)
+        @test duration(Macaulay(), r, cfs, times) ≈ 1.777570320376649
+        @test duration(Modified(), r, cfs, times) ≈ 1.777570320376649 / (1 + 0.04)
+        @test duration(r, cfs, times) ≈ 1.777570320376649 / (1 + 0.04)
+        @test duration(DV01(), r, cfs, times) ≈ 1.777570320376649 / (1 + 0.04) * V / 100
+        
+        #test without times
+        r = Yields.Periodic(0.04,1)
+        @test duration(Macaulay(), r, cfs) ≈ duration(Macaulay(), r, cfs, 1:4)
+        @test duration(Modified(), r, cfs) ≈ duration(Modified(), r, cfs,1:4)
+        @test duration(r, cfs) ≈ duration(r, cfs,1:4)
+        @test duration(DV01(), r, cfs) ≈ duration(DV01(), r, cfs,1:4)
+
         @test duration(Yields.Constant(0.04), cfs, times) ≈ 1.777570320376649 / (1 + 0.04)
         @test duration(Yields.Constant(0.04), -1 .* cfs, times) ≈ 1.777570320376649 / (1 + 0.04) atol=0.00001
         @test duration(Yields.Forward([0.04,0.04]), cfs, times) ≈ 1.777570320376649 / (1 + 0.04) atol=0.00001
