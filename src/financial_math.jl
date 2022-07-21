@@ -417,7 +417,7 @@ function duration(d::Duration, yield, cfs)
     return duration(d, yield, vec(cfs), times)
 end
 
-function duration(::DV01, yield, valuation_function)
+function duration(::DV01, yield, valuation_function::Y) where {Y<:Function}
     return duration(yield, valuation_function) * valuation_function(yield) / 100
 end
 
