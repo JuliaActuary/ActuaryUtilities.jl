@@ -379,5 +379,23 @@ end
 
 end
 
+@testset "spread" begin
+    cfs = fill(10,10)
+    @test spread(0.04,0.05,cfs) ≈ Yields.Periodic(0.01,1)
+    @test spread(Yields.Continuous(0.04),Yields.Continuous(0.05),cfs) ≈ Yields.Periodic(1)(Yields.Continuous(0.05)) - Yields.Periodic(1)(Yields.Continuous(0.04))
+
+      # 2021-03-31 rates from Treasury.gov
+    rates =[0.01, 0.01, 0.03, 0.05, 0.07, 0.16, 0.35, 0.92, 1.40, 1.74, 2.31, 2.41] ./ 100
+    mats = [1/12, 2/12, 3/12, 6/12, 1, 2, 3, 5, 7, 10, 20, 30]
+  
+    y = Yields.CMT(rates,mats)
+
+    y2 = y + Yields.Periodic(0.01,1)
+
+    s = spread(y,y2,cfs)
+
+    @test s ≈ Yields.Periodic(0.01,1) atol=0.002
+end
+
 
 include("run_doctests.jl")
