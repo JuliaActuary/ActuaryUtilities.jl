@@ -148,7 +148,7 @@ end
   
 
 export years_between, duration,
-    irr, internal_rate_of_return, 
+    irr, internal_rate_of_return, spread,
     pv, present_value, price, present_values,
     breakeven,moic,
     accum_offset,

@@ -579,6 +579,21 @@ function duration(keyrate::KeyRateDuration, curve, cashflows)
 
 end
 
+""" 
+    spread(curve1,curve2,cashflows)
+
+Return the solved-for constant spread to add to `curve1` in order to equate the discounted `cashflows` with `curve2`
+"""
+function spread(curve1,curve2,cashflows,times=eachindex(cashflows))
+    pv1 = pv(curve1,cashflows,times)
+    pv2 = pv(curve2,cashflows,times)
+    irr1 = irr([-pv1;cashflows], [0.;times])
+    irr2 = irr([-pv2;cashflows], [0.;times])
+
+    return irr2 - irr1
+
+end
+
 """
     moic(cashflows<:AbstractArray)
 
