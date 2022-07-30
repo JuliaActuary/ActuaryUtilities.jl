@@ -6,16 +6,12 @@ using QuadGK
 using Yields
 import Roots
 import StatsBase
+using SnoopPrecompile
 
 include("financial_math.jl")
 include("risk_measures.jl")
 include("derivatives.jl")
 
-# https://timholy.github.io/SnoopCompile.jl/stable/snoopi_deep_parcel/
-if Base.VERSION >= v"1.4.2"
-    include("precompile.jl")
-    _precompile_()
-end
 
 
 """
@@ -146,6 +142,8 @@ function accum_offset(x; op=*,init=1.0)
     return xnew
 end
   
+include("precompile.jl")
+
 
 export years_between, duration,
     irr, internal_rate_of_return, spread,
