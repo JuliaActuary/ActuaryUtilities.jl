@@ -31,7 +31,7 @@ function internal_rate_of_return(cashflows,times)
     v = try 
         return irr_newton(cashflows,times)
     catch e
-        if isa(e,Roots.ConvergenceFailed) || sprint(showerror, e) =="No convergence"
+        if isa(e,ErrorException) 
             return irr_robust(cashflows,times)
         else
             throw(e)
@@ -62,15 +62,28 @@ function irr_robust(cashflows, times)
 end
 
 irr_newton(cashflows) = irr_newton(cashflows,0:length(cashflows)-1)
+function __irr_pv(r,cfs,times) 
+    s = zero(eltype(cfs))
+    s′ = zero(eltype(cfs))
+    for (cf,t) in zip(cfs,times)
+        u = cf * exp(-r*t)
+        s  = s + u
+        s′ = s′ - t * u
+    end
+    (s,s/s′)
+end
 
-function irr_newton(cashflows, times)
+function irr_newton(cashflows, times;tol=1e-8, maxIter = 20)
     # use newton's method with hand-coded derivative
-    f(r) =  sum(cf * exp(-r*t) for (cf,t) in zip(cashflows,times))
-    f′(r) = sum(-t*cf * exp(-r*t) for (cf,t) in zip(cashflows,times) if t > 0)
-    # r = Roots.solve(Roots.ZeroProblem((f,f′), 0.0), Roots.Newton())
-    r = Roots.newton(x->(f(x),f(x)/f′(x)),0.0)
-    return Yields.Periodic(exp(r)-1,1)
-
+    f(r) = __irr_pv(r,cashflows,times)
+    x = 0.0
+    fx, rx = f(x)
+    for iter in 1:maxIter
+        abs(fx) ≤ tol && return Yields.Periodic(exp(x)-1,1)
+        x = x  - rx   # Iteration
+        fx,rx = f(x)           # Precompute f(x)
+    end
+    throw(ErrorException("Failed to converge after $maxIter iterations"))
 end
 
 """
