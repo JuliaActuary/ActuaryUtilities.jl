@@ -126,7 +126,13 @@ present_value(0.1, [10,20],times)
 
 """
 function present_value(yc::T, cashflows, timepoints) where {T <: Yields.AbstractYield}
-    sum(discount(yc,t) * cf for (t,cf) in zip(timepoints, cashflows))
+    s = 0.0
+    for (cf,t) in zip(cashflows,timepoints)
+        v = discount(yc,t)
+        @muladd s = s +  v * cf
+    end
+    # sum(discount(yc,t) * cf for (t,cf) in zip(timepoints, cashflows))
+    s
 end
 
 function present_value(yc::T, cashflows) where {T <: Yields.AbstractYield}
@@ -140,8 +146,8 @@ function present_value(i, x)
     pv = 0.0
 
     for (t,cf) in enumerate(x)
-        v *= v_factor
-        pv += v * cf
+        v = v * v_factor
+        @muladd pv = pv + v * cf
     end
     return pv 
 end

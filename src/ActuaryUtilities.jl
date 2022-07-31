@@ -3,6 +3,7 @@ module ActuaryUtilities
 using Dates
 using ForwardDiff
 using QuadGK
+using MuladdMacro
 using Yields
 import Roots
 import StatsBase
