@@ -3,6 +3,8 @@ struct Cashflow{A,T}
     time::T
 end
 
+#TODO Define Cashflow on a vector/iterable?
+
 function present_value(yield,cf::Cashflow)
     return discount(yield,cf.time) * cf.amount
 end

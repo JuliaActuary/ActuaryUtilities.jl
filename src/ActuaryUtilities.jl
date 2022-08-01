@@ -7,10 +7,10 @@ using Yields
 import Roots
 import StatsBase
 
+include("cashflows.jl")
 include("financial_math.jl")
 include("risk_measures.jl")
 include("derivatives.jl")
-include("cashflows.jl")
 
 # https://timholy.github.io/SnoopCompile.jl/stable/snoopi_deep_parcel/
 if Base.VERSION >= v"1.4.2"

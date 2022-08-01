@@ -22,6 +22,9 @@ The solution returned will be in the range [-2,2], but may not be the one neares
 function internal_rate_of_return(cashflows)
     return internal_rate_of_return(cashflows, 0:length(cashflows)-1)
 end
+function internal_rate_of_return(cashflows::Vector{T}) where {T<:Cashflow}
+    return internal_rate_of_return((c.amount for c in cashflows), (c.time for c in cashflows))
+end
 
 function internal_rate_of_return(cashflows,times)
     # first try to quickly solve with newton's method, otherwise 
@@ -258,6 +261,9 @@ end
 
 function breakeven(i, cashflows::Vector)
     return breakeven(i, cashflows, [t for t in 0:length(cashflows) - 1])
+end
+function breakeven(i, cashflows::Vector{T}) where {T <: Cashflow}
+    return breakeven(i, [c.amount for c in cashflows], [c.time for c in cashflows])
 end
 
 abstract type Duration end
@@ -571,8 +577,13 @@ julia> moic([-10,20,30])
 ```
 
 """
-function moic(cfs::T) where {T<:AbstractArray}
+function moic(cfs)
     returned = sum(cf for cf in cfs if cf > 0)
     invested = -sum(cf for cf in cfs if cf < 0)
+    return returned / invested
+end
+function moic(cfs::Vector{T}) where {T<:Cashflow}
+    returned = sum(cf.amount for cf in cfs if cf.amount > 0)
+    invested = -sum(cf.amount for cf in cfs if cf.amount < 0)
     return returned / invested
 end

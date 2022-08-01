@@ -51,8 +51,10 @@ end
 
     @testset "pv" begin
         cf = [100, 100]
+        CF = Cashflow.(cf,[1,2])
         
         @test pv(0.05, cf) ≈ cf[1] / 1.05 + cf[2] / 1.05^2
+        @test pv(0.05, CF) ≈ pv(0.05, cf)
         @test price(0.05, cf) ≈ pv(0.05, cf)
 
         # this vector came from Numpy Financial's test suite with target of 122.89, but that assumes payments are begin of period
@@ -103,6 +105,7 @@ end
     @testset "irr" begin
 
         v = [-70000,12000,15000,18000,21000,26000]
+        v_cf = Cashflow.(v,0:5)
         
         # per Excel (example comes from Excel help text)
         @test isapprox(irr(v[1:2]), p(-0.8285714285714), atol = 0.001)
@@ -111,7 +114,7 @@ end
         @test isapprox(irr(v[1:4]), p(-0.1821374641455), atol = 0.001)
         @test isapprox(irr(v[1:5]), p(-0.0212448482734), atol = 0.001)
         @test isapprox(irr(v[1:6]),  p(0.0866309480365), atol = 0.001)
-
+        @test irr(v) ≈ irr(v_cf)
         @test_throws MethodError irr("hello") 
 
 
@@ -181,6 +184,7 @@ end
 
     @testset "basic" begin
         @test breakeven(0.10, [-10,1,2,3,4,8]) == 5
+        @test breakeven(0.10, Cashflow.([-10,1,2,3,4,8],0:5)) == 5
         @test breakeven(0.10, [-10,15,2,3,4,8]) == 1
         @test breakeven(0.10, [-10,15,2,3,4,8]) == 1
         @test breakeven(0.10, [10,15,2,3,4,8]) == 0
@@ -211,6 +215,8 @@ end
     ex1 = [-100;[t == 200 ? 100 * 1.067^t : 0 for t in 1:200]]
     @test moic(ex1) ≈ 429421.59914697794
     
+    ex1_cf  = Cashflow.(ex1, 0:200)
+    @test moic(ex1_cf) ≈ 429421.59914697794
 
     ex2 = ex1[end] *= 0.5
     @test moic(ex1) ≈ 429421.59914697794 * 0.5
@@ -227,9 +233,13 @@ end
         V = present_value(0.04, cfs, times)
 
         @test duration(Macaulay(), 0.04, cfs, times) ≈ 1.777570320376649
+        @test duration(Macaulay(), 0.04, Cashflow.(cfs, times)) ≈ 1.777570320376649
+
         @test duration(Modified(), 0.04, cfs, times) ≈ 1.777570320376649 / (1 + 0.04)
+        @test duration(Modified(), 0.04, Cashflow.(cfs, times)) ≈ 1.777570320376649 / (1 + 0.04)
         @test duration(0.04, cfs, times) ≈ 1.777570320376649 / (1 + 0.04)
         @test duration(DV01(), 0.04, cfs, times) ≈ 1.777570320376649 / (1 + 0.04) * V / 100
+        @test duration(DV01(), 0.04, Cashflow.(cfs, times)) ≈ 1.777570320376649 / (1 + 0.04) * V / 100
         
         @test duration(Yields.Constant(0.04), cfs, times) ≈ 1.777570320376649 / (1 + 0.04)
         @test duration(Yields.Constant(0.04), -1 .* cfs, times) ≈ 1.777570320376649 / (1 + 0.04) atol=0.00001
@@ -262,6 +272,7 @@ end
         @test isapprox(present_value(0.04, cfs, times), 821927.11, atol = 1e-2)
         # @test isapprox(duration(0.04,cfs,times),4.76190476,atol=1e-6)
         @test isapprox(convexity(0.04, cfs, times), 27.7366864, atol = 1e-6)
+        @test isapprox(convexity(0.04, Cashflow.(cfs, times)), 27.7366864, atol = 1e-6)
         @test isapprox(convexity(0.04, cfs), 27.7366864, atol = 1e-6)
         # the same, but with a functional argument
         value(i) = present_value(i, cfs, times)
@@ -330,6 +341,7 @@ end
             @test duration(KeyRatePar(3),c,bond.cfs,bond.times) ≈ 0.0 atol = 0.01
             @test duration(KeyRatePar(4),c,bond.cfs,bond.times) ≈ 0.0 atol = 0.01
             @test duration(KeyRatePar(5),c,bond.cfs,bond.times) ≈ 4.45 atol = 0.05
+            @test duration(KeyRatePar(5),c,Cashflow.(bond.cfs,bond.times)) ≈ 4.45 atol = 0.05
             
             bond =(times=[1,2,3,4,5],cfs=[0,0,0,0,100])
             @test duration(KeyRateZero(1),c,bond.cfs,bond.times) ≈ 0.0 
