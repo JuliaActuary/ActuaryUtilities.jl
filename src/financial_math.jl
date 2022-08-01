@@ -112,41 +112,15 @@ present_value(0.1, [10,20],times)
 ```
 
 """
-function present_value(yc::T, cashflows, timepoints) where {T <: Yields.AbstractYield}
-    sum(discount(yc,t) * cf for (t,cf) in zip(timepoints, cashflows))
+function present_value(yield,cf::T,time::U) where {T<:Real,U<:Real}
+    return discount(yield,time) * cf
 end
 
-function present_value(yc::T, cashflows) where {T <: Yields.AbstractYield}
-    present_value(yc,cashflows,1:length(cashflows))
+function present_value(yield,cfs)
+    return sum(present_value(yield,cf,t) for (t,cf) in pairs(IndexLinear(),cfs))
 end
-
-function present_value(i, x)
-    
-    v = 1.0
-    v_factor = discount(i,0,1)
-    pv = 0.0
-
-    for (t,cf) in enumerate(x)
-        v *= v_factor
-        pv += v * cf
-    end
-    return pv 
-end
-
-function present_value(i, v, times)
-    return present_value(Yields.Constant(i), v, times)
-end
-
-# Interest Given is an array, assume forwards.
-function present_value(i::AbstractArray, v)
-    yc = Yields.Forward(i)
-    return sum(discount(yc, t) * cf for (t,cf) in enumerate(v))
-end
-
-# Interest Given is an array, assume forwards.
-function present_value(i::AbstractArray, v, times)
-    yc = Yields.Forward(i, times)
-    return sum(discount(yc, t) * cf for (cf, t) in zip(v,times))
+function present_value(yield,cfs,times)
+    return sum(present_value(yield,cf,t) for (t,cf) in zip(times,cfs))
 end
 
 """
@@ -406,7 +380,7 @@ function duration(yield, cfs, times)
     return duration(Modified(), yield, vec(cfs), times)
 end
 function duration(yield::Y, cfs::A) where {Y <: Yields.AbstractYield,A <: AbstractArray}
-    times = 1:length(cfs)
+    times = eachindex(cfs)
     return duration(Modified(), yield, vec(cfs), times)
 end
 
@@ -418,7 +392,7 @@ function duration(::DV01, yield, cfs, times)
     return duration(DV01(), yield, i -> price(i, vec(cfs), times))
 end
 function duration(d::Duration, yield, cfs)
-    times = 1:length(cfs)
+    times = eachindex(cfs)
     return duration(d, yield, vec(cfs), times)
 end
 
