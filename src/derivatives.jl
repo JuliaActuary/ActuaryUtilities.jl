@@ -38,6 +38,7 @@ This is the same as the formulation presented in the [dividend extension of the 
 
 """
 function eurocall(; S = 1.0, K = 1.0, τ = 1, r, σ, q = 0.0)
+    iszero(τ) && return max(zero(S),S-K)
     d₁ = d1(S, K, τ, r, σ, q)
     d₂ = d2(S, K, τ, r, σ, q)
     return (N(d₁) * S * exp(τ * (r - q)) - N(d₂) * K) * exp(-r * τ)
@@ -72,6 +73,7 @@ This is the same as the formulation presented in the [dividend extension of the 
 
 """
 function europut(; S = 1.0, K = 1.0, τ = 1, r, σ, q = 0.0)
+    iszero(τ) && return max(zero(S),K-S)
     d₁ = d1(S, K, τ, r, σ, q)
     d₂ = d2(S, K, τ, r, σ, q)
     return (N(-d₂) * K - N(-d₁) * S * exp(τ * (r - q))) * exp(-r * τ)

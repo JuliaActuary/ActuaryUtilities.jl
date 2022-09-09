@@ -19,6 +19,14 @@
         @test eurocall(; params...) ≈ 0.49494 atol = 1e-5
         @test europut(; params...) ≈ 0.00011 atol = 1e-5
 
+        params = (S = 1.0, K = 0.5, τ = 0, r = 0.05, σ = 0.25, q = 0.03)
+        @test eurocall(; params...) ≈ 0.5 atol = 1e-5
+        @test europut(; params...) ≈ 0.0 atol = 1e-5
+
+        params = (S = 1.0, K = 1.5, τ = 0, r = 0.05, σ = 0.25, q = 0.03)
+        @test eurocall(; params...) ≈ 0.0 atol = 1e-5
+        @test europut(; params...) ≈ 0.5 atol = 1e-5
+        
     end
 end
 
