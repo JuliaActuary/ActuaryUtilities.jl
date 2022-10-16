@@ -7,7 +7,8 @@ makedocs(;
     modules=[ActuaryUtilities],
     format=Documenter.HTML(),
     pages=[
-        "Home" => "index.md",
+        "Introduction" => "index.md",
+        "API" => "api.md",
     ],
     repo="https://github.com/JuliaActuary/ActuaryUtilities.jl/blob/{commit}{path}#L{line}",
     sitename="ActuaryUtilities.jl",
