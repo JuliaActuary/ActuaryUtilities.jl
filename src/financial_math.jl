@@ -534,7 +534,8 @@ function moic(cfs::T) where {T<:AbstractArray}
     pos = cfs .> 0
     neg = cfs .< 0
     if !(any(pos) && any(neg))
-        return NaN
+        return "No Positive or Negative Values provided"
+    end
     returned = sum(cf for cf in cfs if cf > 0)
     invested = -sum(cf for cf in cfs if cf < 0)
     return returned / invested
