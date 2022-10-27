@@ -531,6 +531,10 @@ julia> moic([-10,20,30])
 
 """
 function moic(cfs::T) where {T<:AbstractArray}
+    pos = cfs .> 0
+    neg = cfs .< 0
+    if !(any(pos) && any(neg))
+        return NaN
     returned = sum(cf for cf in cfs if cf > 0)
     invested = -sum(cf for cf in cfs if cf < 0)
     return returned / invested
