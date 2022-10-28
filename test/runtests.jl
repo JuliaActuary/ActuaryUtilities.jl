@@ -14,6 +14,10 @@ p(rate) = Yields.Periodic(rate,1)
 @testset "Temporal functions" begin
     @testset "years_between" begin
         @test years_between(Date(2018, 9, 30), Date(2018, 9, 30)) == 0
+        @test years_between(Date(2022, 10, 30), Date(2022, 10, 30)) == 0
+        @test years_between(Date(2021, 10, 30), Date(2021, 10, 30)) == 0
+        @test years_between(Date(2021, 11, 30), Date(2021, 10, 30)) == -1
+        @test years_between(Date(2022, 10, 30), Date(2021, 10, 30)) == -1
         @test years_between(Date(2018, 9, 30), Date(2018, 9, 30), true) == 0
         @test years_between(Date(2018, 9, 30), Date(2019, 9, 30), false) == 0
         @test years_between(Date(2018, 9, 30), Date(2019, 9, 30), true) == 1
@@ -41,6 +45,8 @@ end
     @test all(accum_offset([0.9, 0.8, 0.7],op=+) .== [1.0,1.9,2.7])
     @test all(accum_offset([0.9, 0.8, 0.7],op=+,init=2) .== [2.0,2.9,3.7])
 
+    @test all(accum_offset(1:5,op=+) .== [1,2,4,7,11])
+    @test all(accum_offset(1:5) .== [1,1,2,6,24])
     @test all(accum_offset([1, 2, 3]) .== [1,1,2])
 end
 
