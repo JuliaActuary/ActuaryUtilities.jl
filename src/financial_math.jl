@@ -85,13 +85,17 @@ end
 irr = internal_rate_of_return
 
 """
-    present_value(interest, cashflows::Vector, timepoints)
-    present_value(interest, cashflows::Vector)
+    present_value(yield, cashflow, timepoints)
+    present_value(yield, cashflow)
 
-Discount the `cashflows` vector at the given `interest_interestrate`,  with the cashflows occurring
+Discount the `cashflow` at the given `yield`,  with the cashflows occurring
 at the times specified in `timepoints`. If no `timepoints` given, assumes that cashflows happen at times 1,2,...,n.
 
-The `interest` can be an `InterestCurve`, a single scalar, or a vector wrapped in an `InterestCurve`. 
+# Arguments
+- `yield` can be any valid Yields.jl yield rate or object
+- `cashflow` can be a `Real`-valued scalar, a `Cashflow`, or a vector of scalars or `Cashflow`
+- `timepoints` is a scalar or vector of time-points that the corresponding cashflows occur. If `cashflow` is a `Cashflow` object, then the time used in determining the discount factor will be the time in the `Cashflow`` data, and the `timepoints` will be ignored.
+
 
 # Examples
 ```julia-repl
@@ -120,8 +124,14 @@ function present_value(yield,cf::T,time::U) where {T<:Real,U<:Real}
 end
 
 function present_value(yield,cfs)
-    return sum(present_value(yield,cf,t) for (t,cf) in pairs(IndexLinear(),cfs))
+    present_value(yield,cfs,__times(cfs)) 
 end
+
+
+__times(cfs) = (__time(cf,t) for (t,cf) in zip(Lazy.range(1),cfs))
+__time(cf::Cashflow,t) = cf.time
+__time(cf,t) = t
+
 function present_value(yield,cfs,times)
     return sum(present_value(yield,cf,t) for (t,cf) in zip(times,cfs))
 end
@@ -364,30 +374,30 @@ julia> convexity(0.03,my_lump_sum_value)
 ```
 """
 function duration(::Macaulay, yield, cfs, times)
-    return sum(times .* price.(yield, vec(cfs), times) / price(yield, vec(cfs), times))
+    a= sum(pv(yield, __multiply_time(cf,t), t) for (t,cf) in zip(times,cfs)) 
+    b = sum(pv(yield, cf, t) for (t,cf) in zip(times,cfs)) 
+    a / b
 end
 
+__multiply_time(cf::Cashflow,time) = (cf.amount * cf.time,cf.time)
+__multiply_time(cf,time) = cf * time
+
 function duration(::Modified, yield, cfs, times)
-    D(i) = price(i, vec(cfs), times)
+    D(i) = price(i, cfs, times)
     return duration(yield, D)
 end
 
-function duration(yield, valuation_function)
-    D(i) = log(valuation_function(i + yield))
-    δV =  - ForwardDiff.derivative(D, 0.0)
-end
-
-function duration(yield::Y, valuation_function) where {Y <: Yields.AbstractYield}
+function duration(yield::Y, valuation_function::T) where {Y<:Yields.AbstractYield,T<:Function}
     D(i) = log(valuation_function(i + yield))
     δV =  - ForwardDiff.derivative(D, 0.0)
 end
 
 function duration(yield, cfs, times)
-    return duration(Modified(), yield, vec(cfs), times)
+    return duration(Modified(), yield, cfs, times)
 end
-function duration(yield::Y, cfs::A) where {Y <: Yields.AbstractYield,A <: AbstractArray}
-    times = eachindex(cfs)
-    return duration(Modified(), yield, vec(cfs), times)
+function duration(yield::Y, cfs) where {Y <: Yields.AbstractYield}
+    times = __times(cfs)
+    return duration(Modified(), yield, cfs, times)
 end
 
 function duration(yield::R, cfs) where {R <: Real}
@@ -398,11 +408,11 @@ function duration(::DV01, yield, cfs, times)
     return duration(DV01(), yield, i -> price(i, vec(cfs), times))
 end
 function duration(d::Duration, yield, cfs)
-    times = eachindex(cfs)
-    return duration(d, yield, vec(cfs), times)
+    times = __times(cfs)
+    return duration(d, yield, cfs, times)
 end
 
-function duration(::DV01, yield, valuation_function)
+function duration(::DV01, yield, valuation_function::Y) where {Y<:Function}
     return duration(yield, valuation_function) * valuation_function(yield) / 100
 end
 
@@ -453,7 +463,7 @@ function convexity(yield, cfs::A) where {A <: AbstractArray}
     return convexity(yield, i -> price(i, vec(cfs), times))
 end
 
-function convexity(yield, valuation_function)
+function convexity(yield, valuation_function::T) where {T<:Function}
     v(x) = abs(valuation_function(yield + x[1]))
     ∂²P = ForwardDiff.hessian(v, [0.0])
     return ∂²P[1] / v([0.0])  
@@ -558,7 +568,7 @@ function duration(keyrate::KeyRateDuration, curve, cashflows, timepoints)
 end
 
 function duration(keyrate::KeyRateDuration, curve, cashflows)
-    timepoints = eachindex(cashflows)
+    timepoints = __times(cashflows)
     krd_points = 1:maximum(timepoints)
     return duration(keyrate, curve, cashflows, timepoints, krd_points)
 

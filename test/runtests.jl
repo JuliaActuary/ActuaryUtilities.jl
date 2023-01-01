@@ -56,6 +56,7 @@ end
         @test pv(0.05, cf) ≈ cf[1] / 1.05 + cf[2] / 1.05^2
         @test pv(0.05, CF) ≈ pv(0.05, cf)
         @test price(0.05, cf) ≈ pv(0.05, cf)
+        @test price(0.05, CF) ≈ pv(0.05, CF)
 
         # this vector came from Numpy Financial's test suite with target of 122.89, but that assumes payments are begin of period
         # 117.04 comes from Excel verification with NPV function
