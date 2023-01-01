@@ -5,12 +5,14 @@ using Dates
 import FinanceCore
 @reexport using FinanceCore: internal_rate_of_return, irr
 using ForwardDiff
+import Lazy
 using QuadGK
 using MuladdMacro
 using Yields
 import StatsBase
 using SnoopPrecompile
 
+include("cashflow.jl")
 include("financial_math.jl")
 include("risk_measures.jl")
 include("derivatives.jl")
@@ -155,6 +157,7 @@ export years_between, duration,
     accum_offset,
     Macaulay,Modified,DV01,KeyRatePar,KeyRateZero,KeyRate,duration, convexity,
     VaR,ValueAtRisk,CTE,ConditionalTailExpectation,ExpectedShortfall,
-    eurocall, europut
+    eurocall, europut,
+    Cashflow
 
 end # module

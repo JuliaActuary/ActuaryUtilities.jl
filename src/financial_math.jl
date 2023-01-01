@@ -1,13 +1,17 @@
 """
-    present_value(interest, cashflows::Vector, timepoints)
-    present_value(interest, cashflows::Vector)
+    present_value(yield, cashflow, timepoints)
+    present_value(yield, cashflow)
 
-Discount the `cashflows` vector at the given `interest_interestrate`,  with the cashflows occurring
+Discount the `cashflow` at the given `yield`,  with the cashflows occurring
 at the times specified in `timepoints`. If no `timepoints` given, assumes that cashflows happen at times 1,2,...,n.
 
-The `interest` can be an `InterestCurve`, a single scalar, or a vector wrapped in an `InterestCurve`. 
+# Arguments
+- `yield` can be any valid Yields.jl yield rate or object
+- `cashflow` can be a `Real`-valued scalar, a `Cashflow`, or a vector of scalars or `Cashflow`
+- `timepoints` is a scalar or vector of time-points that the corresponding cashflows occur. If `cashflow` is a `Cashflow` object, then the time used in determining the discount factor will be the time in the `Cashflow`` data, and the `timepoints` will be ignored.
 
 # Examples
+
 ```julia-repl
 julia> present_value(0.1, [10,20],[0,1])
 28.18181818181818
@@ -16,8 +20,8 @@ julia> present_value(Yields.Forward([0.1,0.2]), [10,20],[0,1])
 ```
 
 Example on how to use real dates using the [DayCounts.jl](https://github.com/JuliaFinance/DayCounts.jl) package
-```jldoctest
 
+```jldoctest
 using DayCounts 
 dates = Date(2012,12,31):Year(1):Date(2013,12,31)
 times = map(d -> yearfrac(dates[1], d, DayCounts.Actual365Fixed()),dates) # [0.0,1.0]
@@ -25,13 +29,13 @@ present_value(0.1, [10,20],times)
 
 # output
 28.18181818181818
-
 ```
-
 """
 function present_value(yc::T, cashflows, timepoints) where {T <: Yields.AbstractYield}
     s = 0.0
-    for (cf,t) in zip(cashflows,timepoints)
+    cfs = __cashflows(cashflows)
+    times = __times(cfs,timepoints)
+    for (cf,t) in zip(cfs,times)
         v = discount(yc,t)
         @muladd s = s +  v * cf
     end
@@ -40,37 +44,18 @@ function present_value(yc::T, cashflows, timepoints) where {T <: Yields.Abstract
 end
 
 function present_value(yc::T, cashflows) where {T <: Yields.AbstractYield}
-    present_value(yc,cashflows,1:length(cashflows))
-end
-
-function present_value(i, x)
-    
-    v = 1.0
-    v_factor = discount(i,0,1)
-    pv = 0.0
-
-    for (t,cf) in enumerate(x)
-        v = v * v_factor
-        @muladd pv = pv + v * cf
-    end
-    return pv 
+    times = __times(cashflows)
+    present_value(yc,cashflows,times)
 end
 
 function present_value(i, v, times)
     return present_value(Yields.Constant(i), v, times)
 end
 
-# Interest Given is an array, assume forwards.
-function present_value(i::AbstractArray, v)
-    yc = Yields.Forward(i)
-    return sum(discount(yc, t) * cf for (t,cf) in enumerate(v))
+function present_value(i, v)
+    return present_value(Yields.Constant(i), v)
 end
 
-# Interest Given is an array, assume forwards.
-function present_value(i::AbstractArray, v, times)
-    yc = Yields.Forward(i, times)
-    return sum(discount(yc, t) * cf for (cf, t) in zip(v,times))
-end
 
 """
     pv()
@@ -156,7 +141,7 @@ Calculate the time when the accumulated cashflows breakeven given the yield.
 Assumptions:
 
 - cashflows occur at the end of the period
-- cashflows evenly spaced with the first one occuring at time zero if `times` not given
+- cashflows evenly spaced with the first one occurring at time zero if `times` not given
 
 Returns `nothing` if cashflow stream never breaks even.
 
@@ -172,22 +157,18 @@ julia> breakeven(0.10, [-10,-15,2,3,4,8]) # returns the `nothing` value
 
 ```
 """
-function breakeven(y::T, cashflows::Vector, timepoints::Vector) where {T <: Yields.AbstractYield}
-    accum = zero(eltype(cashflows))
+function breakeven(y::T, cashflows, timepoints) where {T <: Yields.AbstractYield}
+    accum = 0.0
     last_neg = nothing
-
-    accum += cashflows[1]
-    if accum >= 0 && isnothing(last_neg)
-        last_neg = timepoints[1]
-    end
-
-    for i in 2:length(cashflows)
+    times = __times(cfs,timepoints)
+    prior_time = first(times)
+    for (cf, t) in zip(cashflows,times)
         # accumulate the flow from each timepoint to the next
-        accum *= Yields.accumulation(y, timepoints[i - 1], timepoints[i])
-        accum += cashflows[i]
-
-        if accum >= 0 && isnothing(last_neg)
-            last_neg = timepoints[i]
+        accum *= Yields.accumulation(y, prior_time, t)
+        accum += __cashflow(cf)
+        prior_time = t
+        if accum >= 0 && isnothing(last_neg) 
+            last_neg = t
         elseif accum < 0
             last_neg = nothing
         end
@@ -197,16 +178,13 @@ function breakeven(y::T, cashflows::Vector, timepoints::Vector) where {T <: Yiel
 
 end
 
-function breakeven(y::T, cfs, times) where {T <: Real}
+function breakeven(y, cfs, times)
     return breakeven(Yields.Constant(y), cfs, times)
 end
 
-function breakeven(y::Vector{T}, cfs, times) where {T <: Real}
-    return breakeven(Yields.Forward(y), cfs, times)
-end
-
-function breakeven(i, cashflows::Vector)
-    return breakeven(i, cashflows, [t for t in 0:length(cashflows) - 1])
+function breakeven(i, cashflows)
+    times = __times(cashflows;start=0)
+    return breakeven(i, cashflows, times)
 end
 
 abstract type Duration end
@@ -307,8 +285,13 @@ julia> convexity(0.03,my_lump_sum_value)
 ```
 """
 function duration(::Macaulay, yield, cfs, times)
-    return sum(times .* price.(yield, cfs, times) / price(yield, cfs, times))
+    a= sum(pv(yield, __multiply_time(cf,t), t) for (t,cf) in zip(times,cfs)) 
+    b = sum(pv(yield, cf, t) for (t,cf) in zip(times,cfs)) 
+    a / b
 end
+
+__multiply_time(cf::Cashflow,time) = (cf.amount * cf.time,cf.time)
+__multiply_time(cf,time) = cf * time
 
 function duration(::Modified, yield, cfs, times)
     D(i) = price(i, cfs, times)
@@ -321,10 +304,10 @@ function duration(yield::Y, valuation_function::T) where {Y<:Yields.AbstractYiel
 end
 
 function duration(yield, cfs, times)
-    return duration(Modified(), yield, vec(cfs), times)
+    return duration(Modified(), yield, cfs, times)
 end
 function duration(yield::Y, cfs) where {Y <: Yields.AbstractYield}
-    times = 1:length(cfs)
+    times = __times(cfs)
     return duration(Modified(), yield, cfs, times)
 end
 
@@ -336,8 +319,8 @@ function duration(::DV01, yield, cfs, times)
     return duration(DV01(), yield, i -> price(i, vec(cfs), times))
 end
 function duration(d::Duration, yield, cfs)
-    times = 1:length(cfs)
-    return duration(d, yield, vec(cfs), times)
+    times = __times(cfs)
+    return duration(d, yield, cfs, times)
 end
 
 function duration(::DV01, yield, valuation_function::Y) where {Y<:Function}
@@ -383,11 +366,12 @@ julia> convexity(0.03,my_lump_sum_value)
 
 """
 function convexity(yield, cfs, times)
-    return convexity(yield, i -> price(i, cfs, times))
+    ts = __times(cfs,times)
+    return convexity(yield, i -> price(i, cfs, ts))
 end
 
 function convexity(yield,cfs)
-    times = 1:length(cfs)
+    times = __times(cfs)
     return convexity(yield, i -> price(i, cfs, times))
 end
 
@@ -496,7 +480,7 @@ function duration(keyrate::KeyRateDuration, curve, cashflows, timepoints)
 end
 
 function duration(keyrate::KeyRateDuration, curve, cashflows)
-    timepoints = eachindex(cashflows)
+    timepoints = __times(cashflows)
     krd_points = 1:maximum(timepoints)
     return duration(keyrate, curve, cashflows, timepoints, krd_points)
 
@@ -507,7 +491,8 @@ end
 
 Return the solved-for constant spread to add to `curve1` in order to equate the discounted `cashflows` with `curve2`
 """
-function spread(curve1,curve2,cashflows,times=eachindex(cashflows))
+function spread(curve1,curve2,cashflows,times=__times(cashflows))
+    ts = [0.; Lazy.take(times,length(cashflows))]
     pv1 = pv(curve1,cashflows,times)
     pv2 = pv(curve2,cashflows,times)
     irr1 = irr([-pv1;cashflows], [0.;times])
@@ -518,7 +503,7 @@ function spread(curve1,curve2,cashflows,times=eachindex(cashflows))
 end
 
 """
-    moic(cashflows<:AbstractArray)
+    moic(cashflows)
 
 The multiple on invested capital ("moic") is the un-discounted sum of distributions divided by the sum of the contributions. The function assumes that negative numbers in the array represent contributions and positive numbers represent distributions.
 
@@ -530,7 +515,8 @@ julia> moic([-10,20,30])
 ```
 
 """
-function moic(cfs::T) where {T<:AbstractArray}
+function moic(cashflows)
+    cfs = __cashflows(cashflows)
     returned = sum(cf for cf in cfs if cf > 0)
     invested = -sum(cf for cf in cfs if cf < 0)
     return returned / invested
