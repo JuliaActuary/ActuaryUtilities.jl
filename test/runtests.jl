@@ -54,9 +54,12 @@ end
 
     @testset "pv" begin
         cf = [100, 100]
-        
+        CF = Cashflow.(cf,[1,2])
+
         @test pv(0.05, cf) ≈ cf[1] / 1.05 + cf[2] / 1.05^2
+        @test pv(0.05, CF) ≈ pv(0.05, cf)
         @test price(0.05, cf) ≈ pv(0.05, cf)
+        @test price(0.05, CF) ≈ pv(0.05, CF)
 
         # this vector came from Numpy Financial's test suite with target of 122.89, but that assumes payments are begin of period
         # 117.04 comes from Excel verification with NPV function
@@ -92,21 +95,12 @@ end
 
     @testset "pv with vector discount rates" begin
         cf = [100, 100]
-        @test pv([0.0,0.05], cf) ≈ 100 / 1.0 + 100 / 1.05
         @test pv(ActuaryUtilities.Yields.Forward([0.0,0.05]), cf) ≈ 100 / 1.0 + 100 / 1.05
-        @test pv([0.05,0.0], cf) ≈ 100 / 1.05 + 100 / 1.05
-        @test pv([0.05,0.1], cf) ≈ 100 / 1.05 + 100 / 1.05 / 1.1
 
         ts = [0.5,1]
         @test pv(ActuaryUtilities.Yields.Forward([0.0,0.05], ts), cf, ts) ≈ 100 / 1.0 + 100 / 1.05^0.5 
         @test pv(ActuaryUtilities.Yields.Forward([0.05,0.0], ts), cf, ts) ≈ 100 / 1.05^0.5 + 100 / 1.05^0.5 
         @test pv(ActuaryUtilities.Yields.Forward([0.05,0.1], ts), cf, ts) ≈ 100 / 1.05^0.5 + 100 / (1.05^0.5) / (1.1^0.5)
-
-        #without explicit Yields constructor
-        @test pv([0.0,0.05], cf, ts) ≈ 100 / 1.0 + 100 / 1.05^0.5 
-
-        @test price([0.0,0.05], cf, ts) ≈ pv([0.0,0.05], cf, ts)
-        @test price([0.0,0.05], -1 .* cf, ts) ≈ abs(pv([0.0,0.05], cf, ts))
 
         
     end
@@ -118,6 +112,8 @@ end
 
     @testset "basic" begin
         @test breakeven(0.10, [-10,1,2,3,4,8]) == 5
+        @test breakeven(0.10, Cashflow.([-10,1,2,3,4,8],0:5)) == 5
+        @test breakeven(0.10, Cashflow.([-10,1,2,3,4,8],[0,1,2,3,4,4.5])) == 4.5
         @test breakeven(0.10, [-10,15,2,3,4,8]) == 1
         @test breakeven(0.10, [-10,15,2,3,4,8]) == 1
         @test breakeven(0.10, [10,15,2,3,4,8]) == 0
@@ -126,11 +122,12 @@ end
 
     @testset "basic with vector interest" begin
         @test breakeven(0.0,[-10,1,2,3,4], [1,2,3,4,5]) == 5
+        @test breakeven(0.0,[-10,1,2,3,4], [1,2,3,4,4.5]) == 4.5
         # 
-        @test isnothing(breakeven([0.0,0.0,0.0,0.0,0.1], [-10,1,2,3,4], [1,2,3,4,5]))
-        @test breakeven([0.0,0.0,0.0,0.0,-0.5], [-10,1,2,3,4], [1,2,3,4,5]) == 5
-        @test breakeven([0.0,0.0,0.0,-0.9,-0.5],[-10,1,2,3,4], [1,2,3,4,5]) == 4
-        @test breakeven([0.1,0.1,0.2,0.1,0.1], [-10,1,12,3,4], [1,2,3,4,5]) == 3
+        @test isnothing(breakeven(Yields.Forward([0.0,0.0,0.0,0.0,0.1]), [-10,1,2,3,4], [1,2,3,4,5]))
+        @test breakeven(Yields.Forward([0.0,0.0,0.0,0.0,-0.5]), [-10,1,2,3,4], [1,2,3,4,5]) == 5
+        @test breakeven(Yields.Forward([0.0,0.0,0.0,-0.9,-0.5]),[-10,1,2,3,4], [1,2,3,4,5]) == 4
+        @test breakeven(Yields.Forward([0.1,0.1,0.2,0.1,0.1]), [-10,1,12,3,4], [1,2,3,4,5]) == 3
     end
 
     @testset "timepoints" begin
@@ -147,7 +144,8 @@ end
     # https://bankingprep.com/multiple-on-invested-capital/
     ex1 = [-100;[t == 200 ? 100 * 1.067^t : 0 for t in 1:200]]
     @test moic(ex1) ≈ 429421.59914697794
-    
+    ex1_cf  = Cashflow.(ex1, 0:200)
+    @test moic(ex1_cf) ≈ 429421.59914697794
 
     ex2 = ex1[end] *= 0.5
     @test moic(ex1) ≈ 429421.59914697794 * 0.5
@@ -174,9 +172,14 @@ end
         V = present_value(0.04, cfs, times)
 
         @test duration(Macaulay(), 0.04, cfs, times) ≈ 1.777570320376649
+        @test duration(Macaulay(), 0.04, Cashflow.(cfs, times)) ≈ 1.777570320376649
+
         @test duration(Modified(), 0.04, cfs, times) ≈ 1.777570320376649 / (1 + 0.04)
+        @test duration(Modified(), 0.04, Cashflow.(cfs, times)) ≈ 1.777570320376649 / (1 + 0.04)
+
         @test duration(0.04, cfs, times) ≈ 1.777570320376649 / (1 + 0.04)
         @test duration(DV01(), 0.04, cfs, times) ≈ 1.777570320376649 / (1 + 0.04) * V / 100
+        @test duration(DV01(), 0.04, Cashflow.(cfs, times)) ≈ 1.777570320376649 / (1 + 0.04) * V / 100
         
         # test with a Rate
         r = Yields.Periodic(0.04,1)
@@ -223,6 +226,7 @@ end
         @test isapprox(present_value(0.04, cfs, times), 821927.11, atol = 1e-2)
         # @test isapprox(duration(0.04,cfs,times),4.76190476,atol=1e-6)
         @test isapprox(convexity(0.04, cfs, times), 27.7366864, atol = 1e-6)
+        @test isapprox(convexity(0.04, Cashflow.(cfs, times)), 27.7366864, atol = 1e-6)
         @test isapprox(convexity(0.04, cfs), 27.7366864, atol = 1e-6)
         # the same, but with a functional argument
         value(i) = present_value(i, cfs, times)
@@ -291,6 +295,7 @@ end
             @test duration(KeyRatePar(3),c,bond.cfs,bond.times) ≈ 0.0 atol = 0.01
             @test duration(KeyRatePar(4),c,bond.cfs,bond.times) ≈ 0.0 atol = 0.01
             @test duration(KeyRatePar(5),c,bond.cfs,bond.times) ≈ 4.45 atol = 0.05
+            @test duration(KeyRatePar(5),c,Cashflow.(bond.cfs,bond.times)) ≈ 4.45 atol = 0.05
             
             bond =(times=[1,2,3,4,5],cfs=[0,0,0,0,100])
             @test duration(KeyRateZero(1),c,bond.cfs,bond.times) ≈ 0.0 
