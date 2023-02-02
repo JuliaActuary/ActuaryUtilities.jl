@@ -277,6 +277,10 @@ Calculates the Macaulay, Modified, or DV01 duration. `times` may be ommitted and
 
 When not given `Modified()` or `Macaulay()` as an argument, will default to `Modified()`.
 
+- Modified duration: the relative change per point of yield change.
+- Macaulay: the cashflow-weighted average time.
+- DV01: the absolute change per basis point (hundredth of a percentage point).
+
 # Examples
 
 Using vectors of cashflows and times
@@ -341,7 +345,7 @@ function duration(d::Duration, yield, cfs)
 end
 
 function duration(::DV01, yield, valuation_function::Y) where {Y<:Function}
-    return duration(yield, valuation_function) * valuation_function(yield) / 100
+    return duration(yield, valuation_function) * valuation_function(yield) / 10000
 end
 
 """ 

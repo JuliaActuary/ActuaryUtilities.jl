@@ -176,14 +176,16 @@ end
         @test duration(Macaulay(), 0.04, cfs, times) ≈ 1.777570320376649
         @test duration(Modified(), 0.04, cfs, times) ≈ 1.777570320376649 / (1 + 0.04)
         @test duration(0.04, cfs, times) ≈ 1.777570320376649 / (1 + 0.04)
-        @test duration(DV01(), 0.04, cfs, times) ≈ 1.777570320376649 / (1 + 0.04) * V / 100
+
+        # wikipedia example defines DV01 as a per point change, but industry practice is per basis point. Ref Issue #96
+        @test duration(DV01(), 0.04, cfs, times) ≈ 1.777570320376649 / (1 + 0.04) * V / 10000
         
         # test with a Rate
         r = Yields.Periodic(0.04,1)
         @test duration(Macaulay(), r, cfs, times) ≈ 1.777570320376649
         @test duration(Modified(), r, cfs, times) ≈ 1.777570320376649 / (1 + 0.04)
         @test duration(r, cfs, times) ≈ 1.777570320376649 / (1 + 0.04)
-        @test duration(DV01(), r, cfs, times) ≈ 1.777570320376649 / (1 + 0.04) * V / 100
+        @test duration(DV01(), r, cfs, times) ≈ 1.777570320376649 / (1 + 0.04) * V / 10000
         
         #test without times
         r = Yields.Periodic(0.04,1)
