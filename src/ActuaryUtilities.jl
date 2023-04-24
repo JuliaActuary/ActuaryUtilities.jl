@@ -9,7 +9,7 @@ using QuadGK
 using MuladdMacro
 using Yields
 import StatsBase
-using SnoopPrecompile
+using PrecompileTools
 
 include("financial_math.jl")
 include("risk_measures.jl")
