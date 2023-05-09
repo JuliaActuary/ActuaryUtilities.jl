@@ -90,27 +90,6 @@ end
         @test pv(0.05, cf, [1,2]) ≈ cf[1] / 1.05 + cf[2] / 1.05^2
     end
 
-    @testset "pv with vector discount rates" begin
-        cf = [100, 100]
-        @test pv([0.0,0.05], cf) ≈ 100 / 1.0 + 100 / 1.05
-        @test pv(ActuaryUtilities.Yields.Forward([0.0,0.05]), cf) ≈ 100 / 1.0 + 100 / 1.05
-        @test pv([0.05,0.0], cf) ≈ 100 / 1.05 + 100 / 1.05
-        @test pv([0.05,0.1], cf) ≈ 100 / 1.05 + 100 / 1.05 / 1.1
-
-        ts = [0.5,1]
-        @test pv(ActuaryUtilities.Yields.Forward([0.0,0.05], ts), cf, ts) ≈ 100 / 1.0 + 100 / 1.05^0.5 
-        @test pv(ActuaryUtilities.Yields.Forward([0.05,0.0], ts), cf, ts) ≈ 100 / 1.05^0.5 + 100 / 1.05^0.5 
-        @test pv(ActuaryUtilities.Yields.Forward([0.05,0.1], ts), cf, ts) ≈ 100 / 1.05^0.5 + 100 / (1.05^0.5) / (1.1^0.5)
-
-        #without explicit Yields constructor
-        @test pv([0.0,0.05], cf, ts) ≈ 100 / 1.0 + 100 / 1.05^0.5 
-
-        @test price([0.0,0.05], cf, ts) ≈ pv([0.0,0.05], cf, ts)
-        @test price([0.0,0.05], -1 .* cf, ts) ≈ abs(pv([0.0,0.05], cf, ts))
-
-        
-    end
-
 
 end
 
@@ -163,6 +142,7 @@ end
         g = (10 for t in 1:10)
         v = collect(g)
         i = Yields.Constant(0.04)
+        @test pv(i,g) ≈ pv(i,[10 for t in 1:10])
         @test duration(0.04,g) ≈ duration(0.04,v)
         @test duration(i,g) ≈ duration(i,v)
         @test convexity(0.04,g) ≈ convexity(0.04,v)
@@ -227,7 +207,7 @@ end
         @test isapprox(convexity(0.04, cfs, times), 27.7366864, atol = 1e-6)
         @test isapprox(convexity(0.04, cfs), 27.7366864, atol = 1e-6)
         # the same, but with a functional argument
-        value(i) = present_value(i, cfs, times)
+        value(i) = ActuaryUtilities.present_value_differntiable(i, cfs, times)
         # @test isapprox(duration(0.04,value),4.76190476,atol=1e-6)
         @test isapprox(convexity(0.04, value), 27.7366864, atol = 1e-6)
     end

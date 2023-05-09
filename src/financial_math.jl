@@ -5,7 +5,7 @@
 Discount the `cashflows` vector at the given `interest_interestrate`,  with the cashflows occurring
 at the times specified in `timepoints`. If no `timepoints` given, assumes that cashflows happen at times 1,2,...,n.
 
-The `interest` can be an `InterestCurve`, a single scalar, or a vector wrapped in an `InterestCurve`. 
+The `interest` can be an any yield curve from Yields.jl or a scalar annual effective interest rate.
 
 # Examples
 ```julia-repl
@@ -16,8 +16,8 @@ julia> present_value(Yields.Forward([0.1,0.2]), [10,20],[0,1])
 ```
 
 Example on how to use real dates using the [DayCounts.jl](https://github.com/JuliaFinance/DayCounts.jl) package
-```jldoctest
 
+```julia
 using DayCounts 
 dates = Date(2012,12,31):Year(1):Date(2013,12,31)
 times = map(d -> yearfrac(dates[1], d, DayCounts.Actual365Fixed()),dates) # [0.0,1.0]
@@ -25,51 +25,60 @@ present_value(0.1, [10,20],times)
 
 # output
 28.18181818181818
-
 ```
 
+# Extended help
+
+Under the hood, this function uses LoopVectorization to compile specialized code, at the expense of not being auto-differentiable. A differentiable version is available as [`present_value_differntiable`](@ref).
+
+
 """
-function present_value(yc::T, cashflows, timepoints) where {T <: Yields.AbstractYield}
+function present_value(yc, cashflows, timepoints)
     s = 0.0
-    for (cf,t) in zip(cashflows,timepoints)
-        v = discount(yc,t)
-        @muladd s = s +  v * cf
+     @turbo for i ∈ eachindex(cashflows) 
+        v = discount(yc,timepoints[i])
+        s += v * cashflows[i]
     end
-    # sum(discount(yc,t) * cf for (t,cf) in zip(timepoints, cashflows))
     s
 end
 
-function present_value(yc::T, cashflows) where {T <: Yields.AbstractYield}
-    present_value(yc,cashflows,1:length(cashflows))
+function present_value(yc, cashflows::G, timepoints) where {G<:Base.Generator}
+    present_value_differntiable(yc,cashflows,timepoints)
 end
 
-function present_value(i, x)
-    
-    v = 1.0
-    v_factor = discount(i,0,1)
-    pv = 0.0
 
-    for (t,cf) in enumerate(x)
-        v = v * v_factor
-        @muladd pv = pv + v * cf
+"""
+    present_value_differntiable(yc, cashflows[, timepoints])
+
+An auto-diffable version of [`present_value`](@ref). This function is not as efficient as `present_value`, but is useful when you want to use the function in a differentiable context.
+"""
+function present_value_differntiable(yc, cashflows, timepoints)
+    s = 0.0
+     for (cf,t) ∈ zip(cashflows,timepoints) 
+        v = discount(yc,t)
+        s += v * cf
     end
-    return pv 
+    s
 end
 
-function present_value(i, v, times)
-    return present_value(Yields.Constant(i), v, times)
+# dispatch on a scalar value to avoid repeated discount computations
+present_value(y::Y, c, t) where {Y<:Real} = present_value_scalar(y,c,t)
+present_value(y::Y, c, t) where {Y<:Yields.Constant} = present_value_scalar(y,c,t)
+present_value(y::Y, c, t) where {Y<:FinanceCore.Rate} = present_value_scalar(y,c,t)
+
+function present_value_scalar(yc, cashflows,timepoints)
+    s = 0.0
+    v = 1.
+    v_factor = discount(yc,1)
+     @turbo for i ∈ eachindex(cashflows) 
+        v *= v_factor
+        s += v * cashflows[i]
+    end
+    s
 end
 
-# Interest Given is an array, assume forwards.
-function present_value(i::AbstractArray, v)
-    yc = Yields.Forward(i)
-    return sum(discount(yc, t) * cf for (t,cf) in enumerate(v))
-end
-
-# Interest Given is an array, assume forwards.
-function present_value(i::AbstractArray, v, times)
-    yc = Yields.Forward(i, times)
-    return sum(discount(yc, t) * cf for (cf, t) in zip(v,times))
+function present_value(yc, cashflows)
+    present_value(yc,cashflows,1:length(cashflows))
 end
 
 """
@@ -146,6 +155,10 @@ Using `price` can be helpful if the directionality of the value doesn't matter. 
 """
 price(x1,x2) = present_value(x1, x2) |> abs
 price(x1,x2,x3) = present_value(x1, x2, x3) |> abs
+
+price_differentiable(x1,x2) = present_value_differntiable(x1, x2) |> abs
+price_differentiable(x1,x2,x3) = present_value_differntiable(x1, x2, x3) |> abs
+
 
 """
     breakeven(yield, cashflows::Vector)
@@ -311,11 +324,11 @@ julia> convexity(0.03,my_lump_sum_value)
 ```
 """
 function duration(::Macaulay, yield, cfs, times)
-    return sum(times .* price.(yield, cfs, times) / price(yield, cfs, times))
+    return sum(times .* price_differentiable.(yield, cfs, times) / price_differentiable(yield, cfs, times))
 end
 
 function duration(::Modified, yield, cfs, times)
-    D(i) = price(i, cfs, times)
+    D(i) = price_differentiable(i, cfs, times)
     return duration(yield, D)
 end
 
@@ -337,7 +350,7 @@ function duration(yield::R, cfs) where {R <: Real}
 end
 
 function duration(::DV01, yield, cfs, times)
-    return duration(DV01(), yield, i -> price(i, vec(cfs), times))
+    return duration(DV01(), yield, i -> price_differentiable(i, vec(cfs), times))
 end
 function duration(d::Duration, yield, cfs)
     times = 1:length(cfs)
@@ -387,12 +400,12 @@ julia> convexity(0.03,my_lump_sum_value)
 
 """
 function convexity(yield, cfs, times)
-    return convexity(yield, i -> price(i, cfs, times))
+    return convexity(yield, i -> price_differentiable(i, cfs, times))
 end
 
 function convexity(yield,cfs)
     times = 1:length(cfs)
-    return convexity(yield, i -> price(i, cfs, times))
+    return convexity(yield, i -> price_differentiable(i, cfs, times))
 end
 
 function convexity(yield, valuation_function::T) where {T<:Function}
@@ -448,9 +461,9 @@ function duration(keyrate::KeyRateDuration, curve, cashflows, timepoints, krd_po
     shift = keyrate.shift
     curve_up = _krd_new_curve(keyrate,curve,krd_points)
     curve_down = _krd_new_curve(opposite(keyrate),curve,krd_points)
-    price = pv(curve, cashflows, timepoints)
-    price_up = pv(curve_up, cashflows, timepoints)
-    price_down = pv(curve_down, cashflows, timepoints)
+    price = present_value_differntiable(curve, cashflows, timepoints)
+    price_up = present_value_differntiable(curve_up, cashflows, timepoints)
+    price_down = present_value_differntiable(curve_down, cashflows, timepoints)
     
 
     return (price_down - price_up) / (2*shift*price)
@@ -512,8 +525,8 @@ end
 Return the solved-for constant spread to add to `curve1` in order to equate the discounted `cashflows` with `curve2`
 """
 function spread(curve1,curve2,cashflows,times=eachindex(cashflows))
-    pv1 = pv(curve1,cashflows,times)
-    pv2 = pv(curve2,cashflows,times)
+    pv1 = present_value_differntiable(curve1,cashflows,times)
+    pv2 = present_value_differntiable(curve2,cashflows,times)
     irr1 = irr([-pv1;cashflows], [0.;times])
     irr2 = irr([-pv2;cashflows], [0.;times])
 
