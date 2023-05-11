@@ -6,6 +6,7 @@ import FinanceCore
 @reexport using FinanceCore: internal_rate_of_return, irr
 using ForwardDiff
 using QuadGK
+using LoopVectorization
 using MuladdMacro
 using Yields
 import StatsBase
