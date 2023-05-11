@@ -7,6 +7,7 @@ import FinanceCore
 using ForwardDiff
 using QuadGK
 using LoopVectorization
+using MuladdMacro
 using Yields
 import StatsBase
 using PrecompileTools

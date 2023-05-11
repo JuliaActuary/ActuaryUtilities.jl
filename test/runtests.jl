@@ -207,7 +207,7 @@ end
         @test isapprox(convexity(0.04, cfs, times), 27.7366864, atol = 1e-6)
         @test isapprox(convexity(0.04, cfs), 27.7366864, atol = 1e-6)
         # the same, but with a functional argument
-        value(i) = ActuaryUtilities.present_value_differntiable(i, cfs, times)
+        value(i) = ActuaryUtilities.present_value_differentiable(i, cfs, times)
         # @test isapprox(duration(0.04,value),4.76190476,atol=1e-6)
         @test isapprox(convexity(0.04, value), 27.7366864, atol = 1e-6)
     end

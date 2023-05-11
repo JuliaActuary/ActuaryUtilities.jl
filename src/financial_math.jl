@@ -29,30 +29,30 @@ present_value(0.1, [10,20],times)
 
 # Extended help
 
-Under the hood, this function uses LoopVectorization to compile specialized code, at the expense of not being auto-differentiable. A differentiable version is available as [`present_value_differntiable`](@ref).
+Under the hood, this function uses LoopVectorization to compile specialized code, at the expense of not being auto-differentiable. A differentiable version is available as [`present_value_differentiable`](@ref).
 
 
 """
 function present_value(yc, cashflows, timepoints)
-    s = 0.0
-     @turbo for i ∈ eachindex(cashflows) 
-        v = discount(yc,timepoints[i])
+    s = zero(first(cashflows)*.1)
+    for i ∈ eachindex(cashflows) 
+        v = discount(yc,0,timepoints[i])
         s += v * cashflows[i]
     end
     s
 end
 
 function present_value(yc, cashflows::G, timepoints) where {G<:Base.Generator}
-    present_value_differntiable(yc,cashflows,timepoints)
+    present_value_differentiable(yc,cashflows,timepoints)
 end
 
 
 """
-    present_value_differntiable(yc, cashflows[, timepoints])
+    present_value_differentiable(yc, cashflows[, timepoints])
 
 An auto-diffable version of [`present_value`](@ref). This function is not as efficient as `present_value`, but is useful when you want to use the function in a differentiable context.
 """
-function present_value_differntiable(yc, cashflows, timepoints)
+function present_value_differentiable(yc, cashflows, timepoints)
     s = 0.0
      for (cf,t) ∈ zip(cashflows,timepoints) 
         v = discount(yc,t)
@@ -62,24 +62,40 @@ function present_value_differntiable(yc, cashflows, timepoints)
 end
 
 # dispatch on a scalar value to avoid repeated discount computations
-present_value(y::Y, c, t) where {Y<:Real} = present_value_scalar(y,c,t)
-present_value(y::Y, c, t) where {Y<:Yields.Constant} = present_value_scalar(y,c,t)
-present_value(y::Y, c, t) where {Y<:FinanceCore.Rate} = present_value_scalar(y,c,t)
+present_value(y::Y, c,t) where {Y<:Real} = _present_value_scalar(y,c,t)
+present_value(y::Y, c,t) where {Y<:Yields.Constant} = _present_value_scalar(y,c,t)
+present_value(y::Y, c,t) where {Y<:FinanceCore.Rate} = _present_value_scalar(y,c,t)
 
-function present_value_scalar(yc, cashflows,timepoints)
-    s = 0.0
-    v = 1.
-    v_factor = discount(yc,1)
-     @turbo for i ∈ eachindex(cashflows) 
-        v *= v_factor
+function _present_value_scalar(y, cashflows,times)
+    s = zero(first(cashflows) * 0.1)
+    v = discount(y,1)
+    k = -log(v)
+    @turbo for i ∈ eachindex(cashflows) 
+        v = exp(-k*times[i])
         s += v * cashflows[i]
     end
     s
 end
 
-function present_value(yc, cashflows)
-    present_value(yc,cashflows,1:length(cashflows))
+function _present_value_scalar_one_to_n(y, cashflows)
+    s = zero(eltype(cashflows))
+    v = 1.0
+    v_factor = discount(y,1)
+    for i ∈ eachindex(cashflows) 
+        v *= v_factor
+        @muladd  s = s + v * cashflows[i]
+    end
+    s
 end
+
+function present_value(yc, cashflows)
+    present_value(yc,cashflows,eachindex(cashflows))
+end
+
+present_value(y, c::G) where {G<:Base.Generator} = present_value_differentiable(y,c,eachindex(c))
+present_value(y::Y, c) where {Y<:Real} = _present_value_scalar_one_to_n(y,c)
+present_value(y::Y, c) where {Y<:Yields.Constant} = _present_value_scalar_one_to_n(y,c)
+present_value(y::Y, c) where {Y<:FinanceCore.Rate} = _present_value_scalar_one_to_n(y,c)
 
 """
     pv()
@@ -156,8 +172,8 @@ Using `price` can be helpful if the directionality of the value doesn't matter. 
 price(x1,x2) = present_value(x1, x2) |> abs
 price(x1,x2,x3) = present_value(x1, x2, x3) |> abs
 
-price_differentiable(x1,x2) = present_value_differntiable(x1, x2) |> abs
-price_differentiable(x1,x2,x3) = present_value_differntiable(x1, x2, x3) |> abs
+price_differentiable(x1,x2) = present_value_differentiable(x1, x2) |> abs
+price_differentiable(x1,x2,x3) = present_value_differentiable(x1, x2, x3) |> abs
 
 
 """
@@ -461,9 +477,9 @@ function duration(keyrate::KeyRateDuration, curve, cashflows, timepoints, krd_po
     shift = keyrate.shift
     curve_up = _krd_new_curve(keyrate,curve,krd_points)
     curve_down = _krd_new_curve(opposite(keyrate),curve,krd_points)
-    price = present_value_differntiable(curve, cashflows, timepoints)
-    price_up = present_value_differntiable(curve_up, cashflows, timepoints)
-    price_down = present_value_differntiable(curve_down, cashflows, timepoints)
+    price = present_value_differentiable(curve, cashflows, timepoints)
+    price_up = present_value_differentiable(curve_up, cashflows, timepoints)
+    price_down = present_value_differentiable(curve_down, cashflows, timepoints)
     
 
     return (price_down - price_up) / (2*shift*price)
@@ -525,8 +541,8 @@ end
 Return the solved-for constant spread to add to `curve1` in order to equate the discounted `cashflows` with `curve2`
 """
 function spread(curve1,curve2,cashflows,times=eachindex(cashflows))
-    pv1 = present_value_differntiable(curve1,cashflows,times)
-    pv2 = present_value_differntiable(curve2,cashflows,times)
+    pv1 = present_value_differentiable(curve1,cashflows,times)
+    pv2 = present_value_differentiable(curve2,cashflows,times)
     irr1 = irr([-pv1;cashflows], [0.;times])
     irr2 = irr([-pv2;cashflows], [0.;times])
 
