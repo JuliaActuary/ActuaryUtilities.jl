@@ -29,55 +29,48 @@ present_value(0.1, [10,20],times)
 ```
 
 """
-function present_value(yc::T, cashflows, timepoints) where {T <: Yields.AbstractYield}
+function FinanceCore.present_value(yc::T, cashflows, timepoints) where {T<:Yields.AbstractYield}
     s = 0.0
-    for (cf,t) in zip(cashflows,timepoints)
-        v = discount(yc,t)
-        @muladd s = s +  v * cf
+    for (cf, t) in zip(cashflows, timepoints)
+        v = discount(yc, t)
+        @muladd s = s + v * cf
     end
     # sum(discount(yc,t) * cf for (t,cf) in zip(timepoints, cashflows))
     s
 end
 
-function present_value(yc::T, cashflows) where {T <: Yields.AbstractYield}
-    present_value(yc,cashflows,1:length(cashflows))
+function FinanceCore.present_value(yc::T, cashflows) where {T<:Yields.AbstractYield}
+    present_value(yc, cashflows, 1:length(cashflows))
 end
 
-function present_value(i, x)
-    
+function FinanceCore.present_value(i, x)
+
     v = 1.0
-    v_factor = discount(i,0,1)
+    v_factor = discount(i, 0, 1)
     pv = 0.0
 
-    for (t,cf) in enumerate(x)
+    for (t, cf) in enumerate(x)
         v = v * v_factor
         @muladd pv = pv + v * cf
     end
-    return pv 
+    return pv
 end
 
-function present_value(i, v, times)
+function FinanceCore.present_value(i, v, times)
     return present_value(Yields.Constant(i), v, times)
 end
 
 # Interest Given is an array, assume forwards.
-function present_value(i::AbstractArray, v)
+function FinanceCore.present_value(i::AbstractArray, v)
     yc = Yields.Forward(i)
-    return sum(discount(yc, t) * cf for (t,cf) in enumerate(v))
+    return sum(discount(yc, t) * cf for (t, cf) in enumerate(v))
 end
 
 # Interest Given is an array, assume forwards.
-function present_value(i::AbstractArray, v, times)
+function FinanceCore.present_value(i::AbstractArray, v, times)
     yc = Yields.Forward(i, times)
-    return sum(discount(yc, t) * cf for (cf, t) in zip(v,times))
+    return sum(discount(yc, t) * cf for (cf, t) in zip(v, times))
 end
-
-"""
-    pv()
-
-    An alias for `present_value`.
-"""
-pv = present_value
 
 
 """
@@ -99,30 +92,30 @@ julia> present_values(Yields.Forward([0.1,0.2]), [10,20],[0,1])
 
 """
 function present_values(interest, cashflows)
-    pvs = Vector{Float64}(undef,length(cashflows))
+    pvs = Vector{Float64}(undef, length(cashflows))
     pvs[end] = Yields.discount(interest, lastindex(cashflows) - 1, lastindex(cashflows)) * cashflows[end]
-    for (t, cf) in Iterators.reverse(enumerate(cashflows[1:end - 1]))
-        pvs[t] = Yields.discount(interest, t - 1, t) * (cf + pvs[t + 1])
+    for (t, cf) in Iterators.reverse(enumerate(cashflows[1:end-1]))
+        pvs[t] = Yields.discount(interest, t - 1, t) * (cf + pvs[t+1])
     end
 
     return pvs
 end
 
 
-function present_values(interest,cashflows,times)
-    present_values_accumulator(interest,cashflows,times)
+function present_values(interest, cashflows, times)
+    present_values_accumulator(interest, cashflows, times)
 end
 
-function present_values_accumulator(interest,cashflows,times,pvs=[0.0])
-    from_time = length(times) == 1 ? 0. : times[end-1]
-    pv = discount(interest,from_time,last(times)) *(first(pvs) + last(cashflows))
-    pvs = pushfirst!(pvs,pv)
+function present_values_accumulator(interest, cashflows, times, pvs=[0.0])
+    from_time = length(times) == 1 ? 0.0 : times[end-1]
+    pv = discount(interest, from_time, last(times)) * (first(pvs) + last(cashflows))
+    pvs = pushfirst!(pvs, pv)
 
     if length(cashflows) > 1
 
         new_cfs = @view cashflows[1:end-1]
         new_times = @view times[1:end-1]
-        return present_values_accumulator(interest,new_cfs,new_times,pvs)
+        return present_values_accumulator(interest, new_cfs, new_times, pvs)
     else
         # last discount and return
         return pvs[1:end-1] # end-1 get rid of trailing 0.0
@@ -130,7 +123,7 @@ function present_values_accumulator(interest,cashflows,times,pvs=[0.0])
 end
 
 # if given a vector of rates, assume that it should be a forward discount yield
-function present_values(y::Vector{T}, cfs, times) where {T <: Real}
+function present_values(y::Vector{T}, cfs, times) where {T<:Real}
     return present_values(Yields.Forward(y), cfs, times)
 end
 
@@ -144,8 +137,8 @@ The absolute value of the `present_value(...)`.
 
 Using `price` can be helpful if the directionality of the value doesn't matter. For example, in the common usage, duration is more interested in the change in price than present value, so `price` is used there.
 """
-price(x1,x2) = present_value(x1, x2) |> abs
-price(x1,x2,x3) = present_value(x1, x2, x3) |> abs
+price(x1, x2) = present_value(x1, x2) |> abs
+price(x1, x2, x3) = present_value(x1, x2, x3) |> abs
 
 """
     breakeven(yield, cashflows::Vector)
@@ -172,7 +165,7 @@ julia> breakeven(0.10, [-10,-15,2,3,4,8]) # returns the `nothing` value
 
 ```
 """
-function breakeven(y::T, cashflows::Vector, timepoints::Vector) where {T <: Yields.AbstractYield}
+function breakeven(y::T, cashflows::Vector, timepoints::Vector) where {T<:Yields.AbstractYield}
     accum = zero(eltype(cashflows))
     last_neg = nothing
 
@@ -183,7 +176,7 @@ function breakeven(y::T, cashflows::Vector, timepoints::Vector) where {T <: Yiel
 
     for i in 2:length(cashflows)
         # accumulate the flow from each timepoint to the next
-        accum *= Yields.accumulation(y, timepoints[i - 1], timepoints[i])
+        accum *= Yields.accumulation(y, timepoints[i-1], timepoints[i])
         accum += cashflows[i]
 
         if accum >= 0 && isnothing(last_neg)
@@ -197,16 +190,16 @@ function breakeven(y::T, cashflows::Vector, timepoints::Vector) where {T <: Yiel
 
 end
 
-function breakeven(y::T, cfs, times) where {T <: Real}
+function breakeven(y::T, cfs, times) where {T<:Real}
     return breakeven(Yields.Constant(y), cfs, times)
 end
 
-function breakeven(y::Vector{T}, cfs, times) where {T <: Real}
+function breakeven(y::Vector{T}, cfs, times) where {T<:Real}
     return breakeven(Yields.Forward(y), cfs, times)
 end
 
 function breakeven(i, cashflows::Vector)
-    return breakeven(i, cashflows, [t for t in 0:length(cashflows) - 1])
+    return breakeven(i, cashflows, [t for t in 0:length(cashflows)-1])
 end
 
 abstract type Duration end
@@ -228,10 +221,10 @@ Unlike other duration statistics which are computed using analytic derivatives, 
 `KeyRatePar` is more commonly reported (than [`KayRateZero`](@ref)) in the fixed income markets, even though the latter has more analytically attractive properties. See the discussion of KeyRateDuration in the Yields.jl docs.
 
 """
-struct KeyRatePar{T,R} <: KeyRateDuration 
+struct KeyRatePar{T,R} <: KeyRateDuration
     timepoint::T
     shift::R
-    KeyRatePar(timepoint, shift=.001) = new{typeof(timepoint),typeof(shift)}(timepoint,shift)
+    KeyRatePar(timepoint, shift=0.001) = new{typeof(timepoint),typeof(shift)}(timepoint, shift)
 end
 
 """
@@ -243,10 +236,10 @@ Unlike other duration statistics which are computed using analytic derivatives, 
 
 `KeyRateZero` is less commonly reported (than [`KayRatePar`](@ref)) in the fixed income markets, even though the latter has more analytically attractive properties. See the discussion of KeyRateDuration in the Yields.jl docs.
 """
-struct KeyRateZero{T,R} <: KeyRateDuration 
+struct KeyRateZero{T,R} <: KeyRateDuration
     timepoint::T
     shift::R
-    KeyRateZero(timepoint, shift=.001) = new{typeof(timepoint),typeof(shift)}(timepoint,shift)
+    KeyRateZero(timepoint, shift=0.001) = new{typeof(timepoint),typeof(shift)}(timepoint, shift)
 end
 
 """
@@ -321,18 +314,18 @@ end
 
 function duration(yield::Y, valuation_function::T) where {Y<:Yields.AbstractYield,T<:Function}
     D(i) = log(valuation_function(i + yield))
-    δV =  - ForwardDiff.derivative(D, 0.0)
+    δV = -ForwardDiff.derivative(D, 0.0)
 end
 
 function duration(yield, cfs, times)
     return duration(Modified(), yield, vec(cfs), times)
 end
-function duration(yield::Y, cfs) where {Y <: Yields.AbstractYield}
+function duration(yield::Y, cfs) where {Y<:Yields.AbstractYield}
     times = 1:length(cfs)
     return duration(Modified(), yield, cfs, times)
 end
 
-function duration(yield::R, cfs) where {R <: Real}
+function duration(yield::R, cfs) where {R<:Real}
     return duration(Yields.Constant(yield), cfs)
 end
 
@@ -390,7 +383,7 @@ function convexity(yield, cfs, times)
     return convexity(yield, i -> price(i, cfs, times))
 end
 
-function convexity(yield,cfs)
+function convexity(yield, cfs)
     times = 1:length(cfs)
     return convexity(yield, i -> price(i, cfs, times))
 end
@@ -398,7 +391,7 @@ end
 function convexity(yield, valuation_function::T) where {T<:Function}
     v(x) = abs(valuation_function(yield + x[1]))
     ∂²P = ForwardDiff.hessian(v, [0.0])
-    return ∂²P[1] / v([0.0])  
+    return ∂²P[1] / v([0.0])
 end
 
 
@@ -446,21 +439,21 @@ References:
 """
 function duration(keyrate::KeyRateDuration, curve, cashflows, timepoints, krd_points)
     shift = keyrate.shift
-    curve_up = _krd_new_curve(keyrate,curve,krd_points)
-    curve_down = _krd_new_curve(opposite(keyrate),curve,krd_points)
+    curve_up = _krd_new_curve(keyrate, curve, krd_points)
+    curve_down = _krd_new_curve(opposite(keyrate), curve, krd_points)
     price = pv(curve, cashflows, timepoints)
     price_up = pv(curve_up, cashflows, timepoints)
     price_down = pv(curve_down, cashflows, timepoints)
-    
 
-    return (price_down - price_up) / (2*shift*price)
+
+    return (price_down - price_up) / (2 * shift * price)
 
 end
 
-opposite(kr::KeyRateZero) = KeyRateZero(kr.timepoint,-kr.shift)
-opposite(kr::KeyRatePar) = KeyRatePar(kr.timepoint,-kr.shift)
+opposite(kr::KeyRateZero) = KeyRateZero(kr.timepoint, -kr.shift)
+opposite(kr::KeyRatePar) = KeyRatePar(kr.timepoint, -kr.shift)
 
-function _krd_new_curve(keyrate::KeyRateZero,curve,krd_points)
+function _krd_new_curve(keyrate::KeyRateZero, curve, krd_points)
     curve_times = krd_points
     shift = keyrate.shift
 
@@ -470,14 +463,14 @@ function _krd_new_curve(keyrate::KeyRateZero,curve,krd_points)
 
     target_rate = zeros[zero_index]
 
-    zeros[zero_index] += Yields.Rate(shift,target_rate.compounding)
+    zeros[zero_index] += Yields.Rate(shift, target_rate.compounding)
 
     new_curve = Yields.Zero(zeros, curve_times)
 
     return new_curve
 end
 
-function _krd_new_curve(keyrate::KeyRatePar,curve,krd_points)
+function _krd_new_curve(keyrate::KeyRatePar, curve, krd_points)
     curve_times = krd_points
     shift = keyrate.shift
 
@@ -486,7 +479,7 @@ function _krd_new_curve(keyrate::KeyRatePar,curve,krd_points)
     zero_index = findfirst(==(keyrate.timepoint), curve_times)
 
     target_rate = pars[zero_index]
-    pars[zero_index] += Yields.Rate(shift,target_rate.compounding)
+    pars[zero_index] += Yields.Rate(shift, target_rate.compounding)
 
     new_curve = Yields.Par(pars, curve_times)
 
@@ -511,11 +504,11 @@ end
 
 Return the solved-for constant spread to add to `curve1` in order to equate the discounted `cashflows` with `curve2`
 """
-function spread(curve1,curve2,cashflows,times=eachindex(cashflows))
-    pv1 = pv(curve1,cashflows,times)
-    pv2 = pv(curve2,cashflows,times)
-    irr1 = irr([-pv1;cashflows], [0.;times])
-    irr2 = irr([-pv2;cashflows], [0.;times])
+function spread(curve1, curve2, cashflows, times=eachindex(cashflows))
+    pv1 = pv(curve1, cashflows, times)
+    pv2 = pv(curve2, cashflows, times)
+    irr1 = irr([-pv1; cashflows], [0.0; times])
+    irr2 = irr([-pv2; cashflows], [0.0; times])
 
     return irr2 - irr1
 
