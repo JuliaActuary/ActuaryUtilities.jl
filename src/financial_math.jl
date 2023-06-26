@@ -1,81 +1,5 @@
 """
-    present_value(interest, cashflows::Vector, timepoints)
-    present_value(interest, cashflows::Vector)
-
-Discount the `cashflows` vector at the given `interest_interestrate`,  with the cashflows occurring
-at the times specified in `timepoints`. If no `timepoints` given, assumes that cashflows happen at times 1,2,...,n.
-
-The `interest` can be an `InterestCurve`, a single scalar, or a vector wrapped in an `InterestCurve`. 
-
-# Examples
-```julia-repl
-julia> present_value(0.1, [10,20],[0,1])
-28.18181818181818
-julia> present_value(Yields.Forward([0.1,0.2]), [10,20],[0,1])
-28.18181818181818 # same as above, because first cashflow is at time zero
-```
-
-Example on how to use real dates using the [DayCounts.jl](https://github.com/JuliaFinance/DayCounts.jl) package
-```jldoctest
-
-using DayCounts 
-dates = Date(2012,12,31):Year(1):Date(2013,12,31)
-times = map(d -> yearfrac(dates[1], d, DayCounts.Actual365Fixed()),dates) # [0.0,1.0]
-present_value(0.1, [10,20],times)
-
-# output
-28.18181818181818
-
-```
-
-"""
-function FinanceCore.present_value(yc::T, cashflows, timepoints) where {T<:Yields.AbstractYield}
-    s = 0.0
-    for (cf, t) in zip(cashflows, timepoints)
-        v = discount(yc, t)
-        @muladd s = s + v * cf
-    end
-    # sum(discount(yc,t) * cf for (t,cf) in zip(timepoints, cashflows))
-    s
-end
-
-function FinanceCore.present_value(yc::T, cashflows) where {T<:Yields.AbstractYield}
-    present_value(yc, cashflows, 1:length(cashflows))
-end
-
-function FinanceCore.present_value(i, x)
-
-    v = 1.0
-    v_factor = discount(i, 0, 1)
-    pv = 0.0
-
-    for (t, cf) in enumerate(x)
-        v = v * v_factor
-        @muladd pv = pv + v * cf
-    end
-    return pv
-end
-
-function FinanceCore.present_value(i, v, times)
-    return present_value(Yields.Constant(i), v, times)
-end
-
-# Interest Given is an array, assume forwards.
-function FinanceCore.present_value(i::AbstractArray, v)
-    yc = Yields.Forward(i)
-    return sum(discount(yc, t) * cf for (t, cf) in enumerate(v))
-end
-
-# Interest Given is an array, assume forwards.
-function FinanceCore.present_value(i::AbstractArray, v, times)
-    yc = Yields.Forward(i, times)
-    return sum(discount(yc, t) * cf for (cf, t) in zip(v, times))
-end
-
-
-"""
-    present_value(interest, cashflows::Vector, timepoints)
-    present_value(interest, cashflows::Vector)
+    present_values(interest, cashflows, timepoints)
 
 Efficiently calculate a vector representing the present value of the given cashflows at each period prior to the given timepoint.
 
@@ -84,25 +8,14 @@ Efficiently calculate a vector representing the present value of the given cashf
 julia> present_values(0.00, [1,1,1])
 [3,2,1]
 
-julia> present_values(Yields.Forward([0.1,0.2]), [10,20],[0,1])
+julia> present_values(ForwardYield([0.1,0.2]), [10,20],[0,1]) # after `using FinanceModels`
 2-element Vector{Float64}:
  28.18181818181818
  18.18181818181818
 ```
 
 """
-function present_values(interest, cashflows)
-    pvs = Vector{Float64}(undef, length(cashflows))
-    pvs[end] = Yields.discount(interest, lastindex(cashflows) - 1, lastindex(cashflows)) * cashflows[end]
-    for (t, cf) in Iterators.reverse(enumerate(cashflows[1:end-1]))
-        pvs[t] = Yields.discount(interest, t - 1, t) * (cf + pvs[t+1])
-    end
-
-    return pvs
-end
-
-
-function present_values(interest, cashflows, times)
+function present_values(interest, cashflows, times=eachindex(cashflows))
     present_values_accumulator(interest, cashflows, times)
 end
 
@@ -122,11 +35,6 @@ function present_values_accumulator(interest, cashflows, times, pvs=[0.0])
     end
 end
 
-# if given a vector of rates, assume that it should be a forward discount yield
-function present_values(y::Vector{T}, cfs, times) where {T<:Real}
-    return present_values(Yields.Forward(y), cfs, times)
-end
-
 
 """
     price(...)
@@ -137,8 +45,8 @@ The absolute value of the `present_value(...)`.
 
 Using `price` can be helpful if the directionality of the value doesn't matter. For example, in the common usage, duration is more interested in the change in price than present value, so `price` is used there.
 """
-price(x1, x2) = present_value(x1, x2) |> abs
-price(x1, x2, x3) = present_value(x1, x2, x3) |> abs
+price(x1, x2) = FinanceCore.present_value(x1, x2) |> abs
+price(x1, x2, x3) = FinanceCore.present_value(x1, x2, x3) |> abs
 
 """
     breakeven(yield, cashflows::Vector)
@@ -165,7 +73,7 @@ julia> breakeven(0.10, [-10,-15,2,3,4,8]) # returns the `nothing` value
 
 ```
 """
-function breakeven(y::T, cashflows::Vector, timepoints::Vector) where {T<:Yields.AbstractYield}
+function breakeven(y, cashflows, timepoints=eachindex(cashflows))
     accum = zero(eltype(cashflows))
     last_neg = nothing
 
@@ -176,7 +84,7 @@ function breakeven(y::T, cashflows::Vector, timepoints::Vector) where {T<:Yields
 
     for i in 2:length(cashflows)
         # accumulate the flow from each timepoint to the next
-        accum *= Yields.accumulation(y, timepoints[i-1], timepoints[i])
+        accum *= accumulation(y, timepoints[i-1], timepoints[i])
         accum += cashflows[i]
 
         if accum >= 0 && isnothing(last_neg)
@@ -190,17 +98,6 @@ function breakeven(y::T, cashflows::Vector, timepoints::Vector) where {T<:Yields
 
 end
 
-function breakeven(y::T, cfs, times) where {T<:Real}
-    return breakeven(Yields.Constant(y), cfs, times)
-end
-
-function breakeven(y::Vector{T}, cfs, times) where {T<:Real}
-    return breakeven(Yields.Forward(y), cfs, times)
-end
-
-function breakeven(i, cashflows::Vector)
-    return breakeven(i, cashflows, [t for t in 0:length(cashflows)-1])
-end
 
 abstract type Duration end
 
@@ -218,7 +115,7 @@ Shift the par curve by the given amount at the given timepoint. Use in conjuncti
 
 Unlike other duration statistics which are computed using analytic derivatives, `KeyRateDuration`s are computed via a shift-and-compute the yield curve approach.
 
-`KeyRatePar` is more commonly reported (than [`KayRateZero`](@ref)) in the fixed income markets, even though the latter has more analytically attractive properties. See the discussion of KeyRateDuration in the Yields.jl docs.
+`KeyRatePar` is more commonly reported (than [`KayRateZero`](@ref)) in the fixed income markets, even though the latter has more analytically attractive properties. See the discussion of KeyRateDuration in the FinanceModels.jl docs.
 
 """
 struct KeyRatePar{T,R} <: KeyRateDuration
@@ -234,7 +131,7 @@ Shift the par curve by the given amount at the given timepoint. Use in conjuncti
 
 Unlike other duration statistics which are computed using analytic derivatives, `KeyRateDuration` is computed via a shift-and-compute the yield curve approach.
 
-`KeyRateZero` is less commonly reported (than [`KayRatePar`](@ref)) in the fixed income markets, even though the latter has more analytically attractive properties. See the discussion of KeyRateDuration in the Yields.jl docs.
+`KeyRateZero` is less commonly reported (than [`KayRatePar`](@ref)) in the fixed income markets, even though the latter has more analytically attractive properties. See the discussion of KeyRateDuration in the FinanceModels.jl docs.
 """
 struct KeyRateZero{T,R} <: KeyRateDuration
     timepoint::T
@@ -312,7 +209,7 @@ function duration(::Modified, yield, cfs, times)
     return duration(yield, D)
 end
 
-function duration(yield::Y, valuation_function::T) where {Y<:Yields.AbstractYield,T<:Function}
+function duration(yield, valuation_function::T) where {T<:Function}
     D(i) = log(valuation_function(i + yield))
     δV = -ForwardDiff.derivative(D, 0.0)
 end
@@ -320,13 +217,9 @@ end
 function duration(yield, cfs, times)
     return duration(Modified(), yield, vec(cfs), times)
 end
-function duration(yield::Y, cfs) where {Y<:Yields.AbstractYield}
+function duration(yield, cfs)
     times = 1:length(cfs)
     return duration(Modified(), yield, cfs, times)
-end
-
-function duration(yield::R, cfs) where {R<:Real}
-    return duration(Yields.Constant(yield), cfs)
 end
 
 function duration(::DV01, yield, cfs, times)
@@ -406,7 +299,7 @@ The approach is to carve up the curve into `krd_points` (default is the unit ste
 zero rate corresponding to the timepoint within the `KeyRateDuration` is shifted by `shift` (specified by the `KeyRateZero` or `KeyRatePar` constructors. A new curve is created from the shifted rates. This means that the 
 "width" of the shifted section is ± 1 time period, unless specific points are specified via `krd_points`.
 
-The `curve` may be any Yields.jl curve (e.g. does not have to be a curve constructed via `Yields.Zero(...)`).
+The `curve` may be any FinanceModels.jl curve (e.g. does not have to be a curve constructed via `FinanceModels.Zero(...)`).
 
 !!! Experimental: Due to the paucity of examples in the literature, this feature does not have unit tests like the rest of JuliaActuary functionality. Additionally, the API may change in a future major/minor version update.
 
@@ -418,7 +311,7 @@ julia> riskfree_maturities = [0.5, 1.0, 1.5, 2.0];
 
 julia> riskfree    = [0.05, 0.058, 0.064,0.068];
 
-julia> rf_curve = Yields.Zero(riskfree,riskfree_maturities);
+julia> rf_curve = FinanceModels.Zero(riskfree,riskfree_maturities);
 
 julia> cfs = [10,10,10,10,10];
 
@@ -457,15 +350,15 @@ function _krd_new_curve(keyrate::KeyRateZero, curve, krd_points)
     curve_times = krd_points
     shift = keyrate.shift
 
-    zeros = Yields.zero.(curve, curve_times)
+    zeros = FinanceModels.zero.(curve, curve_times)
 
     zero_index = findfirst(==(keyrate.timepoint), curve_times)
 
     target_rate = zeros[zero_index]
 
-    zeros[zero_index] += Yields.Rate(shift, target_rate.compounding)
+    zeros[zero_index] += FinanceModels.Rate(shift, target_rate.compounding)
 
-    new_curve = Yields.Zero(zeros, curve_times)
+    new_curve = FinanceModels.Zero(zeros, curve_times)
 
     return new_curve
 end
@@ -474,14 +367,14 @@ function _krd_new_curve(keyrate::KeyRatePar, curve, krd_points)
     curve_times = krd_points
     shift = keyrate.shift
 
-    pars = Yields.par.(curve, curve_times)
+    pars = FinanceModels.par.(curve, curve_times)
 
     zero_index = findfirst(==(keyrate.timepoint), curve_times)
 
     target_rate = pars[zero_index]
-    pars[zero_index] += Yields.Rate(shift, target_rate.compounding)
+    pars[zero_index] += FinanceModels.Rate(shift, target_rate.compounding)
 
-    new_curve = Yields.Par(pars, curve_times)
+    new_curve = FinanceModels.Par(pars, curve_times)
 
     return new_curve
 end
