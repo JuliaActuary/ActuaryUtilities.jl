@@ -73,7 +73,7 @@ julia> breakeven(0.10, [-10,-15,2,3,4,8]) # returns the `nothing` value
 
 ```
 """
-function breakeven(y, cashflows, timepoints=eachindex(cashflows))
+function breakeven(y, cashflows, timepoints=(eachindex(cashflows) .- 1))
     accum = zero(eltype(cashflows))
     last_neg = nothing
 
@@ -162,8 +162,8 @@ KeyRate = KeyRateZero
     duration(interest_rate,valuation_function)    # Modified Duration
 
 Calculates the Macaulay, Modified, or DV01 duration. `times` may be ommitted and the valuation will assume evenly spaced cashflows starting at the end of the first period.
-- `interest_rate` should be a fixed effective yield (e.g. `0.05`).
 
+Note that the calculated duration will depend on the periodicity convention of the `interest_rate`: a `Periodic` yield (or yield model with that convention) will be a slightly different computed duration than a `Continous` which follows from the present value differing according to the periodicity.
 
 When not given `Modified()` or `Macaulay()` as an argument, will default to `Modified()`.
 
@@ -175,14 +175,25 @@ When not given `Modified()` or `Macaulay()` as an argument, will default to `Mod
 
 Using vectors of cashflows and times
 ```julia-repl
-julia> times = 1:5
-julia> cfs = [0,0,0,0,100]
+julia> times = 1:5;
+
+julia> cfs = [0,0,0,0,100];
+
 julia> duration(0.03,cfs,times)
-4.854368932038834
+4.854368932038835
+
+julia> duration(Periodic(0.03,1),cfs,times)
+4.854368932038835
+
+julia> duration(Continuous(0.03),cfs,times)
+5.0
+
 julia> duration(Macaulay(),0.03,cfs,times)
 5.0
+
 julia> duration(Modified(),0.03,cfs,times)
 4.854368932038835
+
 julia> convexity(0.03,cfs,times)
 28.277877274012614
 
@@ -358,7 +369,7 @@ function _krd_new_curve(keyrate::KeyRateZero, curve, krd_points)
 
     zeros[zero_index] += FinanceModels.Rate(shift, target_rate.compounding)
 
-    new_curve = FinanceModels.Zero(zeros, curve_times)
+    new_curve = fit(Spline.Linear(), FinanceModels.ZCBYield.(zeros, curve_times), FinanceModels.Fit.Bootstrap())
 
     return new_curve
 end
@@ -374,7 +385,7 @@ function _krd_new_curve(keyrate::KeyRatePar, curve, krd_points)
     target_rate = pars[zero_index]
     pars[zero_index] += FinanceModels.Rate(shift, target_rate.compounding)
 
-    new_curve = FinanceModels.Par(pars, curve_times)
+    new_curve = fit(Spline.Linear(), FinanceModels.ParYield.(pars, curve_times), FinanceModels.Fit.Bootstrap())
 
     return new_curve
 end

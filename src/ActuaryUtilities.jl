@@ -3,7 +3,7 @@ module ActuaryUtilities
 using Reexport
 using Dates
 import FinanceCore
-@reexport using FinanceCore: internal_rate_of_return, irr
+@reexport using FinanceCore: internal_rate_of_return, irr, present_value, pv
 using ForwardDiff
 using QuadGK
 using MuladdMacro
