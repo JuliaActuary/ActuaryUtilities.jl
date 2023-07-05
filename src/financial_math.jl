@@ -74,21 +74,24 @@ julia> breakeven(0.10, [-10,-15,2,3,4,8]) # returns the `nothing` value
 ```
 """
 function breakeven(y, cashflows, timepoints=(eachindex(cashflows) .- 1))
-    accum = zero(eltype(cashflows))
+    accum = 0.0
     last_neg = nothing
 
-    accum += cashflows[1]
+    # `amount` and `timepoint` allow to generically handle `Cashflow`s and amount/time vectors
+    accum += FinanceCore.amount(cashflows[1])
     if accum >= 0 && isnothing(last_neg)
-        last_neg = timepoints[1]
+        last_neg = FinanceCore.timepoint(cashflows[1], timepoints[1])
     end
 
     for i in 2:length(cashflows)
         # accumulate the flow from each timepoint to the next
-        accum *= accumulation(y, timepoints[i-1], timepoints[i])
-        accum += cashflows[i]
+        a = FinanceCore.timepoint(cashflows[i-1], timepoints[i-1])
+        b = FinanceCore.timepoint(cashflows[i], timepoints[i])
+        accum *= accumulation(y, a, b)
+        accum += FinanceCore.amount(cashflows[i])
 
         if accum >= 0 && isnothing(last_neg)
-            last_neg = timepoints[i]
+            last_neg = b
         elseif accum < 0
             last_neg = nothing
         end
@@ -212,7 +215,7 @@ julia> convexity(0.03,my_lump_sum_value)
 ```
 """
 function duration(::Macaulay, yield, cfs, times)
-    return sum(times .* price.(yield, cfs, times) / price(yield, cfs, times))
+    return sum(FinanceCore.timepoint.(cfs, times) .* price.(yield, cfs, times) / price(yield, cfs, times))
 end
 
 function duration(::Modified, yield, cfs, times)
@@ -409,6 +412,8 @@ end
 Return the solved-for constant spread to add to `curve1` in order to equate the discounted `cashflows` with `curve2`
 """
 function spread(curve1, curve2, cashflows, times=eachindex(cashflows))
+    times = FinanceCore.timepoint.(cashflows, times)
+    cashflows = FinanceCore.amount.(cashflows)
     pv1 = pv(curve1, cashflows, times)
     pv2 = pv(curve2, cashflows, times)
     irr1 = irr([-pv1; cashflows], [0.0; times])
@@ -432,7 +437,7 @@ julia> moic([-10,20,30])
 
 """
 function moic(cfs::T) where {T<:AbstractArray}
-    returned = sum(cf for cf in cfs if cf > 0)
-    invested = -sum(cf for cf in cfs if cf < 0)
+    returned = sum(FinanceCore.amount(cf) for cf in cfs if FinanceCore.amount(cf) > 0)
+    invested = -sum(FinanceCore.amount(cf) for cf in cfs if FinanceCore.amount(cf) < 0)
     return returned / invested
 end

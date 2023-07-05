@@ -83,6 +83,9 @@ end
         @test price(0.05, cf, ts) ≈ pv(0.05, cf, ts)
         @test price(0.05, -1 .* cf, ts) ≈ abs(pv(0.05, cf, ts))
 
+        @test pv(0.05, FC.Cashflow.(cf, ts)) ≈ pv(0.05, cf, ts)
+        @test price(0.05, FC.Cashflow.(cf, ts)) ≈ price(0.05, cf, ts)
+
 
     end
 
@@ -101,6 +104,7 @@ end
         @test breakeven(0.10, [-10, 15, 2, 3, 4, 8]) == 1
         @test breakeven(0.10, [10, 15, 2, 3, 4, 8]) == 0
         @test isnothing(breakeven(0.10, [-10, -15, 2, 3, 4, 8]))
+        @test breakeven(0.10, FC.Cashflow.([-10, 1, 2, 3, 4, 8], 0:5)) == 5
     end
 
     @testset "timepoints" begin
@@ -117,6 +121,7 @@ end
     # https://bankingprep.com/multiple-on-invested-capital/
     ex1 = [-100; [t == 200 ? 100 * 1.067^t : 0 for t in 1:200]]
     @test moic(ex1) ≈ 429421.59914697794
+    @test moic(FC.Cashflow.(ex1, 0:200)) ≈ 429421.59914697794
 
 
     ex2 = ex1[end] *= 0.5
@@ -141,14 +146,20 @@ end
     @testset "wikipedia example" begin
         times = [0.5, 1, 1.5, 2]
         cfs = [10, 10, 10, 110]
+        cfo = FC.Cashflow.(cfs, times)
         V = present_value(0.04, cfs, times)
 
         @test duration(Macaulay(), 0.04, cfs, times) ≈ 1.777570320376649
         @test duration(Modified(), 0.04, cfs, times) ≈ 1.777570320376649 / (1 + 0.04)
         @test duration(0.04, cfs, times) ≈ 1.777570320376649 / (1 + 0.04)
 
+        @test duration(Macaulay(), 0.04, cfo) ≈ 1.777570320376649
+        @test duration(Modified(), 0.04, cfo) ≈ 1.777570320376649 / (1 + 0.04)
+        @test duration(0.04, cfo) ≈ 1.777570320376649 / (1 + 0.04)
+
         # wikipedia example defines DV01 as a per point change, but industry practice is per basis point. Ref Issue #96
         @test duration(DV01(), 0.04, cfs, times) ≈ 1.777570320376649 / (1 + 0.04) * V / 10000
+        @test duration(DV01(), 0.04, cfo) ≈ 1.777570320376649 / (1 + 0.04) * V / 10000
 
         # test with a Rate
         r = FC.Periodic(0.04, 1)
@@ -191,11 +202,14 @@ end
         # the duration tests are commented out because I think the paper is wrong on the duration?
         cfs = [0, 0, 0, 0, 1.0e6]
         times = 1:5
+        cfo = FC.Cashflow.(cfs, times)
 
         @test isapprox(present_value(0.04, cfs, times), 821927.11, atol=1e-2)
         # @test isapprox(duration(0.04,cfs,times),4.76190476,atol=1e-6)
         @test isapprox(convexity(0.04, cfs, times), 27.7366864, atol=1e-6)
         @test isapprox(convexity(0.04, cfs), 27.7366864, atol=1e-6)
+        @test isapprox(convexity(0.04, cfo), 27.7366864, atol=1e-6)
+
         # the same, but with a functional argument
         value(i) = present_value(i, cfs, times)
         # @test isapprox(duration(0.04,value),4.76190476,atol=1e-6)
@@ -276,6 +290,8 @@ end
             @test duration(KeyRateZero(4), c, bond.cfs, bond.times) ≈ 0.0 atol = 1e-10
             @test duration(KeyRateZero(5), c, bond.cfs, bond.times) ≈ duration(c, bond.cfs, bond.times) atol = 0.1
 
+            cfo = FC.Cashflow.(bond.cfs, bond.times)
+            @test duration(KeyRateZero(5), c, cfo) ≈ duration(c, bond.cfs, bond.times) atol = 0.1
 
 
 
@@ -286,7 +302,11 @@ end
 
 @testset "spread" begin
     cfs = fill(10, 10)
+    cfo = FC.Cashflow.(cfs, 1:10)
+
     @test spread(0.04, 0.05, cfs) ≈ FC.Periodic(0.01, 1)
+    @test spread(0.04, 0.05, cfo) ≈ FC.Periodic(0.01, 1)
+
     @test spread(FC.Continuous(0.04), FC.Continuous(0.05), cfs) ≈ FC.Periodic(1)(FC.Continuous(0.05)) - FC.Periodic(1)(FC.Continuous(0.04))
 
     # 2021-03-31 rates from Treasury.gov
