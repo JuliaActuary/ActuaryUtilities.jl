@@ -1,7 +1,7 @@
 using Documenter, ActuaryUtilities
 
 # Setup for doctests embedded in docstrings.
-DocMeta.setdocmeta!(ActuaryUtilities, :DocTestSetup, :(import Pkg; Pkg.add("DayCounts");using ActuaryUtilities, Dates,DayCounts),recursive=true)
+DocMeta.setdocmeta!(ActuaryUtilities, :DocTestSetup, :(import Pkg; Pkg.add("DayCounts"); using ActuaryUtilities, Dates, DayCounts), recursive=true)
 
 makedocs(;
     modules=[ActuaryUtilities],
@@ -9,12 +9,13 @@ makedocs(;
     pages=[
         "Introduction" => "index.md",
         "API" => "api.md",
+        "Upgrade from Prior Versions" => "upgrade.md",
     ],
     repo="https://github.com/JuliaActuary/ActuaryUtilities.jl/blob/{commit}{path}#L{line}",
     sitename="ActuaryUtilities.jl",
-    authors="Alec Loudenback",
+    authors="Alec Loudenback"
 )
 
 deploydocs(;
-    repo="github.com/JuliaActuary/ActuaryUtilities.jl",
+    repo="github.com/JuliaActuary/ActuaryUtilities.jl"
 )
