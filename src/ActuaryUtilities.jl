@@ -3,17 +3,16 @@ module ActuaryUtilities
 using Reexport
 using Dates
 import FinanceCore
-@reexport using FinanceCore: internal_rate_of_return, irr
+@reexport using FinanceCore: internal_rate_of_return, irr, present_value, pv
 using ForwardDiff
 using QuadGK
 using MuladdMacro
-using Yields
+using FinanceModels
 import StatsBase
 using PrecompileTools
 
 include("financial_math.jl")
 include("risk_measures.jl")
-include("derivatives.jl")
 
 
 
@@ -43,7 +42,7 @@ julia> years_between(d1,d2) # using default `true` overlap
 1 
 ```
 """
-function years_between(d1::Date, d2::Date, overlap = true)
+function years_between(d1::Date, d2::Date, overlap=true)
     iy, im, id = Dates.year(d1), Dates.month(d1), Dates.day(d1)
     vy, vm, vd = Dates.year(d2), Dates.month(d2), Dates.day(d2)
     dur = vy - iy
@@ -136,25 +135,25 @@ julia> accum_offset(1:5,op=+)
 ```
 
 """
-function accum_offset(x; op=*,init=1.0)
+function accum_offset(x; op=*, init=1.0)
     xnew = similar(x)
     xnew[1] = init
     for i in 2:length(x)
-      xnew[i] = op(xnew[i-1],x[i-1])
+        xnew[i] = op(xnew[i-1], x[i-1])
     end
     return xnew
 end
-  
+
 include("precompile.jl")
 
 
 export years_between, duration,
     irr, internal_rate_of_return, spread,
     pv, present_value, price, present_values,
-    breakeven,moic,
+    breakeven, moic,
     accum_offset,
-    Macaulay,Modified,DV01,KeyRatePar,KeyRateZero,KeyRate,duration, convexity,
-    VaR,ValueAtRisk,CTE,ConditionalTailExpectation,ExpectedShortfall,
+    Macaulay, Modified, DV01, KeyRatePar, KeyRateZero, KeyRate, duration, convexity,
+    VaR, ValueAtRisk, CTE, ConditionalTailExpectation, ExpectedShortfall,
     eurocall, europut
 
 end # module
