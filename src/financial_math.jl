@@ -231,8 +231,11 @@ end
 function duration(yield, cfs, times)
     return duration(Modified(), yield, vec(cfs), times)
 end
+
+# timepoints are used to make the function more generic
+# with respect to allowing Cashflow objects
 function duration(yield, cfs)
-    times = 1:length(cfs)
+    times = FinanceCore.timepoint.(cfs, 1:length(cfs))
     return duration(Modified(), yield, cfs, times)
 end
 
@@ -240,7 +243,7 @@ function duration(::DV01, yield, cfs, times)
     return duration(DV01(), yield, i -> price(i, vec(cfs), times))
 end
 function duration(d::Duration, yield, cfs)
-    times = 1:length(cfs)
+    times = FinanceCore.timepoint.(cfs, 1:length(cfs))
     return duration(d, yield, vec(cfs), times)
 end
 
