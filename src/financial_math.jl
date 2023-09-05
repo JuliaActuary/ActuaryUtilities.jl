@@ -21,7 +21,7 @@ end
 
 function present_values_accumulator(interest, cashflows, times, pvs=[0.0])
     from_time = length(times) == 1 ? 0.0 : times[end-1]
-    pv = discount(interest, from_time, last(times)) * (first(pvs) + last(cashflows))
+    pv = FinanceCore.discount(interest, from_time, last(times)) * (first(pvs) + last(cashflows))
     pvs = pushfirst!(pvs, pv)
 
     if length(cashflows) > 1
@@ -87,7 +87,7 @@ function breakeven(y, cashflows, timepoints=(eachindex(cashflows) .- 1))
         # accumulate the flow from each timepoint to the next
         a = FinanceCore.timepoint(cashflows[i-1], timepoints[i-1])
         b = FinanceCore.timepoint(cashflows[i], timepoints[i])
-        accum *= accumulation(y, a, b)
+        accum *= FinanceCore.accumulation(y, a, b)
         accum += FinanceCore.amount(cashflows[i])
 
         if accum >= 0 && isnothing(last_neg)
@@ -372,7 +372,7 @@ function _krd_new_curve(keyrate::KeyRateZero, curve, krd_points)
 
     zeros[zero_index] += FinanceModels.Rate(shift, target_rate.compounding)
 
-    new_curve = fit(Spline.Linear(), FinanceModels.ZCBYield.(zeros, curve_times), FinanceModels.Fit.Bootstrap())
+    new_curve = FinanceModels.fit(FinanceModels.Spline.Linear(), FinanceModels.ZCBYield.(zeros, curve_times), FinanceModels.Fit.Bootstrap())
 
     return new_curve
 end
@@ -388,7 +388,7 @@ function _krd_new_curve(keyrate::KeyRatePar, curve, krd_points)
     target_rate = pars[zero_index]
     pars[zero_index] += FinanceModels.Rate(shift, target_rate.compounding)
 
-    new_curve = fit(Spline.Linear(), FinanceModels.ParYield.(pars, curve_times), FinanceModels.Fit.Bootstrap())
+    new_curve = FinanceModels.fit(FinanceModels.Spline.Linear(), FinanceModels.ParYield.(pars, curve_times), FinanceModels.Fit.Bootstrap())
 
     return new_curve
 end
