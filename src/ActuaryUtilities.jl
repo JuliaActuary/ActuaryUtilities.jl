@@ -7,7 +7,7 @@ import FinanceCore
 using ForwardDiff
 using QuadGK
 using MuladdMacro
-using FinanceModels
+import FinanceModels
 import StatsBase
 using PrecompileTools
 
