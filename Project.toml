@@ -17,7 +17,8 @@ StatsBase = "2913bbd2-ae8a-5f71-8c99-4fb6c76f3a91"
 
 [compat]
 Distributions = "0.23,0.24,0.25"
-FinanceCore = "^1"
+FinanceCore = "^2"
+FinanceModels = "^4"
 ForwardDiff = "^0.10"
 MuladdMacro = "^0.2"
 PrecompileTools = "^1"
