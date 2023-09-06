@@ -9,7 +9,7 @@
     rates = [0.01, 0.01, 0.03, 0.05, 0.07, 0.16, 0.35, 0.92, 1.40, 1.74, 2.31, 2.41] ./ 100
     mats = [1 / 12, 2 / 12, 3 / 12, 6 / 12, 1, 2, 3, 5, 7, 10, 20, 30]
 
-    y = FinanceModels.fit(FinanceModels.Spline.Linear(), CMTYield.(rates, mats), FinanceModels.Fit.Bootstrap())
+    y = FinanceModels.fit(FinanceModels.Spline.Linear(), FinanceModels.CMTYield.(rates, mats), FinanceModels.Fit.Bootstrap())
     r = 0.05
     rates = [r, y]
     @compile_workload begin
