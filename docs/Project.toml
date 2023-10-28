@@ -1,3 +1,5 @@
 [deps]
+ActuaryUtilities = "bdd23359-8b1c-4f88-b89b-d11982a786f4"
 DayCounts = "44e31299-2c53-5a9b-9141-82aa45d7972f"
 Documenter = "e30172f5-a6a5-5a46-863b-614d45cd2de4"
+FinanceCore = "b9b1ffdd-6612-4b69-8227-7663be06e089"
