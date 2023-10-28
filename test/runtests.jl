@@ -10,9 +10,6 @@ const FC = ActuaryUtilities.FinanceCore
 
 include("risk_measures.jl")
 
-#convenience function to wrap scalar into default Rate type
-p(rate) = Yields.Periodic(rate, 1)
-
 @testset "Temporal functions" begin
     @testset "years_between" begin
         @test years_between(Date(2018, 9, 30), Date(2018, 9, 30)) == 0
