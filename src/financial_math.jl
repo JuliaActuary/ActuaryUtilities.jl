@@ -451,3 +451,25 @@ function moic(cfs::T) where {T<:AbstractArray}
     invested = -sum(FinanceCore.amount(cf) for cf in cfs if FinanceCore.amount(cf) < 0)
     return returned / invested
 end
+
+"""
+    mirr(values, finance_rate, reinvest_rate)
+
+The modified internal rate of return ("mirr") is a financial measure that helps to determine the attractiveness of an investment and that can be used to compare different investments. It is the modification of internal rate of return(IRR).
+
+# Examples
+
+```julia-repl
+julia> mirr([-500, 50, 31, 3, 11], 0.34, 0.21)
+-0.25547311822833907
+```
+
+"""
+function mirr(values, finance_rate, reinvest_rate)
+    n = length(values)
+    pos = values .> 0
+    neg = values .< 0
+    numer = abs(present_value(reinvest_rate, values .* pos))
+    denom = abs(present_value(finance_rate, values .* neg))
+    return (numer/denom)^(1/(n - 1))*(1 + reinvest_rate) - 1
+end
