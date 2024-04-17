@@ -10,6 +10,7 @@ using MuladdMacro
 import FinanceModels
 import StatsBase
 using PrecompileTools
+import Distributions
 
 include("financial_math.jl")
 include("risk_measures.jl")
