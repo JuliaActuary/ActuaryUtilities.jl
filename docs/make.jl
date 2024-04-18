@@ -10,6 +10,7 @@ makedocs(;
         "Overview" => "index.md",
         "Financial Math" => "financial_math.md",
         "Risk Measures" => "risk_measures.md",
+        "Other Utilities" => "utilities.md",
         "API" => [
             "ActuaryUtilities" => "API/ActuaryUtilities.md",
             "FinanceCore (re-exported)" => "API/FinanceCore.md",

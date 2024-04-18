@@ -35,7 +35,7 @@ A collection of common functions/manipulations used in Actuarial Calculations.
   - `VaR` for the percentile/Value at Risk
   - `WangTransform` for the Wang Transformation
   - `ProportionalHazard` for proportional hazards
-  - `DualPower` for dual power measure.
+  - `DualPower` for dual power measure
 
 ### Insurance mechanics
 
