@@ -7,10 +7,14 @@ makedocs(;
     modules=[ActuaryUtilities, FinanceCore],
     format=Documenter.HTML(),
     pages=[
-        "Introduction" => "index.md",
-        "Modules" => [
+        "Overview" => "index.md",
+        "Financial Math" => "financial_math.md",
+        "Risk Measures" => "risk_measures.md",
+        "Other Utilities" => "utilities.md",
+        "API" => [
             "ActuaryUtilities" => "API/ActuaryUtilities.md",
-            "FinanceCore" => "API/FinanceCore.md",],
+            "FinanceCore (re-exported)" => "API/FinanceCore.md",
+        ],
         "Upgrade from Prior Versions" => "upgrade.md",
     ],
     repo="https://github.com/JuliaActuary/ActuaryUtilities.jl/blob/{commit}{path}#L{line}",
