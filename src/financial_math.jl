@@ -1,3 +1,15 @@
+module FinancialMath
+
+import ..FinanceCore
+import ..FinanceModels
+import ..ForwardDiff
+import ..ActuaryUtilities: duration
+
+export irr, internal_rate_of_return, spread,
+    pv, present_value, price, present_values,
+    breakeven, moic,
+    Macaulay, Modified, DV01, KeyRatePar, KeyRateZero, KeyRate, duration, convexity
+
 """
     present_values(interest, cashflows, timepoints)
 
@@ -61,7 +73,7 @@ Assumptions:
 
 Returns `nothing` if cashflow stream never breaks even.
 
-```jldoctest
+```julia
 julia> breakeven(0.10, [-10,1,2,3,4,8])
 5
 
@@ -351,9 +363,9 @@ function duration(keyrate::KeyRateDuration, curve, cashflows, timepoints, krd_po
     shift = keyrate.shift
     curve_up = _krd_new_curve(keyrate, curve, krd_points)
     curve_down = _krd_new_curve(opposite(keyrate), curve, krd_points)
-    price = pv(curve, cashflows, timepoints)
-    price_up = pv(curve_up, cashflows, timepoints)
-    price_down = pv(curve_down, cashflows, timepoints)
+    price = FinanceCore.pv(curve, cashflows, timepoints)
+    price_up = FinanceCore.pv(curve_up, cashflows, timepoints)
+    price_down = FinanceCore.pv(curve_down, cashflows, timepoints)
 
 
     return (price_down - price_up) / (2 * shift * price)
@@ -424,10 +436,10 @@ Rate{Float64, Periodic}(0.010000000000000009, Periodic(1))
 function spread(curve1, curve2, cashflows, times=eachindex(cashflows))
     times = FinanceCore.timepoint.(cashflows, times)
     cashflows = FinanceCore.amount.(cashflows)
-    pv1 = pv(curve1, cashflows, times)
-    pv2 = pv(curve2, cashflows, times)
-    irr1 = irr([-pv1; cashflows], [0.0; times])
-    irr2 = irr([-pv2; cashflows], [0.0; times])
+    pv1 = FinanceCore.pv(curve1, cashflows, times)
+    pv2 = FinanceCore.pv(curve2, cashflows, times)
+    irr1 = FinanceCore.irr([-pv1; cashflows], [0.0; times])
+    irr2 = FinanceCore.irr([-pv2; cashflows], [0.0; times])
 
     return irr2 - irr1
 
@@ -450,4 +462,6 @@ function moic(cfs::T) where {T<:AbstractArray}
     returned = sum(FinanceCore.amount(cf) for cf in cfs if FinanceCore.amount(cf) > 0)
     invested = -sum(FinanceCore.amount(cf) for cf in cfs if FinanceCore.amount(cf) < 0)
     return returned / invested
+end
+
 end

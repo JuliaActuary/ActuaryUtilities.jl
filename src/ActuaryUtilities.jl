@@ -1,16 +1,18 @@
 module ActuaryUtilities
 
 using Reexport
-using Dates
+import Dates
 import FinanceCore
 @reexport using FinanceCore: internal_rate_of_return, irr, present_value, pv
-using ForwardDiff
-using QuadGK
-using MuladdMacro
+import ForwardDiff
+import QuadGK
 import FinanceModels
 import StatsBase
 using PrecompileTools
 import Distributions
+
+# need to define this here to extend it without conflict inside FinancialMath
+function duration() end
 
 include("financial_math.jl")
 include("risk_measures.jl")
@@ -26,7 +28,7 @@ first date is after the second. Use third argument to indicate if calendar
 anniversary should count as a full year.
 
 # Examples
-```jldoctest
+```julia
 julia> d1 = Date(2018,09,30);
 
 julia> d2 = Date(2019,09,30);
@@ -43,7 +45,7 @@ julia> years_between(d1,d2) # using default `true` overlap
 1 
 ```
 """
-function years_between(d1::Date, d2::Date, overlap=true)
+function years_between(d1::Dates.Date, d2::Dates.Date, overlap=true)
     iy, im, id = Dates.year(d1), Dates.month(d1), Dates.day(d1)
     vy, vm, vd = Dates.year(d2), Dates.month(d2), Dates.day(d2)
     dur = vy - iy
@@ -64,7 +66,6 @@ function years_between(d1::Date, d2::Date, overlap=true)
     return dur - 1
 end
 
-
 """
     duration(d1::Date, d2::Date)
 
@@ -73,7 +74,7 @@ since the first date. The interval `[0,1)` is defined as having
 duration `1`. Can return negative durations if second argument is before the first.
 
 
-```jldoctest
+```julia
 julia> issue_date  = Date(2018,9,30);
 
 julia> duration(issue_date , Date(2019,9,30) ) 
@@ -91,7 +92,7 @@ julia> duration(Date(2018,9,30),Date(2017,6,30))
 ```
 
 """
-function duration(issue_date::Date, proj_date::Date)
+function duration(issue_date::Dates.Date, proj_date::Dates.Date)
     return years_between(issue_date, proj_date, true) + 1
 end
 
@@ -145,17 +146,11 @@ function accum_offset(x; op=*, init=1.0)
     return xnew
 end
 
-include("precompile.jl")
+# include("precompile.jl")
 
 
 @reexport using .FinancialMath
+@reexport using .RiskMeasures
 export years_between, duration,
-    irr, internal_rate_of_return, spread,
-    pv, present_value, price, present_values,
-    breakeven, moic,
-    accum_offset,
-    Macaulay, Modified, DV01, KeyRatePar, KeyRateZero, KeyRate, duration, convexity,
-    VaR, ValueAtRisk, CTE, ConditionalTailExpectation, ExpectedShortfall,
-    eurocall, europut
-
+    accum_offset
 end # module

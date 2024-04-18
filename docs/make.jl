@@ -7,8 +7,8 @@ makedocs(;
     modules=[ActuaryUtilities, FinanceCore],
     format=Documenter.HTML(),
     pages=[
-        "Introduction" => "index.md",
-        "Modules" => [
+        "Overview" => "index.md",
+        "Financial Math" => "financial_math.md",
         "Risk Measures" => "risk_measures.md",
         "API" => [
             "ActuaryUtilities" => "API/ActuaryUtilities.md",

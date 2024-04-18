@@ -254,8 +254,8 @@ end
 
         c = FM.Yield.Constant(FC.Periodic(0.04, 2))
 
-        cp = ActuaryUtilities._krd_new_curve(KeyRatePar(5), c, 1:10)
-        cz = ActuaryUtilities._krd_new_curve(KeyRateZero(5), c, 1:10)
+        cp = FinancialMath._krd_new_curve(KeyRatePar(5), c, 1:10)
+        cz = FinancialMath._krd_new_curve(KeyRateZero(5), c, 1:10)
 
         # test some relationships between par and zero curve
         @test FM.par(cp, 5) ≈ FM.par(c, 5) + default_shift atol = 0.0002 # 0.001 is the default shift
