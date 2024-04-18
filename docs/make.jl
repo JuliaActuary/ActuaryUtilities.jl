@@ -9,8 +9,11 @@ makedocs(;
     pages=[
         "Introduction" => "index.md",
         "Modules" => [
+        "Risk Measures" => "risk_measures.md",
+        "API" => [
             "ActuaryUtilities" => "API/ActuaryUtilities.md",
-            "FinanceCore" => "API/FinanceCore.md",],
+            "FinanceCore (re-exported)" => "API/FinanceCore.md",
+        ],
         "Upgrade from Prior Versions" => "upgrade.md",
     ],
     repo="https://github.com/JuliaActuary/ActuaryUtilities.jl/blob/{commit}{path}#L{line}",

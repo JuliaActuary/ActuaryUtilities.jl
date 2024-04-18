@@ -148,6 +148,7 @@ end
 include("precompile.jl")
 
 
+@reexport using .FinancialMath
 export years_between, duration,
     irr, internal_rate_of_return, spread,
     pv, present_value, price, present_values,

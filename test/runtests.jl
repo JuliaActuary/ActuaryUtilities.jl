@@ -2,6 +2,8 @@ using ActuaryUtilities
 
 using Dates
 using Test
+using Distributions
+using StatsBase
 
 const FM = ActuaryUtilities.FinanceModels
 const FC = ActuaryUtilities.FinanceCore

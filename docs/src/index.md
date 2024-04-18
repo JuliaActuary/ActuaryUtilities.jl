@@ -28,14 +28,14 @@ A collection of common functions/manipulations used in Actuarial Calculations.
 - `accum_offset` to calculate accumulations like survivorship from a mortality vector
 - `spread` will calculate the spread needed between two yield curves to equate a set of cashflows
 
-### Options Pricing
-- `eurocall` and `europut` for Black-Scholes option prices (note: API may change for this in future)
-
 ### Risk Measures
 
 - Calculate risk measures for a given vector of risks:
-  - `CTE` for the Conditional Tail Expectation, or
-  - `VaR` for the percentile/Value at Risk.
+  - `CTE` for the Conditional Tail Expectation
+  - `VaR` for the percentile/Value at Risk
+  - `WangTransform` for the Wang Transformation
+  - `ProportionalHazard` for proportional hazards
+  - `DualPower` for dual power measure.
 
 ### Insurance mechanics
 
