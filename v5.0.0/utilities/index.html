@@ -1,0 +1,92 @@
+<!DOCTYPE html>
+<html lang="en"><head><meta charset="UTF-8"/><meta name="viewport" content="width=device-width, initial-scale=1.0"/><title>Other Utilities · ActuaryUtilities.jl</title><meta name="title" content="Other Utilities · ActuaryUtilities.jl"/><meta property="og:title" content="Other Utilities · ActuaryUtilities.jl"/><meta property="twitter:title" content="Other Utilities · ActuaryUtilities.jl"/><meta name="description" content="Documentation for ActuaryUtilities.jl."/><meta property="og:description" content="Documentation for ActuaryUtilities.jl."/><meta property="twitter:description" content="Documentation for ActuaryUtilities.jl."/><script data-outdated-warner src="../assets/warner.js"></script><link href="https://cdnjs.cloudflare.com/ajax/libs/lato-font/3.0.0/css/lato-font.min.css" rel="stylesheet" type="text/css"/><link href="https://cdnjs.cloudflare.com/ajax/libs/juliamono/0.050/juliamono.min.css" rel="stylesheet" type="text/css"/><link href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.2/css/fontawesome.min.css" rel="stylesheet" type="text/css"/><link href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.2/css/solid.min.css" rel="stylesheet" type="text/css"/><link href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.2/css/brands.min.css" rel="stylesheet" type="text/css"/><link href="https://cdnjs.cloudflare.com/ajax/libs/KaTeX/0.16.8/katex.min.css" rel="stylesheet" type="text/css"/><script>documenterBaseURL=".."</script><script src="https://cdnjs.cloudflare.com/ajax/libs/require.js/2.3.6/require.min.js" data-main="../assets/documenter.js"></script><script src="../search_index.js"></script><script src="../siteinfo.js"></script><script src="../../versions.js"></script><link class="docs-theme-link" rel="stylesheet" type="text/css" href="../assets/themes/documenter-dark.css" data-theme-name="documenter-dark" data-theme-primary-dark/><link class="docs-theme-link" rel="stylesheet" type="text/css" href="../assets/themes/documenter-light.css" data-theme-name="documenter-light" data-theme-primary/><script src="../assets/themeswap.js"></script></head><body><div id="documenter"><nav class="docs-sidebar"><a class="docs-logo" href="../"><img src="../assets/logo.svg" alt="ActuaryUtilities.jl logo"/></a><div class="docs-package-name"><span class="docs-autofit"><a href="../">ActuaryUtilities.jl</a></span></div><button class="docs-search-query input is-rounded is-small is-clickable my-2 mx-auto py-1 px-2" id="documenter-search-query">Search docs (Ctrl + /)</button><ul class="docs-menu"><li><a class="tocitem" href="../">Overview</a></li><li><a class="tocitem" href="../financial_math/">Financial Math</a></li><li><a class="tocitem" href="../risk_measures/">Risk Measures</a></li><li class="is-active"><a class="tocitem" href>Other Utilities</a><ul class="internal"><li><a class="tocitem" href="#API"><span>API</span></a></li></ul></li><li><span class="tocitem">API</span><ul><li><a class="tocitem" href="../API/ActuaryUtilities/">ActuaryUtilities</a></li><li><a class="tocitem" href="../API/FinanceCore/">FinanceCore (re-exported)</a></li></ul></li><li><a class="tocitem" href="../upgrade/">Upgrade from Prior Versions</a></li></ul><div class="docs-version-selector field has-addons"><div class="control"><span class="docs-label button is-static is-size-7">Version</span></div><div class="docs-selector control is-expanded"><div class="select is-fullwidth is-size-7"><select id="documenter-version-selector"></select></div></div></div></nav><div class="docs-main"><header class="docs-navbar"><a class="docs-sidebar-button docs-navbar-link fa-solid fa-bars is-hidden-desktop" id="documenter-sidebar-button" href="#"></a><nav class="breadcrumb"><ul class="is-hidden-mobile"><li class="is-active"><a href>Other Utilities</a></li></ul><ul class="is-hidden-tablet"><li class="is-active"><a href>Other Utilities</a></li></ul></nav><div class="docs-right"><a class="docs-navbar-link" href="https://github.com/JuliaActuary/ActuaryUtilities.jl/blob/master/docs/src/utilities.md#L" title="Edit source on GitHub"><span class="docs-icon fa-solid"></span></a><a class="docs-settings-button docs-navbar-link fa-solid fa-gear" id="documenter-settings-button" href="#" title="Settings"></a><a class="docs-article-toggle-button fa-solid fa-chevron-up" id="documenter-article-toggle-button" href="javascript:;" title="Collapse all docstrings"></a></div></header><article class="content" id="documenter-page"><h1 id="Utilities-submodule"><a class="docs-heading-anchor" href="#Utilities-submodule">Utilities submodule</a><a id="Utilities-submodule-1"></a><a class="docs-heading-anchor-permalink" href="#Utilities-submodule" title="Permalink"></a></h1><p>Provides miscellaneous routines common in actuarial and financial work.</p><h2 id="API"><a class="docs-heading-anchor" href="#API">API</a><a id="API-1"></a><a class="docs-heading-anchor-permalink" href="#API" title="Permalink"></a></h2><h3 id="Exported-API"><a class="docs-heading-anchor" href="#Exported-API">Exported API</a><a id="Exported-API-1"></a><a class="docs-heading-anchor-permalink" href="#Exported-API" title="Permalink"></a></h3><article class="docstring"><header><a class="docstring-article-toggle-button fa-solid fa-chevron-down" href="javascript:;" title="Collapse docstring"></a><a class="docstring-binding" id="ActuaryUtilities.duration" href="#ActuaryUtilities.duration"><code>ActuaryUtilities.duration</code></a> — <span class="docstring-category">Function</span></header><section><div><pre><code class="language-julia hljs">duration(d1::Date, d2::Date)</code></pre><p>Compute the duration given two dates, which is the number of years since the first date. The interval <code>[0,1)</code> is defined as having  duration <code>1</code>. Can return negative durations if second argument is before the first.</p><pre><code class="language-julia hljs">julia&gt; issue_date  = Date(2018,9,30);
+
+julia&gt; duration(issue_date , Date(2019,9,30) ) 
+2
+julia&gt; duration(issue_date , issue_date) 
+1
+julia&gt; duration(issue_date , Date(2018,10,1) ) 
+1
+julia&gt; duration(issue_date , Date(2019,10,1) ) 
+2
+julia&gt; duration(issue_date , Date(2018,6,30) ) 
+0
+julia&gt; duration(Date(2018,9,30),Date(2017,6,30)) 
+-1</code></pre></div><a class="docs-sourcelink" target="_blank" href="https://github.com/JuliaActuary/ActuaryUtilities.jl/blob/f7ab23cf22c727530259f559fd7601c8e7070527/src/utilities.jl#LL56-L81">source</a></section><section><div><pre><code class="language-julia hljs">duration(Macaulay(),interest_rate,cfs,times)
+duration(Modified(),interest_rate,cfs,times)
+duration(DV01(),interest_rate,cfs,times)
+duration(interest_rate,cfs,times)             # Modified Duration
+duration(interest_rate,valuation_function)    # Modified Duration</code></pre><p>Calculates the Macaulay, Modified, or DV01 duration. <code>times</code> may be ommitted and the valuation will assume evenly spaced cashflows starting at the end of the first period.</p><p>Note that the calculated duration will depend on the periodicity convention of the <code>interest_rate</code>: a <code>Periodic</code> yield (or yield model with that convention) will be a slightly different computed duration than a <code>Continous</code> which follows from the present value differing according to the periodicity.</p><p>When not given <code>Modified()</code> or <code>Macaulay()</code> as an argument, will default to <code>Modified()</code>.</p><ul><li>Modified duration: the relative change per point of yield change.</li><li>Macaulay: the cashflow-weighted average time.</li><li>DV01: the absolute change per basis point (hundredth of a percentage point).</li></ul><p><strong>Examples</strong></p><p>Using vectors of cashflows and times</p><pre><code class="language-julia-repl hljs">julia&gt; times = 1:5;
+
+julia&gt; cfs = [0,0,0,0,100];
+
+julia&gt; duration(0.03,cfs,times)
+4.854368932038835
+
+julia&gt; duration(Periodic(0.03,1),cfs,times)
+4.854368932038835
+
+julia&gt; duration(Continuous(0.03),cfs,times)
+5.0
+
+julia&gt; duration(Macaulay(),0.03,cfs,times)
+5.0
+
+julia&gt; duration(Modified(),0.03,cfs,times)
+4.854368932038835
+
+julia&gt; convexity(0.03,cfs,times)
+28.277877274012614
+</code></pre><p>Using any given value function: </p><pre><code class="language-julia-repl hljs">julia&gt; lump_sum_value(amount,years,i) = amount / (1 + i ) ^ years
+julia&gt; my_lump_sum_value(i) = lump_sum_value(100,5,i)
+julia&gt; duration(0.03,my_lump_sum_value)
+4.854368932038835
+julia&gt; convexity(0.03,my_lump_sum_value)
+28.277877274012617
+</code></pre></div><a class="docs-sourcelink" target="_blank" href="https://github.com/JuliaActuary/ActuaryUtilities.jl/blob/f7ab23cf22c727530259f559fd7601c8e7070527/src/financial_math.jl#LL172-L229">source</a></section><section><div><pre><code class="language-julia hljs">duration(keyrate::KeyRateDuration,curve,cashflows)    
+duration(keyrate::KeyRateDuration,curve,cashflows,timepoints)
+duration(keyrate::KeyRateDuration,curve,cashflows,timepoints,krd_points)</code></pre><p>Calculate the key rate duration by shifting the <strong>zero</strong> (not par) curve by the kwarg <code>shift</code> at the timepoint specified by a KeyRateDuration(time).</p><p>The approach is to carve up the curve into <code>krd_points</code> (default is the unit steps between <code>1</code> and  the last timepoint of the casfhlows). The  zero rate corresponding to the timepoint within the <code>KeyRateDuration</code> is shifted by <code>shift</code> (specified by the <code>KeyRateZero</code> or <code>KeyRatePar</code> constructors. A new curve is created from the shifted rates. This means that the  &quot;width&quot; of the shifted section is ± 1 time period, unless specific points are specified via <code>krd_points</code>.</p><p>The <code>curve</code> may be any FinanceModels.jl curve (e.g. does not have to be a curve constructed via <code>FinanceModels.Zero(...)</code>).</p><p>!!! Experimental: Due to the paucity of examples in the literature, this feature does not have unit tests like the rest of JuliaActuary functionality. Additionally, the API may change in a future major/minor version update.</p><p><strong>Examples</strong></p><pre><code class="language-julia-repl hljs">julia&gt; riskfree_maturities = [0.5, 1.0, 1.5, 2.0];
+
+julia&gt; riskfree    = [0.05, 0.058, 0.064,0.068];
+
+julia&gt; rf_curve = FinanceModels.Zero(riskfree,riskfree_maturities);
+
+julia&gt; cfs = [10,10,10,10,10];
+
+julia&gt; duration(KeyRate(1),rf_curve,cfs)
+8.932800152336995
+</code></pre><p><strong>Extended Help</strong></p><p>Key Rate Duration is not a well specified topic in the literature and in practice. The reference below suggest that shocking the par curve is more common  in practice, but that the zero curve produces more consistent results. Future versions may support shifting the par curve.</p><p>References: </p><ul><li><a href="https://quant.stackexchange.com/questions/33891/to-compute-key-rate-duration-shall-i-use-par-curve-or-zero-curve">Quant Finance Stack Exchange: To compute key rate duration, shall I use par curve or zero curve?</a></li><li>(Financial Exam Help 123](http://www.financialexamhelp123.com/key-rate-duration/)</li></ul></div><a class="docs-sourcelink" target="_blank" href="https://github.com/JuliaActuary/ActuaryUtilities.jl/blob/f7ab23cf22c727530259f559fd7601c8e7070527/src/financial_math.jl#LL320-L361">source</a></section></article><article class="docstring"><header><a class="docstring-article-toggle-button fa-solid fa-chevron-down" href="javascript:;" title="Collapse docstring"></a><a class="docstring-binding" id="ActuaryUtilities.Utilities.years_between" href="#ActuaryUtilities.Utilities.years_between"><code>ActuaryUtilities.Utilities.years_between</code></a> — <span class="docstring-category">Function</span></header><section><div><pre><code class="language-julia hljs">Years_Between(d1::Date, d2::Date)</code></pre><p>Compute the number of integer years between two dates, with the  first date typically before the second. Will return negative number if first date is after the second. Use third argument to indicate if calendar  anniversary should count as a full year.</p><p><strong>Examples</strong></p><pre><code class="language-julia hljs">julia&gt; d1 = Date(2018,09,30);
+
+julia&gt; d2 = Date(2019,09,30);
+
+julia&gt; d3 = Date(2019,10,01);
+
+julia&gt; years_between(d1,d3) 
+1
+julia&gt; years_between(d1,d2,false) # same month/day but `false` overlap
+0 
+julia&gt; years_between(d1,d2) # same month/day but `true` overlap
+1 
+julia&gt; years_between(d1,d2) # using default `true` overlap
+1 </code></pre></div><a class="docs-sourcelink" target="_blank" href="https://github.com/JuliaActuary/ActuaryUtilities.jl/blob/f7ab23cf22c727530259f559fd7601c8e7070527/src/utilities.jl#LL9-L34">source</a></section></article><article class="docstring"><header><a class="docstring-article-toggle-button fa-solid fa-chevron-down" href="javascript:;" title="Collapse docstring"></a><a class="docstring-binding" id="ActuaryUtilities.Utilities.accum_offset" href="#ActuaryUtilities.Utilities.accum_offset"><code>ActuaryUtilities.Utilities.accum_offset</code></a> — <span class="docstring-category">Function</span></header><section><div><pre><code class="language-julia hljs">accum_offset(x; op=*, init=1.0)</code></pre><p>A shortcut for the common operation wherein a vector is scanned with an operation, but has an initial value and the resulting array is offset from the traditional accumulate. </p><p>This is a common pattern when calculating things like survivorship given a mortality vector and you want the first value of the resulting vector to be <code>1.0</code>, and the second value to be <code>1.0 * x[1]</code>, etc.</p><p>Two keyword arguments:</p><ul><li><code>op</code> is the binary (two argument) operator you want to use, such as <code>*</code> or <code>+</code></li><li><code>init</code> is the initial value in the returned array</li></ul><p><strong>Examples</strong></p><pre><code class="language-julia hljs">julia&gt; accum_offset([0.9, 0.8, 0.7])
+3-element Array{Float64,1}:
+ 1.0
+ 0.9
+ 0.7200000000000001
+
+julia&gt; accum_offset(1:5) # the product of elements 1:n, with the default `1` as the first value
+5-element Array{Int64,1}:
+  1
+  1
+  2
+  6
+ 24
+
+julia&gt; accum_offset(1:5,op=+)
+5-element Array{Int64,1}:
+  1
+  2
+  4
+  7
+ 11
+</code></pre></div><a class="docs-sourcelink" target="_blank" href="https://github.com/JuliaActuary/ActuaryUtilities.jl/blob/f7ab23cf22c727530259f559fd7601c8e7070527/src/utilities.jl#LL87-L126">source</a></section></article></article><nav class="docs-footer"><a class="docs-footer-prevpage" href="../risk_measures/">« Risk Measures</a><a class="docs-footer-nextpage" href="../API/ActuaryUtilities/">ActuaryUtilities »</a><div class="flexbox-break"></div><p class="footer-message">Powered by <a href="https://github.com/JuliaDocs/Documenter.jl">Documenter.jl</a> and the <a href="https://julialang.org/">Julia Programming Language</a>.</p></nav></div><div class="modal" id="documenter-settings"><div class="modal-background"></div><div class="modal-card"><header class="modal-card-head"><p class="modal-card-title">Settings</p><button class="delete"></button></header><section class="modal-card-body"><p><label class="label">Theme</label><div class="select"><select id="documenter-themepicker"><option value="auto">Automatic (OS)</option><option value="documenter-light">documenter-light</option><option value="documenter-dark">documenter-dark</option></select></div></p><hr/><p>This document was generated with <a href="https://github.com/JuliaDocs/Documenter.jl">Documenter.jl</a> version 1.4.0 on <span class="colophon-date" title="Thursday 18 April 2024 04:38">Thursday 18 April 2024</span>. Using Julia version 1.9.4.</p></section><footer class="modal-card-foot"></footer></div></div></div></body></html>
