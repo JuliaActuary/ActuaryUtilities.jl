@@ -72,7 +72,7 @@ A risk measure is "exhaustive" if it is coherent and complete.
 
 #### Adaptable
 
-A risk measure is "adapted" or "adaptable" if its distortion function (ee [Distortion Risk Measures](@ref)). $g$:
+A risk measure is "adapted" or "adaptable" if its distortion function (see [Distortion Risk Measures](@ref)) $g$:
 
     1. $g$ is strictly concave, that is $g$ is strictly decreasing. 
     2. $lim_{u\to0+} g\prime(u) = \inf and lim_{u\to1-} g\prime(u) = 0.
