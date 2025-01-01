@@ -18,12 +18,12 @@ rm(outcomes) # ≈ 0.90
 
 ## Introduction
 
-Risk measures encompass the set of functions that map a set of outcomes to an output value characterizing the associated riskiness of those outcomes. As is usual when attempting to compress information (e.g. condensing information into a single value), there are multiple ways we can charactize this riskiness.
+Risk measures encompass the set of functions that map a set of outcomes to an output value characterizing the associated riskiness of those outcomes. As is usual when attempting to compress information (e.g. condensing information into a single value), there are multiple ways we can characterize this riskiness.
 
 
 ## Coherence & Other Desirable Properties
 
-Further, it is desireable that a risk measure has certain properties, and risk measures that meet the first four criteria are called "Coherent" in the literature.  From "An Introduction to Risk Measures for Actuarial Applications" (Hardy), she describes as follows:
+Further, it is desirable that a risk measure has certain properties, and risk measures that meet the first four criteria are called "Coherent" in the literature.  From "An Introduction to Risk Measures for Actuarial Applications" (Hardy), she describes as follows:
 
 Using $H$ as a risk measure and $X$ as the associated risk distribution:
 
@@ -62,7 +62,7 @@ In "Properties of Distortion Risk Measures" (Balbás, Garrido, Mayoral) also no
 
 #### Complete
 
-Completeness is the property that the distortion function associated with the risk measure produces a unique mapping between the original risk's survial function $S(x)$ and the distorted  $S*(x)$ for each $x$. See [Distortion Risk Measures](@ref) for more detail on this.
+Completeness is the property that the distortion function associated with the risk measure produces a unique mapping between the original risk's survival function $S(x)$ and the distorted  $S*(x)$ for each $x$. See [Distortion Risk Measures](@ref) for more detail on this.
 
 In practice, this means that a non-complete risk measure ignores some part of the risk distribution (e.g. CTE and VaR don't use the full distribution and have the same)
 
@@ -72,7 +72,7 @@ A risk measure is "exhaustive" if it is coherent and complete.
 
 #### Adaptable
 
-A risk measure is "adapted" or "adaptable" if its distortion function (ee [Distortion Risk Measures](@ref)).$g$:
+A risk measure is "adapted" or "adaptable" if its distortion function (ee [Distortion Risk Measures](@ref)). $g$:
 
     1. $g$ is strictly concave, that is $g$ is strictly decreasing. 
     2. $lim_{u\to0+} g\prime(u) = \inf and lim_{u\to1-} g\prime(u) = 0.
@@ -110,7 +110,7 @@ To calculate a risk measure $H$, we integrate the distorted $F$ across all possi
 
 $$H(X) = E^*(X) = - \int_{-\infty}^0 g(F(x))dx + \int_0^{+\infty}[1-g(F(x))]dx$$
 
-That is, the risk measure ($H$) is equal to the expected value of the distortion of the risk ditribution ($E^*(X)$).
+That is, the risk measure ($H$) is equal to the expected value of the distortion of the risk distribution ($E^*(X)$).
 
 ## Examples
 
