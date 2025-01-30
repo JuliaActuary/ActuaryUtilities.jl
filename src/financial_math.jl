@@ -4,6 +4,7 @@ import ..FinanceCore
 import ..FinanceModels
 import ..ForwardDiff
 import ..ActuaryUtilities: duration
+import ..ActuaryUtilities.Utilities: _segment_reals
 
 export irr, internal_rate_of_return, spread,
     pv, present_value, price, present_values,
@@ -250,6 +251,9 @@ function duration(yield, cfs)
     times = FinanceCore.timepoint.(cfs, 1:length(cfs))
     return duration(Modified(), yield, cfs, times)
 end
+function duration(yield, cf::FinanceCore.Cashflow)
+    return duration(Modified(), yield, cf.amount, cf.time)
+end
 
 function duration(::DV01, yield, cfs, times)
     return duration(DV01(), yield, i -> price(i, vec(cfs), times))
@@ -420,6 +424,78 @@ function duration(keyrate::KeyRateDuration, curve, cashflows)
     return duration(keyrate, curve, cashflows, timepoints, krd_points)
 
 end
+
+
+"""
+    _residutal_duration(curve,cashflows,time)
+
+Return the duration of the cashflows for the cashflows that occur at or after `time`, weighted by the overall contribution to the present value.
+
+## Extended Help
+
+This is useful when looking to segment the duration into key rates.
+"""
+function _residual_duration(time, cashflows)
+    fcf = filter(c -> c.time >= time, cashflows)
+    if isempty(fcf)
+        return zero(first(cashflows).amount)
+    else
+        d = duration(curve, fcf)
+        d * pv(curve, fcf) / pv(curve, cashflows)
+    end
+end
+
+"""
+
+    _duration_cf(curve,cashflows,time)
+
+For every cashflow in `cashflows`, return a partial duration associated with that cashflow. If the cashflows are dynamic, the duration may not be correct.
+
+## Extended Help
+
+This is useful when looking to segment the duration into key rates.
+"""
+function _duration_cf(curve, cashflows)
+    p = FinanceCore.pv(curve, cashflows)
+    map(cashflows) do cf
+        d = duration(curve, cf)
+        p_i = FinanceCore.pv(curve, cf)
+        (partial_duration=d * p_i / p, time=cf.time)
+    end
+end
+
+abstract type WeightShape end
+struct Triangular <: WeightShape end
+struct Rectangular <: WeightShape end
+
+# TODO: How to handle where points aren't well ordered unique set?
+# banding takes care of it, but do we want to lose that in the response?
+# TODO: Triangular algorithm depends on the above answers.
+function krds(curve, cashflows, points, ::Rectangular)
+    dcf = _duration_cf(curve, cashflows)
+    bands = _segment_reals(points)
+
+    map(bands) do b
+
+        sum(c.partial_duration for c in dcf if (c.time >= first(b)) && (c.time < last(b)))
+    end
+
+end
+
+function krds(curve, cashflows, points, ::Triangular)
+    dcf = _duration_cf(curve, cashflows)
+    bands = _segment_reals(points)
+
+    map(enumerate(bands)) do (i, b)
+        if i == 1
+
+        end
+
+    end
+
+end
+
+
 
 """ 
     spread(curve1,curve2,cashflows)
