@@ -320,3 +320,65 @@ end
 
     @test s ≈ FC.Periodic(0.01, 1) atol = 0.002
 end
+
+@testset "segmenting times" begin
+    u = ActuaryUtilities.Utilities
+    # Three central points
+    central_points = [1.0, 3.0, 5.0]
+    expected_output = [(-Inf, 2.0), (2.0, 4.0), (4.0, Inf)]
+    @test u._segment_reals(central_points) == expected_output
+
+
+    # Single central point
+    central_points = [2.0]
+    expected_output = [(-Inf, Inf)]
+    @test u._segment_reals(central_points) == expected_output
+
+
+    # Two central points
+    central_points = [2.0, 4.0]
+    expected_output = [(-Inf, 3.0), (3.0, Inf)]
+    @test u._segment_reals(central_points) == expected_output
+
+
+    # Descending order of central points
+    central_points = [5.0, 3.0, 1.0]
+    expected_output = [(-Inf, 2.0), (2.0, 4.0), (4.0, Inf)]  # Sorted internally
+    @test u._segment_reals(central_points) == expected_output
+
+
+    # Central points with duplicates
+    central_points = [1.0, 3.0, 3.0, 5.0]
+    expected_output = [(-Inf, 2.0), (2.0, 3.0), (3.0, 4.0), (4.0, Inf)]
+    @test u._segment_reals(central_points) == expected_output
+
+
+    # Evenly spaced points
+    central_points = collect(1:10)  # [1, 2, ..., 10]
+    expected_output = vcat([(-Inf, 1.5)], [(i - 0.5, i + 0.5) for i in 2:9]..., [(9.5, Inf)])
+    @test u._segment_reals(central_points) == expected_output
+
+
+    # Large values in central points
+    central_points = [1e6, 1e7]
+    expected_output = [(-Inf, 5.5e6), (5.5e6, Inf)]
+    @test u._segment_reals(central_points) == expected_output
+
+
+    # Small values in central points
+    central_points = [1e-6, 1e-3]
+    expected_output = [(-Inf, (1e-6 + 1e-3) / 2), ((1e-6 + 1e-3) / 2, Inf)]
+    @test u._segment_reals(central_points) == expected_output
+
+
+    # Empty list of central points
+    central_points = []
+    expected_output = [] # No bands can be created from an empty list
+    @test isempty(u._segment_reals(central_points))
+
+
+    # Negative values in input
+    u._segment_reals([-1.0, -2.0]) == [(-Inf, -1.5), (1.5, Inf)]
+
+
+end

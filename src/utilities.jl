@@ -132,4 +132,32 @@ function accum_offset(x; op=*, init=1.0)
     end
     return xnew
 end
+
+function _segment_reals(central_points)
+    length(central_points) == 1 && return [(-Inf, Inf)]
+    # Sort central points to ensure they are in ascending order
+    sorted_points = sort(central_points)
+
+    # Create bands
+    bounds = map(enumerate(sorted_points)) do (i, p)
+        if i == 1
+            # First band: from 0 to the midpoint between the first two points
+            low = -Inf
+            hi = (sorted_points[i] + sorted_points[i+1]) / 2.0
+        elseif i == length(sorted_points)
+            # Last band: from the midpoint of the last two points to infinity
+            low = (sorted_points[i-1] + sorted_points[i]) / 2.0
+            hi = Inf
+        else
+            # Middle bands: between midpoints of adjacent points
+            low = (sorted_points[i-1] + sorted_points[i]) / 2.0
+            hi = (sorted_points[i] + sorted_points[i+1]) / 2.0
+        end
+
+        (low, hi)
+    end
+
+    return bounds
+end
+
 end
