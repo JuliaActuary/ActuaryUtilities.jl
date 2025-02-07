@@ -475,25 +475,41 @@ function krds(curve, cashflows, points, ::Rectangular)
     dcf = _duration_cf(curve, cashflows)
     bands = _segment_reals(points)
 
-    map(bands) do b
+    map(bands) do band
+        low, high = band.low, band.high
 
-        sum(c.partial_duration for c in dcf if (c.time >= first(b)) && (c.time < last(b)))
+        # Sum partial durations for cashflows within the band
+        krd = sum(c.partial_duration for c in dcf if (c.time >= low) && (c.time < high))
+
+        # Return the band and its corresponding KRD
+        (; band=band, krd=krd)
     end
-
 end
-
 function krds(curve, cashflows, points, ::Triangular)
     dcf = _duration_cf(curve, cashflows)
     bands = _segment_reals(points)
 
-    map(enumerate(bands)) do (i, b)
-        if i == 1
+    map(bands) do band
+        low, high, point = band.low, band.high, band.point
+        krd = 0.0
 
+        for c in dcf
+            if c.time >= low && c.time < high
+                # Calculate weights based on proximity to the central point
+                if c.time <= point
+                    weight = max(0, (c.time - low) / (point - low))
+                else
+                    weight = max(0, (high - c.time) / (high - point))
+                end
+                krd += c.partial_duration * weight
+            end
         end
 
+        (; band=band, krd=krd)
     end
-
 end
+
+
 
 
 
