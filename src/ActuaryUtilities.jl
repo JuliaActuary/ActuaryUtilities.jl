@@ -14,9 +14,9 @@ import Distributions
 # need to define this here to extend it without conflict inside FinancialMath
 function duration() end
 
+include("utilities.jl")
 include("financial_math.jl")
 include("risk_measures.jl")
-include("utilities.jl")
 
 
 

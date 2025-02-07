@@ -4,6 +4,7 @@ import ..FinanceCore
 import ..FinanceModels
 import ..ForwardDiff
 import ..ActuaryUtilities: duration
+import ..ActuaryUtilities.Utilities: _segment_reals
 
 export irr, internal_rate_of_return, spread,
     pv, present_value, price, present_values,
@@ -250,6 +251,9 @@ function duration(yield, cfs)
     times = FinanceCore.timepoint.(cfs, 1:length(cfs))
     return duration(Modified(), yield, cfs, times)
 end
+function duration(yield, cf::FinanceCore.Cashflow)
+    return duration(Modified(), yield, cf.amount, cf.time)
+end
 
 function duration(::DV01, yield, cfs, times)
     return duration(DV01(), yield, i -> price(i, vec(cfs), times))
@@ -420,6 +424,131 @@ function duration(keyrate::KeyRateDuration, curve, cashflows)
     return duration(keyrate, curve, cashflows, timepoints, krd_points)
 
 end
+
+
+"""
+    _residual_duration(curve, cashflows, time)
+
+Return the residual duration for cashflows occurring at or after `time`, weighted by their proportional contribution to the total present value.
+
+This measure decomposes overall portfolio duration by attributing the “remaining” duration to cashflows beyond a given horizon. It is useful for cash flow duration contribution analysis, which focuses on how each cashflow’s timing impacts the overall duration rather than isolating sensitivities at specific curve points.
+"""
+function _residual_duration(time, cashflows)
+    fcf = filter(c -> c.time >= time, cashflows)
+    if isempty(fcf)
+        return zero(first(cashflows).amount)
+    else
+        d = duration(curve, fcf)
+        d * pv(curve, fcf) / pv(curve, cashflows)
+    end
+end
+
+"""
+    _duration_cf(curve, cashflows)
+
+For each cashflow in `cashflows`, compute its partial duration contribution. Each cashflow’s duration is weighted by its proportion of the aggregate present value so that the sum of partial durations equals the overall portfolio duration.
+
+This function forms the basis for our cash flow duration contribution analysis, breaking down the overall duration into weighted pieces assigned to each cashflow.
+"""
+function _duration_cf(curve, cashflows)
+    p = FinanceCore.pv(curve, cashflows)
+    map(cashflows) do cf
+        d = duration(curve, cf)
+        p_i = FinanceCore.pv(curve, cf)
+        (partial_duration=d * p_i / p, time=cf.time)
+    end
+end
+
+abstract type WeightShape end
+struct Triangular <: WeightShape end
+struct Rectangular <: WeightShape end
+
+"""
+    duration_contributions(curve, cashflows, points, ::Rectangular)
+
+Calculate the cash flow duration contributions segmented by bands defined from `points`
+using a rectangular (uniform) weighting scheme. In each band, every cashflow whose time
+falls between the band's lower (low) and upper (high) bounds is given full weight, meaning
+its partial duration contribution is applied in full.
+
+The bands are determined using _segment_reals, which returns a named tuple for each band
+with the fields: low, high, and point (the central reference).
+
+This function decomposes the overall portfolio duration into contributions from each band,
+facilitating an analysis of how cashflows at different maturities contribute to total duration.
+"""
+function duration_contributions(curve, cashflows, points, ::Rectangular)
+    dcf = _duration_cf(curve, cashflows)
+    bands = _segment_reals(points)
+
+    map(bands) do band
+        low, high = band.low, band.high
+
+        # Sum partial durations for cashflows within the band
+        krd = sum(c.partial_duration for c in dcf if (c.time >= low) && (c.time < high))
+
+        # Return the band and its corresponding KRD
+        (; band=band, krd=krd)
+    end
+end
+
+"""
+duration_contributions(curve, cashflows, points, ::Triangular)
+
+Calculate the cash flow duration contributions segmented by bands defined from `points`
+using a triangular (linearly graded) weighting scheme. Within each band, cashflows are
+weighted based on their proximity to the band’s central point:
+  - In a middle band, cashflows before the central point are assigned a weight that increases 
+    linearly from the band's lower bound to the central point, while cashflows after are 
+    linearly decreased from the central point to the band's upper bound.
+  - In the first band (with low == -Inf), cashflows on the finite side (c.time >= low) receive 
+    full weight if they are no later than the central point; those after the central point have 
+    their weights linearly decreased.
+  - In the last band (with high == Inf), cashflows on the finite side (c.time < high) receive 
+    full weight if they are no earlier than the central point; those before the central point have 
+    weights linearly increased.
+
+The bands are determined via _segment_reals, which returns each band as a named tuple with 
+low, high, and point. This function provides a refined breakdown of overall duration by assigning
+differentiated weights to cashflows according to their timing relative to the band’s center.
+"""
+function duration_contributions(curve, cashflows, points, ::Triangular)
+    dcf = _duration_cf(curve, cashflows)
+    bands = _segment_reals(points)
+
+    map(bands) do band
+        low, high, point = band.low, band.high, band.point
+        krd = 0.0
+        isfirst = band == first(bands)
+        islast = band == last(bands)
+
+        for c in dcf
+            if c.time >= low && c.time < high
+                # Calculate weights based on proximity to the central point
+                if c.time <= point
+                    weight = if isfirst
+                        1
+                    else
+                        max(0, (c.time - low) / (point - low))
+                    end
+                else
+                    if islast
+                        1
+                    else
+                        weight = max(0, (high - c.time) / (high - point))
+                    end
+                end
+                krd += c.partial_duration * weight
+            end
+        end
+
+        (; band=band, krd=krd)
+    end
+end
+
+
+
+
 
 """ 
     spread(curve1,curve2,cashflows)
