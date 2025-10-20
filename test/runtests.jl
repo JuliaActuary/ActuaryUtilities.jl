@@ -9,7 +9,6 @@ const FM = ActuaryUtilities.FinanceModels
 const FC = ActuaryUtilities.FinanceCore
 
 
-
 include("risk_measures.jl")
 
 @testset "Temporal functions" begin
@@ -43,10 +42,10 @@ end
 
 @testset "accum_offset" begin
     @test all(accum_offset([0.9, 0.8, 0.7]) .== [1.0, 0.9, 1.0 * 0.9 * 0.8])
-    @test all(accum_offset([0.9, 0.8, 0.7], op=+) .== [1.0, 1.9, 2.7])
-    @test all(accum_offset([0.9, 0.8, 0.7], op=+, init=2) .== [2.0, 2.9, 3.7])
+    @test all(accum_offset([0.9, 0.8, 0.7], op = +) .== [1.0, 1.9, 2.7])
+    @test all(accum_offset([0.9, 0.8, 0.7], op = +, init = 2) .== [2.0, 2.9, 3.7])
 
-    @test all(accum_offset(1:5, op=+) .== [1, 2, 4, 7, 11])
+    @test all(accum_offset(1:5, op = +) .== [1, 2, 4, 7, 11])
     @test all(accum_offset(1:5) .== [1, 1, 2, 6, 24])
     @test all(accum_offset([1, 2, 3]) .== [1, 1, 2])
 end
@@ -66,11 +65,10 @@ end
         @test pvs[2] ≈ (1 / 1.1 + 1) / 1.1
 
 
-
-        @test all(present_values(0.00, [1, 1, 1]) .≈ [3, 2, 1])
-        @test all(present_values(0.00, [1, 1, 1], [0, 1, 2]) .≈ [3, 2, 1])
-        @test all(present_values(0.00, [1, 1, 1], [1, 2, 3]) .≈ [3, 2, 1])
-        @test all(present_values(0.00, [1, 1, 1], [1, 2, 3]) .≈ [3, 2, 1])
+        @test all(present_values(0.0, [1, 1, 1]) .≈ [3, 2, 1])
+        @test all(present_values(0.0, [1, 1, 1], [0, 1, 2]) .≈ [3, 2, 1])
+        @test all(present_values(0.0, [1, 1, 1], [1, 2, 3]) .≈ [3, 2, 1])
+        @test all(present_values(0.0, [1, 1, 1], [1, 2, 3]) .≈ [3, 2, 1])
         @test all(present_values(0.01, [1, 2, 3]) .≈ [5.862461552497766, 4.921086168022744, 2.9702970297029707])
 
         cf = [100, 100]
@@ -89,29 +87,25 @@ end
     end
 
 
-
-
-
-
 end
 
 @testset "Breakeven time" begin
 
     @testset "basic" begin
-        @test breakeven(0.10, [-10, 1, 2, 3, 4, 8]) == 5
-        @test breakeven(0.10, [-10, 15, 2, 3, 4, 8]) == 1
-        @test breakeven(0.10, [-10, 15, 2, 3, 4, 8]) == 1
-        @test breakeven(0.10, [10, 15, 2, 3, 4, 8]) == 0
-        @test isnothing(breakeven(0.10, [-10, -15, 2, 3, 4, 8]))
-        @test breakeven(0.10, FC.Cashflow.([-10, 1, 2, 3, 4, 8], 0:5)) == 5
+        @test breakeven(0.1, [-10, 1, 2, 3, 4, 8]) == 5
+        @test breakeven(0.1, [-10, 15, 2, 3, 4, 8]) == 1
+        @test breakeven(0.1, [-10, 15, 2, 3, 4, 8]) == 1
+        @test breakeven(0.1, [10, 15, 2, 3, 4, 8]) == 0
+        @test isnothing(breakeven(0.1, [-10, -15, 2, 3, 4, 8]))
+        @test breakeven(0.1, FC.Cashflow.([-10, 1, 2, 3, 4, 8], 0:5)) == 5
     end
 
     @testset "timepoints" begin
         times = [t for t in 0:5]
-        @test breakeven(0.10, [-10, 1, 2, 3, 4, 8], times) == 5
-        @test breakeven(0.10, [-10, 15, 2, 3, 4, 8], times) == 1
-        @test breakeven(0.10, [-10, 15, 2, 3, 4, 8], times) == 1
-        @test isnothing(breakeven(0.10, [-10, -15, 2, 3, 4, 8], times))
+        @test breakeven(0.1, [-10, 1, 2, 3, 4, 8], times) == 5
+        @test breakeven(0.1, [-10, 15, 2, 3, 4, 8], times) == 1
+        @test breakeven(0.1, [-10, 15, 2, 3, 4, 8], times) == 1
+        @test isnothing(breakeven(0.1, [-10, -15, 2, 3, 4, 8], times))
     end
 end
 
@@ -192,8 +186,8 @@ end
         times = 0.5:0.5:5.0
         int = (1 + 0.075 / 2)^2 - 1 # convert bond yield to effective yield
 
-        @test isapprox(present_value(int, cfs, times), 100.00, atol=1e-2)
-        @test isapprox(duration(Macaulay(), int, cfs, times), 4.26, atol=1e-2)
+        @test isapprox(present_value(int, cfs, times), 100.0, atol = 1.0e-2)
+        @test isapprox(duration(Macaulay(), int, cfs, times), 4.26, atol = 1.0e-2)
     end
 
     @testset "Primer example" begin
@@ -203,16 +197,16 @@ end
         times = 1:5
         cfo = FC.Cashflow.(cfs, times)
 
-        @test isapprox(present_value(0.04, cfs, times), 821927.11, atol=1e-2)
+        @test isapprox(present_value(0.04, cfs, times), 821927.11, atol = 1.0e-2)
         # @test isapprox(duration(0.04,cfs,times),4.76190476,atol=1e-6)
-        @test isapprox(convexity(0.04, cfs, times), 27.7366864, atol=1e-6)
-        @test isapprox(convexity(0.04, cfs), 27.7366864, atol=1e-6)
-        @test isapprox(convexity(0.04, cfo), 27.7366864, atol=1e-6)
+        @test isapprox(convexity(0.04, cfs, times), 27.7366864, atol = 1.0e-6)
+        @test isapprox(convexity(0.04, cfs), 27.7366864, atol = 1.0e-6)
+        @test isapprox(convexity(0.04, cfo), 27.7366864, atol = 1.0e-6)
 
         # the same, but with a functional argument
         value(i) = present_value(i, cfs, times)
         # @test isapprox(duration(0.04,value),4.76190476,atol=1e-6)
-        @test isapprox(convexity(0.04, value), 27.7366864, atol=1e-6)
+        @test isapprox(convexity(0.04, value), 27.7366864, atol = 1.0e-6)
     end
 
     @testset "Quantlib" begin
@@ -231,16 +225,20 @@ end
 
 
         # test a single matrix dimension
-        cfs = [5 0 0
-            0 5 105]
+        cfs = [
+            5 0 0
+            0 5 105
+        ]
 
-        @test duration(0.03, sum(cfs, dims=1), times) ≈ 2.780101622010806
+        @test duration(0.03, sum(cfs, dims = 1), times) ≈ 2.780101622010806
 
-        cfs = [5 0
+        cfs = [
             5 0
-            0 105]
+            5 0
+            0 105
+        ]
 
-        @test duration(0.03, sum(cfs, dims=2), times) ≈ 2.780101622010806
+        @test duration(0.03, sum(cfs, dims = 2), times) ≈ 2.780101622010806
 
 
     end
@@ -270,8 +268,8 @@ end
 
 
             bond = (
-                cfs=[0.02 for t in 1:10],
-                times=collect(0.5:0.5:5)
+                cfs = [0.02 for t in 1:10],
+                times = collect(0.5:0.5:5),
             )
             bond.cfs[end] += 1.0
 
@@ -281,17 +279,16 @@ end
             @test duration(KeyRatePar(4), c, bond.cfs, bond.times) ≈ 0.0 atol = 0.01
             @test duration(KeyRatePar(5), c, bond.cfs, bond.times) ≈ 4.45 atol = 0.05
 
-            bond = (times=[1, 2, 3, 4, 5], cfs=[0, 0, 0, 0, 100])
+            bond = (times = [1, 2, 3, 4, 5], cfs = [0, 0, 0, 0, 100])
             c = FC.Continuous(0.05)
-            @test duration(KeyRateZero(1), c, bond.cfs, bond.times) ≈ 0.0 atol = 1e-10
-            @test duration(KeyRateZero(2), c, bond.cfs, bond.times) ≈ 0.0 atol = 1e-10
-            @test duration(KeyRateZero(3), c, bond.cfs, bond.times) ≈ 0.0 atol = 1e-10
-            @test duration(KeyRateZero(4), c, bond.cfs, bond.times) ≈ 0.0 atol = 1e-10
+            @test duration(KeyRateZero(1), c, bond.cfs, bond.times) ≈ 0.0 atol = 1.0e-10
+            @test duration(KeyRateZero(2), c, bond.cfs, bond.times) ≈ 0.0 atol = 1.0e-10
+            @test duration(KeyRateZero(3), c, bond.cfs, bond.times) ≈ 0.0 atol = 1.0e-10
+            @test duration(KeyRateZero(4), c, bond.cfs, bond.times) ≈ 0.0 atol = 1.0e-10
             @test duration(KeyRateZero(5), c, bond.cfs, bond.times) ≈ duration(c, bond.cfs, bond.times) atol = 0.1
 
             cfo = FC.Cashflow.(bond.cfs, bond.times)
             @test duration(KeyRateZero(5), c, cfo) ≈ duration(c, bond.cfs, bond.times) atol = 0.1
-
 
 
         end
@@ -303,13 +300,13 @@ end
     cfs = fill(10, 10)
     cfo = FC.Cashflow.(cfs, 1:10)
 
-    @test spread(0.04, 0.05, cfs) ≈ FC.Periodic(0.01, 1)
-    @test spread(0.04, 0.05, cfo) ≈ FC.Periodic(0.01, 1)
+    @test spread(0.04, 0.05, cfs) ≈ FC.Periodic(0.01, 1) atol = 1.0e-6
+    @test spread(0.04, 0.05, cfo) ≈ FC.Periodic(0.01, 1) atol = 1.0e-6
 
-    @test spread(FC.Continuous(0.04), FC.Continuous(0.05), cfs) ≈ FC.Periodic(1)(FC.Continuous(0.05)) - FC.Periodic(1)(FC.Continuous(0.04))
+    @test spread(FC.Continuous(0.04), FC.Continuous(0.05), cfs) ≈ FC.Periodic(1)(FC.Continuous(0.05) - FC.Continuous(0.04)) atol = 1.0e-6
 
     # 2021-03-31 rates from Treasury.gov
-    rates = [0.01, 0.01, 0.03, 0.05, 0.07, 0.16, 0.35, 0.92, 1.40, 1.74, 2.31, 2.41] ./ 100
+    rates = [0.01, 0.01, 0.03, 0.05, 0.07, 0.16, 0.35, 0.92, 1.4, 1.74, 2.31, 2.41] ./ 100
     mats = [1 / 12, 2 / 12, 3 / 12, 6 / 12, 1, 2, 3, 5, 7, 10, 20, 30]
 
     y = FM.fit(FM.Spline.Linear(), FM.CMTYield.(rates, mats), FM.Fit.Bootstrap())
@@ -318,5 +315,5 @@ end
 
     s = spread(y, y2, cfs)
 
-    @test s ≈ FC.Periodic(0.01, 1) atol = 0.002
+    @test s ≈ FC.Periodic(0.01, 1) atol = 1.0e-6
 end
