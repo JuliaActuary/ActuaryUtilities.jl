@@ -10,6 +10,8 @@ import FinanceModels
 import StatsBase
 using PrecompileTools
 import Distributions
+import Optimization
+import OptimizationOptimJL
 
 # need to define this here to extend it without conflict inside FinancialMath
 function duration() end
@@ -17,7 +19,6 @@ function duration() end
 include("financial_math.jl")
 include("risk_measures.jl")
 include("utilities.jl")
-
 
 
 # include("precompile.jl")

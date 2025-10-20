@@ -4,6 +4,8 @@ import ..FinanceCore
 import ..FinanceModels
 import ..ForwardDiff
 import ..ActuaryUtilities: duration
+import ..Optimization
+import ..OptimizationOptimJL
 
 export irr, internal_rate_of_return, spread,
     pv, present_value, price, present_values,
@@ -27,23 +29,23 @@ julia> present_values(ForwardYield([0.1,0.2]), [10,20],[0,1]) # after `using Fin
 ```
 
 """
-function present_values(interest, cashflows, times=eachindex(cashflows))
-    present_values_accumulator(interest, cashflows, times)
+function present_values(interest, cashflows, times = eachindex(cashflows))
+    return present_values_accumulator(interest, cashflows, times)
 end
 
-function present_values_accumulator(interest, cashflows, times, pvs=[0.0])
-    from_time = length(times) == 1 ? 0.0 : times[end-1]
+function present_values_accumulator(interest, cashflows, times, pvs = [0.0])
+    from_time = length(times) == 1 ? 0.0 : times[end - 1]
     pv = FinanceCore.discount(interest, from_time, last(times)) * (first(pvs) + last(cashflows))
     pvs = pushfirst!(pvs, pv)
 
     if length(cashflows) > 1
 
-        new_cfs = @view cashflows[1:end-1]
-        new_times = @view times[1:end-1]
+        new_cfs = @view cashflows[1:(end - 1)]
+        new_times = @view times[1:(end - 1)]
         return present_values_accumulator(interest, new_cfs, new_times, pvs)
     else
         # last discount and return
-        return pvs[1:end-1] # end-1 get rid of trailing 0.0
+        return pvs[1:(end - 1)] # end-1 get rid of trailing 0.0
     end
 end
 
@@ -85,7 +87,7 @@ julia> breakeven(0.10, [-10,-15,2,3,4,8]) # returns the `nothing` value
 
 ```
 """
-function breakeven(y, cashflows, timepoints=(eachindex(cashflows) .- 1))
+function breakeven(y, cashflows, timepoints = (eachindex(cashflows) .- 1))
     accum = 0.0
     last_neg = nothing
 
@@ -97,7 +99,7 @@ function breakeven(y, cashflows, timepoints=(eachindex(cashflows) .- 1))
 
     for i in 2:length(cashflows)
         # accumulate the flow from each timepoint to the next
-        a = FinanceCore.timepoint(cashflows[i-1], timepoints[i-1])
+        a = FinanceCore.timepoint(cashflows[i - 1], timepoints[i - 1])
         b = FinanceCore.timepoint(cashflows[i], timepoints[i])
         accum *= FinanceCore.accumulation(y, a, b)
         accum += FinanceCore.amount(cashflows[i])
@@ -133,10 +135,10 @@ Unlike other duration statistics which are computed using analytic derivatives, 
 `KeyRatePar` is more commonly reported (than [`KeyRateZero`](@ref)) in the fixed income markets, even though the latter has more analytically attractive properties. See the discussion of KeyRateDuration in the FinanceModels.jl docs.
 
 """
-struct KeyRatePar{T,R} <: KeyRateDuration
+struct KeyRatePar{T, R} <: KeyRateDuration
     timepoint::T
     shift::R
-    KeyRatePar(timepoint, shift=0.001) = new{typeof(timepoint),typeof(shift)}(timepoint, shift)
+    KeyRatePar(timepoint, shift = 0.001) = new{typeof(timepoint), typeof(shift)}(timepoint, shift)
 end
 
 """
@@ -148,10 +150,10 @@ Unlike other duration statistics which are computed using analytic derivatives, 
 
 `KeyRateZero` is less commonly reported (than [`KeyRatePar`](@ref)) in the fixed income markets, even though the latter has more analytically attractive properties. See the discussion of KeyRateDuration in the FinanceModels.jl docs.
 """
-struct KeyRateZero{T,R} <: KeyRateDuration
+struct KeyRateZero{T, R} <: KeyRateDuration
     timepoint::T
     shift::R
-    KeyRateZero(timepoint, shift=0.001) = new{typeof(timepoint),typeof(shift)}(timepoint, shift)
+    KeyRateZero(timepoint, shift = 0.001) = new{typeof(timepoint), typeof(shift)}(timepoint, shift)
 end
 
 """
@@ -235,9 +237,9 @@ function duration(::Modified, yield, cfs, times)
     return duration(yield, D)
 end
 
-function duration(yield, valuation_function::T) where {T<:Function}
+function duration(yield, valuation_function::T) where {T <: Function}
     D(i) = log(valuation_function(i + yield))
-    δV = -ForwardDiff.derivative(D, 0.0)
+    return δV = -ForwardDiff.derivative(D, 0.0)
 end
 
 function duration(yield, cfs, times)
@@ -259,7 +261,7 @@ function duration(d::Duration, yield, cfs)
     return duration(d, yield, vec(cfs), times)
 end
 
-function duration(::DV01, yield, valuation_function::Y) where {Y<:Function}
+function duration(::DV01, yield, valuation_function::Y) where {Y <: Function}
     return duration(yield, valuation_function) * valuation_function(yield) / 10000
 end
 
@@ -310,7 +312,7 @@ function convexity(yield, cfs)
     return convexity(yield, i -> price(i, cfs, times))
 end
 
-function convexity(yield, valuation_function::T) where {T<:Function}
+function convexity(yield, valuation_function::T) where {T <: Function}
     v(x) = abs(valuation_function(yield + x[1]))
     ∂²P = ForwardDiff.hessian(v, [0.0])
     return ∂²P[1] / v([0.0])
@@ -433,15 +435,21 @@ spread(0.04, 0.05, cfs)
 Rate{Float64, Periodic}(0.010000000000000009, Periodic(1))
 ```
 """
-function spread(curve1, curve2, cashflows, times=eachindex(cashflows))
+function spread(curve1, curve2, cashflows, times = eachindex(cashflows))
     times = FinanceCore.timepoint.(cashflows, times)
     cashflows = FinanceCore.amount.(cashflows)
-    pv1 = FinanceCore.pv(curve1, cashflows, times)
     pv2 = FinanceCore.pv(curve2, cashflows, times)
-    irr1 = FinanceCore.irr([-pv1; cashflows], [0.0; times])
-    irr2 = FinanceCore.irr([-pv2; cashflows], [0.0; times])
 
-    return irr2 - irr1
+
+    function f(s, p)
+        return abs2(FinanceCore.pv(curve1 + FinanceCore.Periodic(only(s), 1), cashflows, times) - pv2)
+    end
+
+    s0 = zeros(1)
+
+    prob = Optimization.OptimizationProblem(f, s0, nothing)
+    sol = Optimization.solve(prob, OptimizationOptimJL.NelderMead())
+    return FinanceCore.Periodic(only(sol.u), 1)
 
 end
 
@@ -458,7 +466,7 @@ julia> moic([-10,20,30])
 ```
 
 """
-function moic(cfs::T) where {T<:AbstractArray}
+function moic(cfs::T) where {T <: AbstractArray}
     returned = sum(FinanceCore.amount(cf) for cf in cfs if FinanceCore.amount(cf) > 0)
     invested = -sum(FinanceCore.amount(cf) for cf in cfs if FinanceCore.amount(cf) < 0)
     return returned / invested
