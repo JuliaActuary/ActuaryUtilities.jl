@@ -296,6 +296,337 @@ end
 
 end
 
+@testset "IR01 and CS01" begin
+    @testset "flat rates: IR01 ≈ CS01 ≈ DV01" begin
+        cfs = [10, 10, 10, 110]
+        times = [0.5, 1, 1.5, 2]
+        base_rate = 0.03
+        credit_spread = 0.02
+        total_rate = base_rate + credit_spread
+
+        dv01 = duration(DV01(), total_rate, cfs, times)
+        ir01 = duration(IR01(), base_rate, credit_spread, cfs, times)
+        cs01 = duration(CS01(), base_rate, credit_spread, cfs, times)
+
+        @test ir01 ≈ dv01
+        @test cs01 ≈ dv01
+        @test ir01 ≈ cs01
+    end
+
+    @testset "with Rate objects" begin
+        cfs = [10, 10, 10, 110]
+        times = [0.5, 1, 1.5, 2]
+        base_r = FC.Periodic(0.03, 1)
+        spread_r = FC.Periodic(0.02, 1)
+
+        ir01 = duration(IR01(), base_r, spread_r, cfs, times)
+        cs01 = duration(CS01(), base_r, spread_r, cfs, times)
+
+        @test ir01 > 0
+        @test cs01 > 0
+        @test ir01 ≈ cs01
+    end
+
+    @testset "without explicit times" begin
+        cfs = [5, 5, 5, 105]
+
+        dv01 = duration(DV01(), 0.05, cfs)
+        ir01 = duration(IR01(), 0.03, 0.02, cfs)
+        cs01 = duration(CS01(), 0.03, 0.02, cfs)
+
+        @test ir01 ≈ dv01
+        @test cs01 ≈ dv01
+    end
+
+    @testset "with Cashflow objects" begin
+        cfs = [5, 5, 5, 105]
+        times = 1:4
+        cfo = FC.Cashflow.(cfs, times)
+
+        ir01_cfo = duration(IR01(), 0.03, 0.02, cfo)
+        ir01_raw = duration(IR01(), 0.03, 0.02, cfs, times)
+
+        @test ir01_cfo ≈ ir01_raw
+
+        cs01_cfo = duration(CS01(), 0.03, 0.02, cfo)
+        cs01_raw = duration(CS01(), 0.03, 0.02, cfs, times)
+
+        @test cs01_cfo ≈ cs01_raw
+    end
+
+    @testset "with yield curve" begin
+        rates = [0.01, 0.02, 0.03, 0.04]
+        mats = [1, 2, 3, 5]
+        y = FM.fit(FM.Spline.Linear(), FM.CMTYield.(rates, mats), FM.Fit.Bootstrap())
+        credit_spread = FC.Periodic(0.02, 1)
+        cfs = [5, 5, 5, 105]
+        times = 1:4
+
+        ir01 = duration(IR01(), y, credit_spread, cfs, times)
+        cs01 = duration(CS01(), y, credit_spread, cfs, times)
+
+        @test ir01 > 0
+        @test cs01 > 0
+    end
+end
+
+@testset "ZeroRateCurve duration" begin
+    @testset "ZCB at a tenor: duration concentrated at that tenor" begin
+        rates = [0.03, 0.03, 0.03]
+        tenors = [1.0, 2.0, 5.0]
+        zrc = FM.ZeroRateCurve(rates, tenors)
+        face = 100.0
+
+        # key rate durations via duration(zrc, cfs, times)
+        krds = duration(zrc, [0.0, 0.0, face], tenors)
+
+        # duration at the maturity tenor (index 3) should be ≈ t = 5.0
+        @test krds[3] ≈ 5.0 atol = 1e-6
+
+        # durations at other tenors should be zero
+        @test krds[1] ≈ 0.0 atol = 1e-6
+        @test krds[2] ≈ 0.0 atol = 1e-6
+    end
+
+    @testset "coupon bond flat curve: sum of KRDs ≈ Macaulay duration" begin
+        rates = [0.04, 0.04, 0.04, 0.04, 0.04]
+        tenors = [1.0, 2.0, 3.0, 4.0, 5.0]
+        zrc = FM.ZeroRateCurve(rates, tenors)
+        coupon = 5.0
+        face = 100.0
+        cfs = [coupon, coupon, coupon, coupon, coupon + face]
+
+        krds = duration(zrc, cfs, tenors)
+
+        # all key rate durations should be positive
+        @test all(krds .> 0)
+
+        # sum of KRDs ≈ Macaulay duration for a flat continuous curve
+        dfs = [exp(-0.04 * t) for t in tenors]
+        mac_dur = sum(t * cf * df for (t, cf, df) in zip(tenors, cfs, dfs)) / sum(cf * df for (cf, df) in zip(cfs, dfs))
+        @test sum(krds) ≈ mac_dur atol = 1e-6
+    end
+
+    @testset "DV01 positive for standard bond" begin
+        rates = [0.03, 0.03, 0.03]
+        tenors = [1.0, 2.0, 3.0]
+        zrc = FM.ZeroRateCurve(rates, tenors)
+        cfs = [5.0, 5.0, 105.0]
+
+        dv01s = duration(DV01(), zrc, cfs, tenors)
+        @test all(dv01s .> 0)
+    end
+
+    @testset "do-block custom valuation (callable bond)" begin
+        rates = [0.05, 0.05, 0.05, 0.05, 0.05]
+        tenors = [1.0, 2.0, 3.0, 4.0, 5.0]
+        zrc = FM.ZeroRateCurve(rates, tenors)
+        coupon = 6.0
+        face = 100.0
+        call_price = 102.0
+        cfs_noncallable = [coupon, coupon, coupon, coupon, coupon + face]
+
+        callable_dur = duration(zrc) do curve
+            ncv = sum(cf * curve(t) for (cf, t) in zip(cfs_noncallable, tenors))
+            called_value = sum(cf * curve(t) for (cf, t) in zip(cfs_noncallable[1:3], tenors[1:3])) -
+                           cfs_noncallable[3] * curve(3.0) + call_price * curve(3.0)
+            min(ncv, called_value)
+        end
+
+        @test length(callable_dur) == 5
+    end
+
+    @testset "convexity matrix for ZCB" begin
+        rates = [0.03, 0.03, 0.03]
+        tenors = [1.0, 2.0, 5.0]
+        zrc = FM.ZeroRateCurve(rates, tenors)
+        face = 100.0
+
+        conv = convexity(zrc, [0.0, 0.0, face], tenors)
+
+        # diagonal at the maturity tenor should be t^2 = 25.0
+        @test conv[3, 3] ≈ 25.0 atol = 1e-6
+
+        # off-diagonal should be zero
+        @test conv[1, 3] ≈ 0.0 atol = 1e-6
+        @test conv[2, 3] ≈ 0.0 atol = 1e-6
+    end
+
+    @testset "two-curve IR01/CS01" begin
+        base_rates = [0.03, 0.03, 0.03, 0.03, 0.03]
+        credit_rates = [0.02, 0.02, 0.02, 0.02, 0.02]
+        tenors = [1.0, 2.0, 3.0, 4.0, 5.0]
+        base = FM.ZeroRateCurve(base_rates, tenors)
+        credit = FM.ZeroRateCurve(credit_rates, tenors)
+        cfs = [5.0, 5.0, 5.0, 5.0, 105.0]
+
+        ir01s = duration(IR01(), base, credit, cfs, tenors)
+        cs01s = duration(CS01(), base, credit, cfs, tenors)
+
+        # For additive combination, IR01 ≈ CS01
+        @test ir01s ≈ cs01s atol = 1e-10
+        @test all(ir01s .> 0)
+    end
+
+    @testset "two-curve convexity" begin
+        base_rates = [0.03, 0.03, 0.03]
+        credit_rates = [0.02, 0.02, 0.02]
+        tenors = [1.0, 2.0, 5.0]
+        base = FM.ZeroRateCurve(base_rates, tenors)
+        credit = FM.ZeroRateCurve(credit_rates, tenors)
+        cfs = [5.0, 5.0, 105.0]
+
+        conv = convexity(base, credit, cfs, tenors)
+
+        @test !all(isapprox.(conv.cross, 0.0, atol = 1e-10))
+        @test !all(isapprox.(conv.base, 0.0, atol = 1e-10))
+        @test !all(isapprox.(conv.credit, 0.0, atol = 1e-10))
+        # For symmetric additive combination, cross ≈ base
+        @test conv.cross ≈ conv.base atol = 1e-10
+    end
+
+    @testset "cubic vs linear: same on flat curve" begin
+        rates = [0.04, 0.04, 0.04, 0.04, 0.04]
+        tenors = [1.0, 2.0, 3.0, 4.0, 5.0]
+        cfs = [5.0, 5.0, 5.0, 5.0, 105.0]
+
+        zrc_lin = FM.ZeroRateCurve(rates, tenors, FM.Spline.Linear())
+        zrc_cub = FM.ZeroRateCurve(rates, tenors, FM.Spline.Cubic())
+
+        dur_lin = duration(zrc_lin, cfs, tenors)
+        dur_cub = duration(zrc_cub, cfs, tenors)
+
+        @test dur_lin ≈ dur_cub atol = 1e-4
+    end
+end
+
+@testset "ZeroRateCurve sensitivities" begin
+    @testset "ZCB analytical" begin
+        rates = [0.03, 0.03, 0.03]
+        tenors = [1.0, 2.0, 5.0]
+        zrc = FM.ZeroRateCurve(rates, tenors)
+        face = 100.0
+
+        result = sensitivities(zrc, [0.0, 0.0, face], tenors)
+
+        @test result.value ≈ face * exp(-0.03 * 5.0) atol = 1e-6
+        @test result.durations[3] ≈ 5.0 atol = 1e-6
+        @test result.durations[1] ≈ 0.0 atol = 1e-6
+        @test result.convexities[3, 3] ≈ 25.0 atol = 1e-6
+    end
+
+    @testset "coupon bond" begin
+        rates = [0.04, 0.04, 0.04, 0.04, 0.04]
+        tenors = [1.0, 2.0, 3.0, 4.0, 5.0]
+        zrc = FM.ZeroRateCurve(rates, tenors)
+        cfs = [5.0, 5.0, 5.0, 5.0, 105.0]
+
+        result = sensitivities(zrc, cfs, tenors)
+
+        @test result.value > 0
+        @test all(result.durations .> 0)
+        @test all(result.dv01s .> 0)
+
+        # sensitivities returns same durations as calling duration separately
+        @test result.durations ≈ duration(zrc, cfs, tenors) atol = 1e-12
+    end
+
+    @testset "do-block" begin
+        rates = [0.03, 0.03, 0.03]
+        tenors = [1.0, 2.0, 3.0]
+        zrc = FM.ZeroRateCurve(rates, tenors)
+        cfs = [5.0, 5.0, 105.0]
+
+        result = sensitivities(zrc) do curve
+            sum(cf * curve(t) for (cf, t) in zip(cfs, tenors))
+        end
+
+        @test result.value > 0
+        @test all(result.durations .> 0)
+    end
+
+    @testset "two-curve additive: IR01 ≈ CS01" begin
+        base_rates = [0.03, 0.03, 0.03, 0.03, 0.03]
+        credit_rates = [0.02, 0.02, 0.02, 0.02, 0.02]
+        tenors = [1.0, 2.0, 3.0, 4.0, 5.0]
+        base = FM.ZeroRateCurve(base_rates, tenors)
+        credit = FM.ZeroRateCurve(credit_rates, tenors)
+        cfs = [5.0, 5.0, 5.0, 5.0, 105.0]
+
+        result = sensitivities(base, credit, cfs, tenors)
+
+        @test result.base_durations ≈ result.credit_durations atol = 1e-10
+        @test result.base_dv01s ≈ result.credit_dv01s atol = 1e-12
+
+        # Macaulay duration for flat continuous rate 0.05
+        total_rate = 0.05
+        dfs = [exp(-total_rate * t) for t in tenors]
+        mac_dur = sum(t * cf * df for (t, cf, df) in zip(tenors, cfs, dfs)) / sum(cf * df for (cf, df) in zip(cfs, dfs))
+        @test sum(result.base_durations) ≈ mac_dur atol = 1e-6
+    end
+
+    @testset "two-curve non-additive: base ≠ credit" begin
+        base_rates = [0.03, 0.03, 0.03]
+        credit_rates = [0.02, 0.02, 0.02]
+        tenors = [1.0, 2.0, 5.0]
+        base = FM.ZeroRateCurve(base_rates, tenors)
+        credit = FM.ZeroRateCurve(credit_rates, tenors)
+        face = 100.0
+
+        result = sensitivities(base, credit) do base_curve, credit_curve
+            face * (2.0 * base_curve(5.0) + 0.5 * credit_curve(5.0))
+        end
+
+        @test !isapprox(result.base_durations, result.credit_durations, atol = 1e-6)
+    end
+
+    @testset "chapter VGH test case" begin
+        zero_rates = [0.01, 0.02, 0.02, 0.03, 0.05, 0.055]
+        times = [1.0, 2.0, 3.0, 5.0, 10.0, 20.0]
+        zrc = FM.ZeroRateCurve(zero_rates, times, FM.Spline.Cubic())
+
+        # 10-year fixed bond, 9% coupon, semi-annual, par=1.0
+        coupon = 0.09
+        cfs_times = collect(0.5:0.5:10.0)
+        cfs = [coupon / 2 + (t == 10.0 ? 1.0 : 0.0) for t in cfs_times]
+
+        result = sensitivities(zrc, cfs, cfs_times)
+
+        @test result.value > 0
+        # durations at tenors within the bond's maturity are positive
+        @test all(result.durations[1:5] .> 0)
+        @test sum(result.durations) > 0  # total duration is positive
+
+        # convexity matrix is symmetric
+        @test result.convexities ≈ result.convexities' atol = 1e-10
+    end
+
+    @testset "portfolio linearity" begin
+        zero_rates = [0.03, 0.03, 0.03, 0.03, 0.03]
+        tenors = [1.0, 2.0, 3.0, 4.0, 5.0]
+        zrc = FM.ZeroRateCurve(zero_rates, tenors)
+
+        bond1_cfs = [0.05, 0.05, 1.05, 0.0, 0.0]
+        bond1_times = [1.0, 2.0, 3.0, 4.0, 5.0]
+        bond2_cfs = [0.03, 0.03, 0.03, 1.03, 0.0]
+        bond2_times = [1.0, 2.0, 3.0, 5.0, 5.0]
+
+        # Portfolio valuation — single AD pass over sum
+        portfolio_valuation = curve -> begin
+            sum(cf * curve(t) for (cf, t) in zip(bond1_cfs, bond1_times)) +
+            sum(cf * curve(t) for (cf, t) in zip(bond2_cfs, bond2_times))
+        end
+        portfolio_dv01 = duration(DV01(), portfolio_valuation, zrc)
+
+        # Individual DV01s
+        dv01_1 = duration(DV01(), zrc, bond1_cfs, bond1_times)
+        dv01_2 = duration(DV01(), zrc, bond2_cfs, bond2_times)
+
+        # DV01 is additive (not value-weighted like modified duration)
+        @test portfolio_dv01 ≈ dv01_1 .+ dv01_2 atol = 1e-10
+    end
+end
+
 @testset "spread" begin
     cfs = fill(10, 10)
     cfo = FC.Cashflow.(cfs, 1:10)
