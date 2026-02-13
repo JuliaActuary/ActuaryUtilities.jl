@@ -96,6 +96,60 @@ dv01_2 = duration(DV01(), zrc, bond2_cfs, bond2_times)
 portfolio_dv01 ≈ dv01_1 .+ dv01_2
 ```
 
+### Example: Portfolio of Floating Rate Bonds
+
+Floating rate bonds have coupons that reset to the prevailing market rate, so their cashflows depend on the rate curve itself. The do-block captures this dependency through AD — differentiating through both the discount factors and the coupon amounts in a single pass:
+
+```julia
+using ActuaryUtilities, FinanceModels
+
+rates = [0.02, 0.025, 0.03, 0.035, 0.04, 0.042, 0.044, 0.046, 0.048, 0.05]
+tenors = collect(1.0:10.0)
+zrc = ZeroRateCurve(rates, tenors)
+
+# 10 floating rate bonds: maturities 1yr to 10yr, face 100 each,
+# annual coupons = 1yr forward rate + 50bp credit spread
+notionals = fill(100.0, 10)
+maturities = 1:10
+spread = 0.005
+
+result = sensitivities(zrc) do curve
+    total = 0.0
+    for (notional, mat) in zip(notionals, maturities)
+        for t in 1:mat
+            df = curve(Float64(t))
+            df_prev = t == 1 ? 1.0 : curve(Float64(t - 1))
+            fwd = df_prev / df - 1.0          # 1yr simple forward rate
+            total += notional * (fwd + spread) * df  # PV of floating coupon
+            t == mat && (total += notional * df)      # principal at maturity
+        end
+    end
+    total
+end
+
+f(zrc,notionals,maturities) = sensitivities(zrc) do curve
+    total = 0.0
+    for (notional, mat) in zip(notionals, maturities)
+        for t in 1:mat
+            df = curve(Float64(t))
+            df_prev = t == 1 ? 1.0 : curve(Float64(t - 1))
+            fwd = df_prev / df - 1.0          # 1yr simple forward rate
+            total += notional * (fwd + spread) * df  # PV of floating coupon
+            t == mat && (total += notional * df)      # principal at maturity
+        end
+    end
+    total
+end
+
+@benchmark f($zrc,$notionals,$maturities)
+
+result.value       # portfolio present value (≈ 10 × 100 + spread premium)
+result.durations   # key rate durations — small, since floaters reset
+result.dv01s       # key rate DV01s
+```
+
+Without the spread, a floater prices at par and has near-zero duration (coupons offset discount factor changes). The spread introduces duration because its fixed cashflows are rate-sensitive — similar to a portfolio of small fixed-rate annuities layered on top of the par-valued floaters.
+
 ## Choosing Interpolation
 
 `ZeroRateCurve` accepts an optional third argument for the interpolation method:

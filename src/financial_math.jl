@@ -661,6 +661,11 @@ function duration(::DV01, zrc::ZRC, cfs, times)
     return duration(DV01(), _standard_valuation(cfs, times), zrc)
 end
 
+# Do-block forwarding: duration(DV01(), zrc) do curve ... end
+function duration(valuation_fn::Function, ::DV01, zrc::ZRC)
+    return duration(DV01(), valuation_fn, zrc)
+end
+
 """
     duration(::IR01, base::ZeroRateCurve, credit::ZeroRateCurve, valuation_fn::Function)
     duration(::IR01, base::ZeroRateCurve, credit::ZeroRateCurve, cfs, times)
@@ -676,6 +681,11 @@ function duration(::IR01, base::ZRC, credit::ZRC, cfs, times)
     return duration(IR01(), _standard_valuation_2curve(cfs, times), base, credit)
 end
 
+# Do-block forwarding: duration(IR01(), base, credit) do base_curve, credit_curve ... end
+function duration(valuation_fn::Function, ::IR01, base::ZRC, credit::ZRC)
+    return duration(IR01(), valuation_fn, base, credit)
+end
+
 """
     duration(::CS01, base::ZeroRateCurve, credit::ZeroRateCurve, valuation_fn::Function)
     duration(::CS01, base::ZeroRateCurve, credit::ZeroRateCurve, cfs, times)
@@ -689,6 +699,11 @@ end
 
 function duration(::CS01, base::ZRC, credit::ZRC, cfs, times)
     return duration(CS01(), _standard_valuation_2curve(cfs, times), base, credit)
+end
+
+# Do-block forwarding: duration(CS01(), base, credit) do base_curve, credit_curve ... end
+function duration(valuation_fn::Function, ::CS01, base::ZRC, credit::ZRC)
+    return duration(CS01(), valuation_fn, base, credit)
 end
 
 ## convexity methods for ZeroRateCurve
