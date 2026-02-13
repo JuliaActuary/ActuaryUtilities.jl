@@ -375,7 +375,8 @@ end
     @testset "ZCB at a tenor: duration concentrated at that tenor" begin
         rates = [0.03, 0.03, 0.03]
         tenors = [1.0, 2.0, 5.0]
-        zrc = FM.ZeroRateCurve(rates, tenors)
+        # Use Linear for perfect locality (zero sensitivity outside adjacent intervals)
+        zrc = FM.ZeroRateCurve(rates, tenors, FM.Spline.Linear())
         face = 100.0
 
         # key rate durations via duration(zrc, cfs, times)
@@ -392,26 +393,30 @@ end
     @testset "coupon bond flat curve: sum of KRDs ≈ Macaulay duration" begin
         rates = [0.04, 0.04, 0.04, 0.04, 0.04]
         tenors = [1.0, 2.0, 3.0, 4.0, 5.0]
-        zrc = FM.ZeroRateCurve(rates, tenors)
         coupon = 5.0
         face = 100.0
         cfs = [coupon, coupon, coupon, coupon, coupon + face]
 
-        krds = duration(zrc, cfs, tenors)
-
-        # all key rate durations should be positive
-        @test all(krds .> 0)
-
-        # sum of KRDs ≈ Macaulay duration for a flat continuous curve
+        # sum of KRDs ≈ Macaulay duration regardless of interpolation
         dfs = [exp(-0.04 * t) for t in tenors]
         mac_dur = sum(t * cf * df for (t, cf, df) in zip(tenors, cfs, dfs)) / sum(cf * df for (cf, df) in zip(cfs, dfs))
-        @test sum(krds) ≈ mac_dur atol = 1e-6
+
+        for spline in [FM.Spline.Linear(), FM.Spline.MonotoneConvex(), FM.Spline.PCHIP()]
+            zrc = FM.ZeroRateCurve(rates, tenors, spline)
+            krds = duration(zrc, cfs, tenors)
+            @test sum(krds) ≈ mac_dur atol = 1e-4
+        end
+
+        # all KRDs positive only guaranteed for Linear (perfectly local)
+        zrc_lin = FM.ZeroRateCurve(rates, tenors, FM.Spline.Linear())
+        @test all(duration(zrc_lin, cfs, tenors) .> 0)
     end
 
     @testset "DV01 positive for standard bond" begin
         rates = [0.03, 0.03, 0.03]
         tenors = [1.0, 2.0, 3.0]
-        zrc = FM.ZeroRateCurve(rates, tenors)
+        # Use Linear: smooth methods may produce negative KRDs at some tenors
+        zrc = FM.ZeroRateCurve(rates, tenors, FM.Spline.Linear())
         cfs = [5.0, 5.0, 105.0]
 
         dv01s = duration(DV01(), zrc, cfs, tenors)
@@ -440,7 +445,8 @@ end
     @testset "convexity matrix for ZCB" begin
         rates = [0.03, 0.03, 0.03]
         tenors = [1.0, 2.0, 5.0]
-        zrc = FM.ZeroRateCurve(rates, tenors)
+        # Use Linear for perfect locality in convexity test
+        zrc = FM.ZeroRateCurve(rates, tenors, FM.Spline.Linear())
         face = 100.0
 
         conv = convexity(zrc, [0.0, 0.0, face], tenors)
@@ -457,8 +463,9 @@ end
         base_rates = [0.03, 0.03, 0.03, 0.03, 0.03]
         credit_rates = [0.02, 0.02, 0.02, 0.02, 0.02]
         tenors = [1.0, 2.0, 3.0, 4.0, 5.0]
-        base = FM.ZeroRateCurve(base_rates, tenors)
-        credit = FM.ZeroRateCurve(credit_rates, tenors)
+        # Use Linear for symmetric IR01 ≈ CS01 test
+        base = FM.ZeroRateCurve(base_rates, tenors, FM.Spline.Linear())
+        credit = FM.ZeroRateCurve(credit_rates, tenors, FM.Spline.Linear())
         cfs = [5.0, 5.0, 5.0, 5.0, 105.0]
 
         ir01s = duration(IR01(), base, credit, cfs, tenors)
@@ -473,8 +480,9 @@ end
         base_rates = [0.03, 0.03, 0.03]
         credit_rates = [0.02, 0.02, 0.02]
         tenors = [1.0, 2.0, 5.0]
-        base = FM.ZeroRateCurve(base_rates, tenors)
-        credit = FM.ZeroRateCurve(credit_rates, tenors)
+        # Use Linear for symmetric cross ≈ base test
+        base = FM.ZeroRateCurve(base_rates, tenors, FM.Spline.Linear())
+        credit = FM.ZeroRateCurve(credit_rates, tenors, FM.Spline.Linear())
         cfs = [5.0, 5.0, 105.0]
 
         conv = convexity(base, credit, cfs, tenors)
@@ -505,7 +513,8 @@ end
     @testset "ZCB analytical" begin
         rates = [0.03, 0.03, 0.03]
         tenors = [1.0, 2.0, 5.0]
-        zrc = FM.ZeroRateCurve(rates, tenors)
+        # Use Linear for perfect locality assertions
+        zrc = FM.ZeroRateCurve(rates, tenors, FM.Spline.Linear())
         face = 100.0
 
         result = sensitivities(zrc, [0.0, 0.0, face], tenors)
@@ -519,7 +528,8 @@ end
     @testset "coupon bond" begin
         rates = [0.04, 0.04, 0.04, 0.04, 0.04]
         tenors = [1.0, 2.0, 3.0, 4.0, 5.0]
-        zrc = FM.ZeroRateCurve(rates, tenors)
+        # Use Linear for positive-KRD guarantee
+        zrc = FM.ZeroRateCurve(rates, tenors, FM.Spline.Linear())
         cfs = [5.0, 5.0, 5.0, 5.0, 105.0]
 
         result = sensitivities(zrc, cfs, tenors)
@@ -535,7 +545,8 @@ end
     @testset "do-block" begin
         rates = [0.03, 0.03, 0.03]
         tenors = [1.0, 2.0, 3.0]
-        zrc = FM.ZeroRateCurve(rates, tenors)
+        # Use Linear for positive-KRD guarantee
+        zrc = FM.ZeroRateCurve(rates, tenors, FM.Spline.Linear())
         cfs = [5.0, 5.0, 105.0]
 
         result = sensitivities(zrc) do curve
@@ -579,6 +590,15 @@ end
         end
 
         @test !isapprox(result.base_durations, result.credit_durations, atol = 1e-6)
+    end
+
+    @testset "two-curve tenor mismatch" begin
+        base = FM.ZeroRateCurve([0.03, 0.03, 0.03], [1.0, 2.0, 5.0])
+        credit = FM.ZeroRateCurve([0.02, 0.02], [1.0, 2.0])
+        @test_throws ArgumentError sensitivities(base, credit, [5.0, 5.0, 105.0], [1.0, 2.0, 5.0])
+
+        credit2 = FM.ZeroRateCurve([0.02, 0.02, 0.02], [1.0, 3.0, 5.0])
+        @test_throws ArgumentError sensitivities(base, credit2, [5.0, 5.0, 105.0], [1.0, 2.0, 5.0])
     end
 
     @testset "chapter VGH test case" begin
@@ -664,7 +684,7 @@ end
         r = 0.051441  # continuously compounded
         tenors = [1.0, 2.0, 3.0, 4.0, 5.0]
         rates = fill(r, 5)
-        zrc = FM.ZeroRateCurve(rates, tenors)
+        zrc = FM.ZeroRateCurve(rates, tenors, FM.Spline.Linear())
 
         # 4% annual coupon, 5yr, face=100
         cfs = [4.0, 4.0, 4.0, 4.0, 104.0]
@@ -698,7 +718,7 @@ end
         r = 0.04
         tenors = [1.0, 2.0, 3.0, 4.0, 5.0]
         rates = fill(r, 5)
-        zrc = FM.ZeroRateCurve(rates, tenors)
+        zrc = FM.ZeroRateCurve(rates, tenors, FM.Spline.Linear())
         cfs = [5.0, 5.0, 5.0, 5.0, 105.0]
 
         krds = duration(zrc, cfs, tenors)
@@ -720,7 +740,7 @@ end
         # giving KRD_i = t_i * cf_i * df_i / V — same formula as flat curve.
         rates = [0.02, 0.03, 0.04, 0.05]
         tenors = [1.0, 2.0, 5.0, 10.0]
-        zrc = FM.ZeroRateCurve(rates, tenors)
+        zrc = FM.ZeroRateCurve(rates, tenors, FM.Spline.Linear())
         cfs = [3.0, 3.0, 3.0, 103.0]
 
         krds = duration(zrc, cfs, tenors)
@@ -758,7 +778,7 @@ end
         r = 0.04
         tenors = [1.0, 2.0, 3.0, 4.0, 5.0]
         rates = fill(r, 5)
-        zrc = FM.ZeroRateCurve(rates, tenors)
+        zrc = FM.ZeroRateCurve(rates, tenors, FM.Spline.Linear())
         cfs = [5.0, 5.0, 5.0, 5.0, 105.0]
 
         conv = convexity(zrc, cfs, tenors)

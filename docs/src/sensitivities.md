@@ -127,22 +127,6 @@ result = sensitivities(zrc) do curve
     total
 end
 
-f(zrc,notionals,maturities) = sensitivities(zrc) do curve
-    total = 0.0
-    for (notional, mat) in zip(notionals, maturities)
-        for t in 1:mat
-            df = curve(Float64(t))
-            df_prev = t == 1 ? 1.0 : curve(Float64(t - 1))
-            fwd = df_prev / df - 1.0          # 1yr simple forward rate
-            total += notional * (fwd + spread) * df  # PV of floating coupon
-            t == mat && (total += notional * df)      # principal at maturity
-        end
-    end
-    total
-end
-
-@benchmark f($zrc,$notionals,$maturities)
-
 result.value       # portfolio present value (≈ 10 × 100 + spread premium)
 result.durations   # key rate durations — small, since floaters reset
 result.dv01s       # key rate DV01s
@@ -153,6 +137,66 @@ Without the spread, a floater prices at par and has near-zero duration (coupons 
 ## Stochastic Model Sensitivities
 
 ForwardDiff's dual numbers propagate through the full Monte Carlo simulation pipeline in FinanceModels.jl, including the Euler-Maruyama path generation. This means you can compute exact sensitivities of expected present values under stochastic short-rate models — differentiating through thousands of simulated rate paths in a single AD pass.
+
+### What is being differentiated?
+
+The `sensitivities` function always differentiates with respect to the **zero rates in the `ZeroRateCurve`** — these are the market-observable inputs. When you wrap a stochastic model inside the do-block:
+
+```julia
+sensitivities(zrc) do curve
+    hw = ShortRate.HullWhite(0.1, 0.01, curve)
+    # ... simulate and value ...
+end
+```
+
+the chain of differentiation is:
+
+1. ForwardDiff perturbs zero rate `rᵢ`
+2. The perturbed `curve` changes the forward curve `f(0, t)`
+3. Hull-White recalibrates `θ(t)` from the new forwards
+4. All simulated paths shift (same random draws, different drift)
+5. The expected PV changes → this change is the KRD at tenor `i`
+
+The stochastic model parameters (`a`, `σ`) are **not** being differentiated — they are constants in this computation. The KRDs answer: *"if the market yield curve shifts, how does my model-valued portfolio respond?"* This is the relevant question for hedging with market instruments (bonds, swaps), which is the primary use case for key rate durations.
+
+### Model parameter sensitivities (vega, mean-reversion sensitivity)
+
+A separate question is: *"how does expected PV change if I change the model parameters `a` or `σ`?"* These are **model risk** sensitivities, useful for understanding calibration sensitivity and model uncertainty. They are conceptually different from curve KRDs:
+
+| | Curve KRDs (`∂V/∂rᵢ`) | Model Greeks (`∂V/∂a`, `∂V/∂σ`) |
+|---|---|---|
+| **What moves** | Market zero rates | Model calibration parameters |
+| **Use case** | Hedging with bonds/swaps | Model risk, calibration stability |
+| **Hedgeable?** | Yes (with market instruments) | No (not directly tradeable) |
+
+Model parameter sensitivities (`∂V/∂a`, `∂V/∂σ`) are **not currently supported** by the AD pathway. The `simulate` function in FinanceModels.jl uses `Float64` arrays internally for simulation paths, which prevents ForwardDiff dual numbers from propagating through the model parameters. Dual numbers flow through the *curve rates* (because `build_model` and `θ(t)` calibration handle generic numeric types), but `a` and `σ` must be plain `Float64`.
+
+For model parameter sensitivities, use finite differences as a workaround:
+
+```julia
+using FinanceModels: ShortRate, simulate
+using FinanceCore: discount
+using Random: Xoshiro
+
+rates = [0.03, 0.03, 0.03, 0.03, 0.03]
+tenors = [1.0, 2.0, 3.0, 4.0, 5.0]
+cfs = [5.0, 5.0, 5.0, 5.0, 105.0]
+
+function mc_value(a, σ)
+    curve = ZeroRateCurve(rates, tenors)
+    hw = ShortRate.HullWhite(a, σ, curve)
+    scenarios = simulate(hw; n_scenarios=1000, timestep=1/12, horizon=6.0, rng=Xoshiro(42))
+    sum(sum(cf * discount(sc, t) for (cf, t) in zip(cfs, tenors)) for sc in scenarios) / 1000
+end
+
+# Finite-difference sensitivities
+ε = 1e-5
+dV_da = (mc_value(0.1 + ε, 0.01) - mc_value(0.1 - ε, 0.01)) / (2ε)   # mean reversion
+dV_dσ = (mc_value(0.1, 0.01 + ε) - mc_value(0.1, 0.01 - ε)) / (2ε)   # volatility (vega)
+```
+
+!!! note
+    Supporting AD through model parameters would require parameterizing the element type of internal simulation arrays on the model parameter types in FinanceModels.jl. This is a potential future enhancement.
 
 ### Hull-White: sensitivities w.r.t. the initial term structure
 
@@ -221,13 +265,48 @@ This phenomenon is well-established in derivatives pricing as "model-dependent G
 `ZeroRateCurve` accepts an optional third argument for the interpolation method:
 
 ```julia
-zrc_linear = ZeroRateCurve(rates, tenors)                    # default: linear
-zrc_linear = ZeroRateCurve(rates, tenors, Spline.Linear())   # explicit linear
-zrc_cubic  = ZeroRateCurve(rates, tenors, Spline.Cubic())    # cubic spline
+zrc = ZeroRateCurve(rates, tenors)                              # default: MonotoneConvex
+zrc_pchip = ZeroRateCurve(rates, tenors, Spline.PCHIP())        # PCHIP
+zrc_lin = ZeroRateCurve(rates, tenors, Spline.Linear())          # linear
+zrc_cub = ZeroRateCurve(rates, tenors, Spline.Cubic())           # cubic spline
+zrc_aki = ZeroRateCurve(rates, tenors, Spline.Akima())           # Akima
 ```
 
-**Linear interpolation** (`Spline.Linear()`): Key rate bumps have local effect — bumping one tenor only affects adjacent intervals. This produces intuitive, well-localized KRDs.
+**MonotoneConvex** (`Spline.MonotoneConvex()`, default): Finance-aware interpolation ([Hagan & West, 2006](https://doi.org/10.1080/13504860600829233)). Guarantees positive continuous forward rates, best KRD locality among smooth methods, and fastest AD performance.
 
-**Cubic spline** (`Spline.Cubic()`): Smoother curve, but bumps have non-local effects due to the global nature of cubic splines. KRDs at distant tenors may be slightly negative. Use cubic when curve smoothness matters more than KRD locality.
+**PCHIP** (`Spline.PCHIP()`): Smooth forward curves (C1), local sensitivity, monotonicity-preserving. Good general-purpose alternative.
 
-On a flat curve, both methods produce identical results.
+**Linear** (`Spline.Linear()`): Perfectly local KRDs (zero sensitivity outside adjacent intervals), but kinks in the forward curve at tenor points.
+
+**Akima** (`Spline.Akima()`): Alternative to PCHIP with different behavior near inflection points. Slightly more non-local leakage than PCHIP.
+
+**Cubic spline** (`Spline.Cubic()`): Smoothest (C2), but bumps have non-local effects. KRDs at distant tenors may be negative. Use when smoothness matters most.
+
+See the [FinanceModels interpolation guide](https://juliaactuary.github.io/FinanceModels.jl/dev/interpolation/) for detailed benchmarks and tradeoff analysis. On a flat curve, all methods produce identical results.
+
+## Validating AD vs Bump-and-Reprice
+
+AD sensitivities can be cross-validated against traditional finite-difference (bump-and-reprice) results. The AD approach gives exact derivatives in a single pass, while FD has O(ε²) truncation error:
+
+```julia
+using ActuaryUtilities, FinanceModels, Test
+
+rates = [0.02, 0.03, 0.04, 0.05]
+tenors = [1.0, 3.0, 5.0, 10.0]
+zrc = ZeroRateCurve(rates, tenors)
+cfs = [3.0, 3.0, 3.0, 103.0]
+
+# AD (exact)
+ad_dv01 = duration(DV01(), zrc, cfs, tenors)
+
+# Finite difference (bump-and-reprice)
+ε = 1e-5
+for i in 1:4
+    rates_up = copy(rates); rates_up[i] += ε
+    rates_dn = copy(rates); rates_dn[i] -= ε
+    v_up = sum(cf * ZeroRateCurve(rates_up, tenors)(t) for (cf, t) in zip(cfs, tenors))
+    v_dn = sum(cf * ZeroRateCurve(rates_dn, tenors)(t) for (cf, t) in zip(cfs, tenors))
+    fd_dv01 = -(v_up - v_dn) / (2ε) / 10_000
+    @test ad_dv01[i] ≈ fd_dv01 atol = 1e-4
+end
+```

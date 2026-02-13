@@ -566,10 +566,11 @@ end
 const ZRC = FinanceModels.Yield.ZeroRateCurve
 
 # Internal AD helper: computes value, gradient, and optionally hessian w.r.t. rates
+# Builds the interpolation model once per gradient step (not per discount call)
 function _keyrate_ad(zrc::ZRC, valuation_fn; order = 1)
     function f(r)
-        curve = FinanceModels.Yield.ZeroRateCurve(r, zrc.tenors, zrc.spline)
-        valuation_fn(curve)
+        model = FinanceModels.Yield.build_model(zrc.spline, zrc.tenors, r)
+        valuation_fn(model)
     end
     v = f(zrc.rates)
     grad = ForwardDiff.gradient(f, zrc.rates)
@@ -580,11 +581,13 @@ end
 
 # Two-curve AD helper: concatenates rates, one AD pass, partitions results
 function _keyrate_ad(base::ZRC, credit::ZRC, valuation_fn; order = 1)
+    base.tenors == credit.tenors || throw(ArgumentError(
+        "base and credit curves must have identical tenors"))
     n = length(base.rates)
     function f(combined)
-        base_curve = FinanceModels.Yield.ZeroRateCurve(combined[1:n], base.tenors, base.spline)
-        credit_curve = FinanceModels.Yield.ZeroRateCurve(combined[n+1:2n], credit.tenors, credit.spline)
-        valuation_fn(base_curve, credit_curve)
+        base_model = FinanceModels.Yield.build_model(base.spline, base.tenors, combined[1:n])
+        credit_model = FinanceModels.Yield.build_model(credit.spline, credit.tenors, combined[n+1:2n])
+        valuation_fn(base_model, credit_model)
     end
     combined = [base.rates; credit.rates]
     v = f(combined)
@@ -773,6 +776,21 @@ result = sensitivities(zrc) do curve
     sum(cf * curve(t) for (cf, t) in zip([5.0, 5.0, 105.0], [1.0, 2.0, 3.0]))
 end
 ```
+
+When using stochastic (Monte Carlo) valuations, you must fix the RNG seed so that
+the same random draws are used for every AD perturbation:
+
+```julia
+result = sensitivities(zrc) do curve
+    hw = HullWhite(0.1, 0.01, curve)
+    pv_mc(hw, contract; n_scenarios=1000, rng=MersenneTwister(42))
+end
+```
+
+Without a fixed seed, gradients will be noisy and incorrect.
+
+Pathwise AD is invalid for discontinuous payoffs (digital options, barriers).
+For those cases, use finite differences instead.
 """
 function sensitivities(valuation_fn::Function, zrc::ZRC)
     ad = _keyrate_ad(zrc, valuation_fn; order = 2)
@@ -793,7 +811,11 @@ end
     sensitivities(::IR01, base::ZeroRateCurve, credit::ZeroRateCurve, cfs, times)
     sensitivities(::CS01, base::ZeroRateCurve, credit::ZeroRateCurve, cfs, times)
 
-Two-curve sensitivities. Returns a `NamedTuple` with base and credit components.
+Two-curve sensitivities. Returns base/credit durations, DV01s, and convexity matrices.
+
+The `convexities.cross` matrix `[i,j] = ∂²V/(∂base_rᵢ ∂credit_rⱼ) / V` captures
+interaction effects between base and credit rate movements — relevant when the two
+curves move in correlated fashion (e.g., both driven by macro factors).
 """
 function sensitivities(valuation_fn::Function, base::ZRC, credit::ZRC)
     ad = _keyrate_ad(base, credit, valuation_fn; order = 2)
