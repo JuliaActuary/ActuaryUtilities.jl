@@ -17,24 +17,85 @@ zrc = ZeroRateCurve(rates, tenors)
 
 cfs = [5.0, 5.0, 5.0, 5.0, 105.0]
 
-# Key rate durations (modified): vector of -∂V/∂rᵢ / V
-krds = duration(zrc, cfs, tenors)
+# Scalar modified duration (default)
+dur = duration(zrc, cfs, tenors)
 
-# Key rate DV01s: vector of -∂V/∂rᵢ / 10000
-dv01s = duration(DV01(), zrc, cfs, tenors)
+# Scalar DV01
+dv01 = duration(DV01(), zrc, cfs, tenors)
 
-# Key rate convexity matrix: ∂²V/∂rᵢ∂rⱼ / V
+# Scalar convexity
 conv = convexity(zrc, cfs, tenors)
 ```
 
-For a complete set of results in a single AD pass, use `sensitivities`:
+To get the full key-rate decomposition (vectors/matrices), use `KeyRates()`:
+
+```julia
+# Key rate durations (modified): vector of -∂V/∂rᵢ / V
+krds = duration(KeyRates(), zrc, cfs, tenors)
+
+# Key rate DV01s: vector of -∂V/∂rᵢ / 10000
+dv01s = duration(DV01(), KeyRates(), zrc, cfs, tenors)
+
+# Key rate convexity matrix: ∂²V/∂rᵢ∂rⱼ / V
+conv_matrix = convexity(KeyRates(), zrc, cfs, tenors)
+```
+
+For a complete set of key-rate results in a single AD pass, use `sensitivities`:
 
 ```julia
 result = sensitivities(zrc, cfs, tenors)
 # result.value       — present value
-# result.durations   — key rate durations (modified)
-# result.dv01s       — key rate DV01s
-# result.convexities — cross-convexity matrix
+# result.durations   — key rate durations (modified) — vector
+# result.convexities — cross-convexity matrix — matrix
+
+# For DV01s instead of durations:
+dv01_result = sensitivities(DV01(), zrc, cfs, tenors)
+# dv01_result.value       — present value
+# dv01_result.dv01s       — key rate DV01s — vector
+# dv01_result.convexities — cross-convexity matrix — matrix
+```
+
+## Scalar vs Key-Rate Decomposition
+
+By default, `duration` and `convexity` with a `ZeroRateCurve` return **scalars** — the total modified duration, DV01, or convexity. This is consistent with the yield-based API (`duration(0.03, cfs, times)`).
+
+To obtain the per-tenor decomposition, pass `KeyRates()` as the first argument:
+
+```julia
+# Scalar (default) — same as sum of key-rate decomposition
+duration(zrc, cfs, tenors)                          # scalar
+duration(DV01(), zrc, cfs, tenors)                   # scalar
+convexity(zrc, cfs, tenors)                          # scalar
+
+# Key-rate decomposition
+duration(KeyRates(), zrc, cfs, tenors)               # vector
+duration(DV01(), KeyRates(), zrc, cfs, tenors)       # vector
+convexity(KeyRates(), zrc, cfs, tenors)              # matrix
+```
+
+The scalar value equals the sum of the key-rate decomposition:
+
+```julia
+duration(zrc, cfs, tenors) ≈ sum(duration(KeyRates(), zrc, cfs, tenors))
+```
+
+For a flat curve, the scalar modified duration matches the yield-based API:
+
+```julia
+using ActuaryUtilities
+
+cfs = [5.0, 5.0, 5.0, 5.0, 105.0]
+tenors = [1.0, 2.0, 3.0, 4.0, 5.0]
+zrc = ZeroRateCurve(fill(0.03, 5), tenors)
+
+duration(zrc, cfs, tenors)                            # ≈ 4.57
+duration(Continuous(), 0.03, cfs, tenors)              # ≈ 4.57 (same)
+```
+
+For Macaulay duration, use the scalar yield API directly — there is no `ZeroRateCurve` dispatch:
+
+```julia
+duration(Macaulay(), 0.03, cfs, tenors)
 ```
 
 ## Interest-Sensitive Instruments
@@ -42,7 +103,15 @@ result = sensitivities(zrc, cfs, tenors)
 For instruments whose cashflows depend on the rate environment (callable bonds, floaters, etc.), use the do-block syntax to pass a custom valuation function:
 
 ```julia
-# Callable bond: issuer calls at par + 2 after year 3
+# Callable bond: key rate durations (vector)
+callable_krds = duration(KeyRates(), zrc) do curve
+    ncv = sum(cf * curve(t) for (cf, t) in zip(cfs, tenors))
+    called_value = sum(cf * curve(t) for (cf, t) in zip(cfs[1:3], tenors[1:3])) +
+                   102.0 * curve(3.0)
+    min(ncv, called_value)
+end
+
+# Scalar duration (default)
 callable_dur = duration(zrc) do curve
     ncv = sum(cf * curve(t) for (cf, t) in zip(cfs, tenors))
     called_value = sum(cf * curve(t) for (cf, t) in zip(cfs[1:3], tenors[1:3])) +
@@ -61,17 +130,23 @@ Decompose sensitivities into base (risk-free) and credit spread components using
 base = ZeroRateCurve([0.03, 0.03, 0.03, 0.03, 0.03], tenors)
 credit = ZeroRateCurve([0.02, 0.02, 0.02, 0.02, 0.02], tenors)
 
-# Base curve DV01s
-ir01s = duration(IR01(), base, credit, cfs, tenors)
+# Scalar IR01 and CS01
+ir01 = duration(IR01(), base, credit, cfs, tenors)
+cs01 = duration(CS01(), base, credit, cfs, tenors)
 
-# Credit spread DV01s
-cs01s = duration(CS01(), base, credit, cfs, tenors)
+# Key-rate decomposition (vectors)
+ir01s = duration(IR01(), KeyRates(), base, credit, cfs, tenors)
+cs01s = duration(CS01(), KeyRates(), base, credit, cfs, tenors)
 
-# Two-curve convexity (base, credit, and cross matrices)
+# Two-curve convexity — scalars by default
 conv = convexity(base, credit, cfs, tenors)
-# conv.base, conv.credit, conv.cross
+# conv.base, conv.credit, conv.cross (all scalars)
 
-# Full two-curve sensitivities
+# Key-rate decomposition (matrices)
+conv_kr = convexity(KeyRates(), base, credit, cfs, tenors)
+# conv_kr.base, conv_kr.credit, conv_kr.cross (all matrices)
+
+# Full two-curve sensitivities (always key-rate decomposition)
 result = sensitivities(base, credit, cfs, tenors)
 ```
 
@@ -84,15 +159,15 @@ DV01s are additive across positions, so a portfolio's DV01 vector equals the sum
 ```julia
 zrc = ZeroRateCurve(rates, tenors)
 
-# Compute portfolio DV01 in a single AD pass
-portfolio_dv01 = duration(DV01(), zrc) do curve
+# Compute portfolio DV01 vector in a single AD pass
+portfolio_dv01 = duration(DV01(), KeyRates(), zrc) do curve
     sum(cf * curve(t) for (cf, t) in zip(bond1_cfs, bond1_times)) +
     sum(cf * curve(t) for (cf, t) in zip(bond2_cfs, bond2_times))
 end
 
 # Equivalently (but two AD passes):
-dv01_1 = duration(DV01(), zrc, bond1_cfs, bond1_times)
-dv01_2 = duration(DV01(), zrc, bond2_cfs, bond2_times)
+dv01_1 = duration(DV01(), KeyRates(), zrc, bond1_cfs, bond1_times)
+dv01_2 = duration(DV01(), KeyRates(), zrc, bond2_cfs, bond2_times)
 portfolio_dv01 ≈ dv01_1 .+ dv01_2
 ```
 
@@ -113,15 +188,27 @@ notionals = fill(100.0, 10)
 maturities = 1:10
 spread = 0.005
 
+# The do-block receives the curve and returns the total present value
+# of all cashflows across the portfolio.
+# The curve is constructed once per AD evaluation — valuing all 10 bonds
+# inside a single do-block avoids rebuilding the curve for each bond.
 result = sensitivities(zrc) do curve
     total = 0.0
     for (notional, mat) in zip(notionals, maturities)
+        # For each bond, loop over annual payment dates t = 1, 2, ..., maturity
         for t in 1:mat
+            # Discount factors: df = P(0,t), df_prev = P(0,t-1)
             df = curve(Float64(t))
             df_prev = t == 1 ? 1.0 : curve(Float64(t - 1))
-            fwd = df_prev / df - 1.0          # 1yr simple forward rate
-            total += notional * (fwd + spread) * df  # PV of floating coupon
-            t == mat && (total += notional * df)      # principal at maturity
+
+            # 1yr simple forward rate from t-1 to t: F = P(0,t-1)/P(0,t) - 1
+            fwd = df_prev / df - 1.0
+
+            # Floating coupon PV: notional × (forward rate + spread) × P(0,t)
+            total += notional * (fwd + spread) * df
+
+            # Return principal at maturity
+            t == mat && (total += notional * df)
         end
     end
     total
@@ -129,7 +216,6 @@ end
 
 result.value       # portfolio present value (≈ 10 × 100 + spread premium)
 result.durations   # key rate durations — small, since floaters reset
-result.dv01s       # key rate DV01s
 ```
 
 Without the spread, a floater prices at par and has near-zero duration (coupons offset discount factor changes). The spread introduces duration because its fixed cashflows are rate-sensitive — similar to a portfolio of small fixed-rate annuities layered on top of the par-valued floaters.
@@ -223,7 +309,6 @@ hw_result = sensitivities(zrc) do curve
 end
 
 hw_result.durations   # key rate durations under stochastic dynamics
-hw_result.dv01s       # key rate DV01s
 hw_result.convexities # cross-convexity matrix
 ```
 
@@ -247,7 +332,7 @@ end
 det_result.durations  # [0.04, 0.09, 0.13, 0.16, 4.15]  (localized at each tenor)
 hw_result.durations   # [-1.01, 1.04, 1.70, 1.85, 0.99]  (redistributed across tenors)
 
-sum(det_result.durations) # 4.57  — total modified duration
+sum(det_result.durations) # 4.57  — total modified duration (= duration(zrc, cfs, tenors))
 sum(hw_result.durations)  # 4.57  — same total (risk-neutral guarantee)
 ```
 
@@ -296,8 +381,8 @@ tenors = [1.0, 3.0, 5.0, 10.0]
 zrc = ZeroRateCurve(rates, tenors)
 cfs = [3.0, 3.0, 3.0, 103.0]
 
-# AD (exact)
-ad_dv01 = duration(DV01(), zrc, cfs, tenors)
+# AD (exact) — use KeyRates() for the per-tenor vector
+ad_dv01 = duration(DV01(), KeyRates(), zrc, cfs, tenors)
 
 # Finite difference (bump-and-reprice)
 ε = 1e-5
