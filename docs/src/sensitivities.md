@@ -150,6 +150,65 @@ result.dv01s       # key rate DV01s
 
 Without the spread, a floater prices at par and has near-zero duration (coupons offset discount factor changes). The spread introduces duration because its fixed cashflows are rate-sensitive — similar to a portfolio of small fixed-rate annuities layered on top of the par-valued floaters.
 
+## Stochastic Model Sensitivities
+
+ForwardDiff's dual numbers propagate through the full Monte Carlo simulation pipeline in FinanceModels.jl, including the Euler-Maruyama path generation. This means you can compute exact sensitivities of expected present values under stochastic short-rate models — differentiating through thousands of simulated rate paths in a single AD pass.
+
+### Hull-White: sensitivities w.r.t. the initial term structure
+
+A Hull-White model calibrates its drift θ(t) to match an initial yield curve. When that curve is a `ZeroRateCurve`, you can compute how the Monte Carlo expected value responds to movements in the initial zero rates:
+
+```julia
+using ActuaryUtilities, FinanceModels
+using FinanceModels: ShortRate, simulate
+using FinanceCore: discount
+using Random
+
+rates = [0.03, 0.03, 0.03, 0.03, 0.03]
+tenors = [1.0, 2.0, 3.0, 4.0, 5.0]
+zrc = ZeroRateCurve(rates, tenors)
+
+cfs = [5.0, 5.0, 5.0, 5.0, 105.0]
+times = [1.0, 2.0, 3.0, 4.0, 5.0]
+
+# Key rate sensitivities of E[V] under Hull-White dynamics
+hw_result = sensitivities(zrc) do curve
+    hw = ShortRate.HullWhite(0.1, 0.01, curve)
+    scenarios = simulate(hw; n_scenarios=500, timestep=1/12, horizon=6.0, rng=Xoshiro(42))
+    sum(sum(cf * discount(sc, t) for (cf, t) in zip(cfs, times)) for sc in scenarios) / 500
+end
+
+hw_result.durations   # key rate durations under stochastic dynamics
+hw_result.dv01s       # key rate DV01s
+hw_result.convexities # cross-convexity matrix
+```
+
+This involves nested AD: the outer ForwardDiff differentiates w.r.t. zero rates, while Hull-White's θ(t) calibration internally uses ForwardDiff to compute instantaneous forward rates from the curve. ForwardDiff's [tag system](https://github.com/JuliaDiff/ForwardDiff.jl/issues/83) disambiguates the two differentiation passes automatically.
+
+### Comparison: deterministic vs stochastic sensitivities
+
+The deterministic `ZeroRateCurve` and stochastic Hull-White valuations give different sensitivities for the same bond, because the stochastic model accounts for rate volatility and mean reversion:
+
+```julia
+# Deterministic: discount directly off the initial curve
+det_result = sensitivities(zrc, cfs, tenors)
+
+# Stochastic: average across simulated rate paths
+hw_result = sensitivities(zrc) do curve
+    hw = ShortRate.HullWhite(0.1, 0.01, curve)
+    scenarios = simulate(hw; n_scenarios=1000, timestep=1/12, horizon=6.0, rng=Xoshiro(42))
+    sum(sum(cf * discount(sc, t) for (cf, t) in zip(cfs, times)) for sc in scenarios) / 1000
+end
+
+det_result.durations  # [0.04, 0.09, 0.13, 0.16, 4.15]  (concentrated at maturity)
+hw_result.durations   # [-1.01, 1.04, 1.70, 1.85, 0.99]  (redistributed by mean reversion)
+```
+
+The deterministic curve produces KRDs that are PV-weighted cashflow contributions — nearly all duration (4.15) sits at the 5yr tenor where the principal repays, with small coupons contributing little at shorter tenors. Under Hull-White dynamics, mean reversion fundamentally changes the picture: the stochastic KRDs are spread more evenly across tenors (roughly 1.0–1.85 each), reflecting how θ(t) recalibration transmits initial curve movements into the drift at all future times. The negative KRD at the 1yr tenor arises because a higher short rate increases the mean-reversion pull downward, which can raise intermediate discount factors via θ(t). The stochastic convexity matrix also captures volatility-driven cross-tenor effects absent from the deterministic model.
+
+!!! note
+    The fixed `rng` seed ensures reproducibility: the same random draws are used for every AD perturbation, giving exact pathwise derivatives. Without a fixed seed, each call would use different paths, introducing MC noise into the gradient.
+
 ## Choosing Interpolation
 
 `ZeroRateCurve` accepts an optional third argument for the interpolation method:
