@@ -4,6 +4,7 @@ using Dates
 using Test
 using Distributions
 using StatsBase
+using Random
 
 const FM = ActuaryUtilities.FinanceModels
 const FC = ActuaryUtilities.FinanceCore
@@ -776,6 +777,37 @@ end
             @test conv[i, j] ≈ 0.0 atol = 1e-10
         end
     end
+end
+
+@testset "Hull-White MC: sum of KRDs = deterministic (risk-neutral guarantee)" begin
+    # For fixed cashflows, E[V] = Σ cf_i × P(0,t_i) under any risk-neutral model
+    # (Glasserman, 2003, Ch. 7), so the sum of key rate durations is preserved
+    # between deterministic discounting and Monte Carlo under Hull-White dynamics.
+    # Individual KRDs differ because HW's θ(t) calibration creates non-local
+    # rate dependencies (Brigo & Mercurio, 2006, Ch. 3).
+    rates = [0.03, 0.03, 0.03, 0.03, 0.03]
+    tenors = [1.0, 2.0, 3.0, 4.0, 5.0]
+    cfs = [5.0, 5.0, 5.0, 5.0, 105.0]
+
+    # Deterministic KRDs
+    zrc = FM.ZeroRateCurve(rates, tenors)
+    det = sensitivities(zrc, cfs, tenors)
+
+    # Hull-White MC KRDs (AD through Monte Carlo via pathwise differentiation)
+    hw_result = sensitivities(zrc) do curve
+        hw = FM.ShortRate.HullWhite(0.1, 0.01, curve)
+        scenarios = FM.simulate(hw; n_scenarios=500, timestep=1 / 12, horizon=6.0, rng=Xoshiro(42))
+        sum(sum(cf * FC.discount(sc, t) for (cf, t) in zip(cfs, tenors)) for sc in scenarios) / 500
+    end
+
+    # Total duration preserved (risk-neutral pricing theorem)
+    @test sum(hw_result.durations) ≈ sum(det.durations) atol = 0.05
+
+    # Individual KRDs should differ (HW redistributes across tenors)
+    @test !(hw_result.durations ≈ det.durations)
+
+    # Present values should also agree
+    @test hw_result.value ≈ det.value atol = 0.5
 end
 
 @testset "spread" begin

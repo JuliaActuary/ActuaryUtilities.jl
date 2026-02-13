@@ -185,26 +185,33 @@ hw_result.convexities # cross-convexity matrix
 
 This involves nested AD: the outer ForwardDiff differentiates w.r.t. zero rates, while Hull-White's θ(t) calibration internally uses ForwardDiff to compute instantaneous forward rates from the curve. ForwardDiff's [tag system](https://github.com/JuliaDiff/ForwardDiff.jl/issues/83) disambiguates the two differentiation passes automatically.
 
-### Comparison: deterministic vs stochastic sensitivities
+### Comparison: deterministic vs model-based sensitivities
 
-The deterministic `ZeroRateCurve` and stochastic Hull-White valuations give different sensitivities for the same bond, because the stochastic model accounts for rate volatility and mean reversion:
+The deterministic `ZeroRateCurve` and Hull-White MC valuations produce the same total duration for fixed cashflows (a consequence of the [risk-neutral pricing theorem](https://en.wikipedia.org/wiki/Risk-neutral_measure)), but decompose it across tenors differently:
 
 ```julia
 # Deterministic: discount directly off the initial curve
 det_result = sensitivities(zrc, cfs, tenors)
 
-# Stochastic: average across simulated rate paths
+# Model-based: average across simulated rate paths
 hw_result = sensitivities(zrc) do curve
     hw = ShortRate.HullWhite(0.1, 0.01, curve)
     scenarios = simulate(hw; n_scenarios=1000, timestep=1/12, horizon=6.0, rng=Xoshiro(42))
     sum(sum(cf * discount(sc, t) for (cf, t) in zip(cfs, times)) for sc in scenarios) / 1000
 end
 
-det_result.durations  # [0.04, 0.09, 0.13, 0.16, 4.15]  (concentrated at maturity)
-hw_result.durations   # [-1.01, 1.04, 1.70, 1.85, 0.99]  (redistributed by mean reversion)
+det_result.durations  # [0.04, 0.09, 0.13, 0.16, 4.15]  (localized at each tenor)
+hw_result.durations   # [-1.01, 1.04, 1.70, 1.85, 0.99]  (redistributed across tenors)
+
+sum(det_result.durations) # 4.57  — total modified duration
+sum(hw_result.durations)  # 4.57  — same total (risk-neutral guarantee)
 ```
 
-The deterministic curve produces KRDs that are PV-weighted cashflow contributions — nearly all duration (4.15) sits at the 5yr tenor where the principal repays, with small coupons contributing little at shorter tenors. Under Hull-White dynamics, mean reversion fundamentally changes the picture: the stochastic KRDs are spread more evenly across tenors (roughly 1.0–1.85 each), reflecting how θ(t) recalibration transmits initial curve movements into the drift at all future times. The negative KRD at the 1yr tenor arises because a higher short rate increases the mean-reversion pull downward, which can raise intermediate discount factors via θ(t). The stochastic convexity matrix also captures volatility-driven cross-tenor effects absent from the deterministic model.
+**Why the totals match:** For fixed cashflows, E[V] = Σ cf_i × P(0, t_i) under any risk-neutral model ([Glasserman, 2003, Ch. 7](https://link.springer.com/book/10.1007/978-0-387-21617-1)), so a parallel shift of all zero rates produces the same ΔV regardless of whether we compute it by direct discounting or via Monte Carlo. This implies Σ KRD_det = Σ KRD_HW.
+
+**Why the decomposition differs:** The two approaches construct discount factors through different mathematical pathways. `ZeroRateCurve` with linear interpolation gives `df(t) = exp(-r_interp(t) × t)`, where bumping rate_j only affects the interpolated rate near tenor j — producing localized KRDs. Hull-White constructs discount factors by integrating a calibrated short-rate ODE: bumping rate_j changes the forward curve f(0,t), which changes θ(t) = ∂f/∂t + a·f + σ²(1−e^{−2at})/2a everywhere, altering the short-rate path at all times via the mean-reversion dynamics ([Brigo & Mercurio, 2006, Ch. 3](https://link.springer.com/book/10.1007/978-3-540-34604-3)). This creates non-local sensitivity even in the σ→0 limit — it is the model's parametric structure, not stochastic volatility, that redistributes duration.
+
+This phenomenon is well-established in derivatives pricing as "model-dependent Greeks": different models calibrated to the same curve produce identical prices but different sensitivities. The pathwise differentiation technique used here ([Giles & Glasserman, 2006](https://people.maths.ox.ac.uk/~gilesm/files/mc_greeks.pdf)) computes exact derivatives of the Monte Carlo estimate in a single forward pass, capturing the full chain of dependencies from initial curve through θ(t) calibration through path simulation to valuation.
 
 !!! note
     The fixed `rng` seed ensures reproducibility: the same random draws are used for every AD perturbation, giving exact pathwise derivatives. Without a fixed seed, each call would use different paths, introducing MC noise into the gradient.
