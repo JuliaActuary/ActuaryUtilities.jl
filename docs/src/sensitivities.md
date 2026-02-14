@@ -89,7 +89,7 @@ tenors = [1.0, 2.0, 3.0, 4.0, 5.0]
 zrc = ZeroRateCurve(fill(0.03, 5), tenors)
 
 duration(zrc, cfs, tenors)                            # ≈ 4.57
-duration(Continuous(), 0.03, cfs, tenors)              # ≈ 4.57 (same)
+duration(0.03, cfs, tenors)                            # ≈ 4.57 (same)
 ```
 
 For Macaulay duration, use the scalar yield API directly — there is no `ZeroRateCurve` dispatch:
@@ -105,17 +105,15 @@ For instruments whose cashflows depend on the rate environment (callable bonds, 
 ```julia
 # Callable bond: key rate durations (vector)
 callable_krds = duration(KeyRates(), zrc) do curve
-    ncv = sum(cf * curve(t) for (cf, t) in zip(cfs, tenors))
-    called_value = sum(cf * curve(t) for (cf, t) in zip(cfs[1:3], tenors[1:3])) +
-                   102.0 * curve(3.0)
+    ncv = pv(curve, cfs, tenors)
+    called_value = pv(curve, cfs[1:3], tenors[1:3]) + 102.0 * curve(3.0)
     min(ncv, called_value)
 end
 
 # Scalar duration (default)
 callable_dur = duration(zrc) do curve
-    ncv = sum(cf * curve(t) for (cf, t) in zip(cfs, tenors))
-    called_value = sum(cf * curve(t) for (cf, t) in zip(cfs[1:3], tenors[1:3])) +
-                   102.0 * curve(3.0)
+    ncv = pv(curve, cfs, tenors)
+    called_value = pv(curve, cfs[1:3], tenors[1:3]) + 102.0 * curve(3.0)
     min(ncv, called_value)
 end
 ```
@@ -152,6 +150,42 @@ result = sensitivities(base, credit, cfs, tenors)
 
 The default two-curve valuation uses multiplicative discount factors: `V = Σ cf × base(t) × credit(t)`, which corresponds to additive rates.
 
+### Example: Credit-Risky Floating Rate Bond
+
+For fixed cashflows, IR01 and CS01 are identical because base and credit rates enter additively. A **credit-risky floating rate bond** breaks this symmetry — its coupons reset to the risk-free forward rate plus a fixed credit spread, so bumping base rates changes both coupon amounts and discount factors (partially canceling), while bumping credit rates only affects discounting:
+
+```julia
+base = ZeroRateCurve([0.03, 0.03, 0.03, 0.03, 0.03], tenors)
+credit = ZeroRateCurve([0.02, 0.02, 0.02, 0.02, 0.02], tenors)
+
+# Floating rate bond: coupon = risk-free forward + 200bp credit spread
+# Discounted at the combined base + credit rate
+spread = 0.02
+face = 100.0
+
+result = sensitivities(base, credit) do base_curve, credit_curve
+    total = 0.0
+    for t in 1:5
+        df_base = base_curve(Float64(t))
+        df_credit = credit_curve(Float64(t))
+        df_base_prev = t == 1 ? 1.0 : base_curve(Float64(t - 1))
+
+        # Coupon resets to risk-free forward rate + fixed credit spread
+        fwd = df_base_prev / df_base - 1.0
+        total += face * (fwd + spread) * df_base * df_credit
+
+        # Principal at maturity
+        t == 5 && (total += face * df_base * df_credit)
+    end
+    total
+end
+
+sum(result.base_durations)    # IR01 — small, coupon reset offsets base rate sensitivity
+sum(result.credit_durations)  # CS01 — larger, credit spread only affects discounting
+```
+
+Bumping base rates changes both the floating coupon amounts and the discount factors (partially canceling), while bumping credit rates only affects discounting. This asymmetry is why the IR01/CS01 decomposition matters for instruments with rate-dependent cashflows.
+
 ## Portfolio Sensitivity
 
 DV01s are additive across positions, so a portfolio's DV01 vector equals the sum of individual DV01s:
@@ -160,9 +194,9 @@ DV01s are additive across positions, so a portfolio's DV01 vector equals the sum
 zrc = ZeroRateCurve(rates, tenors)
 
 # Compute portfolio DV01 vector in a single AD pass
+# bond1_cfs, bond2_cfs are Vector{Cashflow} (from FinanceCore)
 portfolio_dv01 = duration(DV01(), KeyRates(), zrc) do curve
-    sum(cf * curve(t) for (cf, t) in zip(bond1_cfs, bond1_times)) +
-    sum(cf * curve(t) for (cf, t) in zip(bond2_cfs, bond2_times))
+    pv(curve, bond1_cfs) + pv(curve, bond2_cfs)
 end
 
 # Equivalently (but two AD passes):
@@ -229,10 +263,8 @@ ForwardDiff's dual numbers propagate through the full Monte Carlo simulation pip
 The `sensitivities` function always differentiates with respect to the **zero rates in the `ZeroRateCurve`** — these are the market-observable inputs. When you wrap a stochastic model inside the do-block:
 
 ```julia
-sensitivities(zrc) do curve
-    hw = ShortRate.HullWhite(0.1, 0.01, curve)
-    # ... simulate and value ...
-end
+hw = ShortRate.HullWhite(0.1, 0.01, zrc)
+sensitivities(hw, cfs, times; n_scenarios=500, rng=Xoshiro(42))
 ```
 
 the chain of differentiation is:
@@ -272,7 +304,7 @@ function mc_value(a, σ)
     curve = ZeroRateCurve(rates, tenors)
     hw = ShortRate.HullWhite(a, σ, curve)
     scenarios = simulate(hw; n_scenarios=1000, timestep=1/12, horizon=6.0, rng=Xoshiro(42))
-    sum(sum(cf * discount(sc, t) for (cf, t) in zip(cfs, tenors)) for sc in scenarios) / 1000
+    sum(pv(sc, cfs, tenors) for sc in scenarios) / 1000
 end
 
 # Finite-difference sensitivities
@@ -302,11 +334,8 @@ cfs = [5.0, 5.0, 5.0, 5.0, 105.0]
 times = [1.0, 2.0, 3.0, 4.0, 5.0]
 
 # Key rate sensitivities of E[V] under Hull-White dynamics
-hw_result = sensitivities(zrc) do curve
-    hw = ShortRate.HullWhite(0.1, 0.01, curve)
-    scenarios = simulate(hw; n_scenarios=500, timestep=1/12, horizon=6.0, rng=Xoshiro(42))
-    sum(sum(cf * discount(sc, t) for (cf, t) in zip(cfs, times)) for sc in scenarios) / 500
-end
+hw = ShortRate.HullWhite(0.1, 0.01, zrc)
+hw_result = sensitivities(hw, cfs, times; n_scenarios=500, timestep=1/12, horizon=6.0, rng=Xoshiro(42))
 
 hw_result.durations   # key rate durations under stochastic dynamics
 hw_result.convexities # cross-convexity matrix
@@ -323,11 +352,8 @@ The deterministic `ZeroRateCurve` and Hull-White MC valuations produce the same 
 det_result = sensitivities(zrc, cfs, tenors)
 
 # Model-based: average across simulated rate paths
-hw_result = sensitivities(zrc) do curve
-    hw = ShortRate.HullWhite(0.1, 0.01, curve)
-    scenarios = simulate(hw; n_scenarios=1000, timestep=1/12, horizon=6.0, rng=Xoshiro(42))
-    sum(sum(cf * discount(sc, t) for (cf, t) in zip(cfs, times)) for sc in scenarios) / 1000
-end
+hw = ShortRate.HullWhite(0.1, 0.01, zrc)
+hw_result = sensitivities(hw, cfs, times; n_scenarios=1000, timestep=1/12, horizon=6.0, rng=Xoshiro(42))
 
 det_result.durations  # [0.04, 0.09, 0.13, 0.16, 4.15]  (localized at each tenor)
 hw_result.durations   # [-1.01, 1.04, 1.70, 1.85, 0.99]  (redistributed across tenors)
@@ -389,8 +415,8 @@ ad_dv01 = duration(DV01(), KeyRates(), zrc, cfs, tenors)
 for i in 1:4
     rates_up = copy(rates); rates_up[i] += ε
     rates_dn = copy(rates); rates_dn[i] -= ε
-    v_up = sum(cf * ZeroRateCurve(rates_up, tenors)(t) for (cf, t) in zip(cfs, tenors))
-    v_dn = sum(cf * ZeroRateCurve(rates_dn, tenors)(t) for (cf, t) in zip(cfs, tenors))
+    v_up = pv(ZeroRateCurve(rates_up, tenors), cfs, tenors)
+    v_dn = pv(ZeroRateCurve(rates_dn, tenors), cfs, tenors)
     fd_dv01 = -(v_up - v_dn) / (2ε) / 10_000
     @test ad_dv01[i] ≈ fd_dv01 atol = 1e-4
 end

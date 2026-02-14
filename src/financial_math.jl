@@ -6,6 +6,7 @@ import ..ForwardDiff
 import ..ActuaryUtilities: duration
 import ..Optimization
 import ..OptimizationOptimJL
+import Random
 
 export irr, internal_rate_of_return, spread,
     pv, present_value, price, present_values,
@@ -1049,6 +1050,67 @@ end
 # Do-block: sensitivities(DV01(), base, credit) do ... end
 function sensitivities(valuation_fn::Function, ::DV01, base::ZRC, credit::ZRC)
     return sensitivities(DV01(), valuation_fn, base, credit)
+end
+
+## Hull-White convenience methods
+
+const HW = FinanceModels.ShortRate.HullWhite
+
+# Fixed cashflows: sensitivities(hw, cfs, times; ...)
+function sensitivities(hw::HW, cfs, times;
+                       n_scenarios=1000, timestep=1/12, horizon=nothing,
+                       rng=Random.default_rng())
+    zrc = hw.curve
+    zrc isa ZRC || throw(ArgumentError(
+        "Hull-White curve must be a ZeroRateCurve for AD sensitivities"))
+    h = horizon === nothing ? maximum(times) + 1.0 : Float64(horizon)
+    sensitivities(zrc) do curve
+        hw_new = FinanceModels.ShortRate.HullWhite(hw.a, hw.σ, curve)
+        scenarios = FinanceModels.simulate(hw_new; n_scenarios, timestep, horizon=h, rng)
+        sum(FinanceCore.pv(sc, cfs, times) for sc in scenarios) / n_scenarios
+    end
+end
+
+# Do-block: sensitivities(hw; ...) do scenarios ... end
+function sensitivities(valuation_fn::Function, hw::HW;
+                       n_scenarios=1000, timestep=1/12, horizon=30.0,
+                       rng=Random.default_rng())
+    zrc = hw.curve
+    zrc isa ZRC || throw(ArgumentError(
+        "Hull-White curve must be a ZeroRateCurve for AD sensitivities"))
+    sensitivities(zrc) do curve
+        hw_new = FinanceModels.ShortRate.HullWhite(hw.a, hw.σ, curve)
+        scenarios = FinanceModels.simulate(hw_new; n_scenarios, timestep, horizon, rng)
+        valuation_fn(scenarios)
+    end
+end
+
+# DV01 variants
+function sensitivities(::DV01, hw::HW, cfs, times;
+                       n_scenarios=1000, timestep=1/12, horizon=nothing,
+                       rng=Random.default_rng())
+    zrc = hw.curve
+    zrc isa ZRC || throw(ArgumentError(
+        "Hull-White curve must be a ZeroRateCurve for AD sensitivities"))
+    h = horizon === nothing ? maximum(times) + 1.0 : Float64(horizon)
+    sensitivities(DV01(), zrc) do curve
+        hw_new = FinanceModels.ShortRate.HullWhite(hw.a, hw.σ, curve)
+        scenarios = FinanceModels.simulate(hw_new; n_scenarios, timestep, horizon=h, rng)
+        sum(FinanceCore.pv(sc, cfs, times) for sc in scenarios) / n_scenarios
+    end
+end
+
+function sensitivities(valuation_fn::Function, ::DV01, hw::HW;
+                       n_scenarios=1000, timestep=1/12, horizon=30.0,
+                       rng=Random.default_rng())
+    zrc = hw.curve
+    zrc isa ZRC || throw(ArgumentError(
+        "Hull-White curve must be a ZeroRateCurve for AD sensitivities"))
+    sensitivities(DV01(), zrc) do curve
+        hw_new = FinanceModels.ShortRate.HullWhite(hw.a, hw.σ, curve)
+        scenarios = FinanceModels.simulate(hw_new; n_scenarios, timestep, horizon, rng)
+        valuation_fn(scenarios)
+    end
 end
 
 end
