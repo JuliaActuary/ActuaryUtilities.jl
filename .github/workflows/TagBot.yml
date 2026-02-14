@@ -21,5 +21,5 @@ jobs:
           # use a PAT with `workflow` scope instead of GITHUB_TOKEN.
           # See: https://github.com/JuliaRegistries/TagBot#commits-that-modify-workflow-files
           ssh: ${{ secrets.DOCUMENTER_KEY }}
-          # ssh: ${{ secrets.NAME_OF_MY_SSH_PRIVATE_KEY_SECRET }}
+          ssh: ${{ secrets.SSH_KEY }}
           # changelog_format: github  # 'custom' (default), 'github', or 'conventional'
