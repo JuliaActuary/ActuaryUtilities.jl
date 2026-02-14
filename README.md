@@ -27,13 +27,47 @@ A collection of common functions/manipulations used in Actuarial Calculations.
 
 - `duration`:
   - Calculate the `Macaulay`, `Modified`, or `DV01` durations for a set of cashflows
-  - Calculate the `KeyRate(time)` (a.k.a. `KeyRateZero`)duration or `KeyRatePar(time)` duration
+  - Calculate the `KeyRate(time)` (a.k.a. `KeyRateZero`) duration or `KeyRatePar(time)` duration
 - `convexity` for price sensitivity
 - Flexible interest rate models via the [`FinanceModels.jl`](https://github.com/JuliaActuary/FinanceModels.jl) package.
 - `internal_rate_of_return` or `irr` to calculate the IRR given cashflows (including at timepoints like Excel's `XIRR`)
 - `breakeven` to calculate the breakeven time for a set of cashflows
 - `accum_offset` to calculate accumulations like survivorship from a mortality vector
 - `spread` will calculate the spread needed between two yield curves to equate a set of cashflows
+
+### Key Rate Sensitivities via Automatic Differentiation
+
+Compute exact key rate durations, DV01s, and convexities using ForwardDiff through `ZeroRateCurve` from [FinanceModels.jl](https://github.com/JuliaActuary/FinanceModels.jl) -- machine-precision sensitivities in a single pass, no bump-and-reprice required.
+
+```julia
+using ActuaryUtilities, FinanceModels
+
+rates = [0.03, 0.03, 0.03, 0.03, 0.03]
+tenors = [1.0, 2.0, 3.0, 4.0, 5.0]
+zrc = ZeroRateCurve(rates, tenors)
+cfs = [5.0, 5.0, 5.0, 5.0, 105.0]
+
+# All key rate sensitivities in one AD pass
+result = sensitivities(zrc, cfs, tenors)
+result.value       # present value
+result.durations   # key rate durations (vector)
+result.convexities # cross-convexity matrix
+```
+
+- **`sensitivities`**: bundled value, key rate durations, and convexity matrix in a single AD pass
+- **Two-curve decomposition**: separate `IR01` (risk-free) and `CS01` (credit spread) sensitivities
+- **Do-block syntax**: custom valuation functions for rate-dependent instruments (callable bonds, floaters, caps/floors)
+- **Hull-White stochastic model**: key rate sensitivities of Monte Carlo expected values, differentiating through the full simulation pipeline
+
+```julia
+using FinanceModels: ShortRate
+
+hw = ShortRate.HullWhite(0.1, 0.01, zrc)
+hw_result = sensitivities(hw, cfs, tenors; n_scenarios=1000, rng=Xoshiro(42))
+hw_result.durations   # key rate durations under stochastic dynamics
+```
+
+See the [Key Rate Sensitivities documentation](https://JuliaActuary.github.io/ActuaryUtilities.jl/stable/sensitivities/) for details.
 
 ### Risk Measures
 
