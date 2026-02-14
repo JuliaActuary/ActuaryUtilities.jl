@@ -122,6 +122,15 @@ abstract type Duration end
 
 struct Macaulay <: Duration end
 struct Modified <: Duration end
+"""
+    DV01 <: Duration
+
+Dollar Value of 01. The dollar change in value for a 1 basis point (0.01%) parallel shift in rates.
+
+`DV01 = -∂V/∂r / 10000`, so a DV01 of 0.045 means the position loses \$0.045 per \$100 notional for a 1bp rate increase.
+
+See also: [`IR01`](@ref), [`CS01`](@ref)
+"""
 struct DV01 <: Duration end
 
 """
