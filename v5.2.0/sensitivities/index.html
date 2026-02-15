@@ -1,0 +1,226 @@
+<!DOCTYPE html>
+<html lang="en"><head><meta charset="UTF-8"/><meta name="viewport" content="width=device-width, initial-scale=1.0"/><title>Key Rate Sensitivities · ActuaryUtilities.jl</title><meta name="title" content="Key Rate Sensitivities · ActuaryUtilities.jl"/><meta property="og:title" content="Key Rate Sensitivities · ActuaryUtilities.jl"/><meta property="twitter:title" content="Key Rate Sensitivities · ActuaryUtilities.jl"/><meta name="description" content="Documentation for ActuaryUtilities.jl."/><meta property="og:description" content="Documentation for ActuaryUtilities.jl."/><meta property="twitter:description" content="Documentation for ActuaryUtilities.jl."/><script data-outdated-warner src="../assets/warner.js"></script><link href="https://cdnjs.cloudflare.com/ajax/libs/lato-font/3.0.0/css/lato-font.min.css" rel="stylesheet" type="text/css"/><link href="https://cdnjs.cloudflare.com/ajax/libs/juliamono/0.050/juliamono.min.css" rel="stylesheet" type="text/css"/><link href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.2/css/fontawesome.min.css" rel="stylesheet" type="text/css"/><link href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.2/css/solid.min.css" rel="stylesheet" type="text/css"/><link href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.2/css/brands.min.css" rel="stylesheet" type="text/css"/><link href="https://cdnjs.cloudflare.com/ajax/libs/KaTeX/0.16.8/katex.min.css" rel="stylesheet" type="text/css"/><script>documenterBaseURL=".."</script><script src="https://cdnjs.cloudflare.com/ajax/libs/require.js/2.3.6/require.min.js" data-main="../assets/documenter.js"></script><script src="../search_index.js"></script><script src="../siteinfo.js"></script><script src="../../versions.js"></script><link class="docs-theme-link" rel="stylesheet" type="text/css" href="../assets/themes/catppuccin-mocha.css" data-theme-name="catppuccin-mocha"/><link class="docs-theme-link" rel="stylesheet" type="text/css" href="../assets/themes/catppuccin-macchiato.css" data-theme-name="catppuccin-macchiato"/><link class="docs-theme-link" rel="stylesheet" type="text/css" href="../assets/themes/catppuccin-frappe.css" data-theme-name="catppuccin-frappe"/><link class="docs-theme-link" rel="stylesheet" type="text/css" href="../assets/themes/catppuccin-latte.css" data-theme-name="catppuccin-latte"/><link class="docs-theme-link" rel="stylesheet" type="text/css" href="../assets/themes/documenter-dark.css" data-theme-name="documenter-dark" data-theme-primary-dark/><link class="docs-theme-link" rel="stylesheet" type="text/css" href="../assets/themes/documenter-light.css" data-theme-name="documenter-light" data-theme-primary/><script src="../assets/themeswap.js"></script></head><body><div id="documenter"><nav class="docs-sidebar"><a class="docs-logo" href="../"><img src="../assets/logo.svg" alt="ActuaryUtilities.jl logo"/></a><div class="docs-package-name"><span class="docs-autofit"><a href="../">ActuaryUtilities.jl</a></span></div><button class="docs-search-query input is-rounded is-small is-clickable my-2 mx-auto py-1 px-2" id="documenter-search-query">Search docs (Ctrl + /)</button><ul class="docs-menu"><li><a class="tocitem" href="../">Overview</a></li><li><a class="tocitem" href="../financial_math/">Financial Math</a></li><li class="is-active"><a class="tocitem" href>Key Rate Sensitivities</a><ul class="internal"><li><a class="tocitem" href="#Basic-Usage"><span>Basic Usage</span></a></li><li><a class="tocitem" href="#Scalar-vs-Key-Rate-Decomposition"><span>Scalar vs Key-Rate Decomposition</span></a></li><li><a class="tocitem" href="#Interest-Sensitive-Instruments"><span>Interest-Sensitive Instruments</span></a></li><li><a class="tocitem" href="#Two-Curve-Decomposition"><span>Two-Curve Decomposition</span></a></li><li><a class="tocitem" href="#Portfolio-Sensitivity"><span>Portfolio Sensitivity</span></a></li><li><a class="tocitem" href="#Stochastic-Model-Sensitivities"><span>Stochastic Model Sensitivities</span></a></li><li><a class="tocitem" href="#Choosing-Interpolation"><span>Choosing Interpolation</span></a></li><li><a class="tocitem" href="#Validating-AD-vs-Bump-and-Reprice"><span>Validating AD vs Bump-and-Reprice</span></a></li></ul></li><li><a class="tocitem" href="../risk_measures/">Risk Measures</a></li><li><a class="tocitem" href="../utilities/">Other Utilities</a></li><li><span class="tocitem">API</span><ul><li><a class="tocitem" href="../API/ActuaryUtilities/">ActuaryUtilities</a></li><li><a class="tocitem" href="../API/FinanceCore/">FinanceCore (re-exported)</a></li></ul></li><li><a class="tocitem" href="../upgrade/">Upgrade from Prior Versions</a></li></ul><div class="docs-version-selector field has-addons"><div class="control"><span class="docs-label button is-static is-size-7">Version</span></div><div class="docs-selector control is-expanded"><div class="select is-fullwidth is-size-7"><select id="documenter-version-selector"></select></div></div></div></nav><div class="docs-main"><header class="docs-navbar"><a class="docs-sidebar-button docs-navbar-link fa-solid fa-bars is-hidden-desktop" id="documenter-sidebar-button" href="#"></a><nav class="breadcrumb"><ul class="is-hidden-mobile"><li class="is-active"><a href>Key Rate Sensitivities</a></li></ul><ul class="is-hidden-tablet"><li class="is-active"><a href>Key Rate Sensitivities</a></li></ul></nav><div class="docs-right"><a class="docs-navbar-link" href="https://github.com/JuliaActuary/ActuaryUtilities.jl/blob/master/docs/src/sensitivities.md#L" title="Edit source on GitHub"><span class="docs-icon fa-solid"></span></a><a class="docs-settings-button docs-navbar-link fa-solid fa-gear" id="documenter-settings-button" href="#" title="Settings"></a><a class="docs-article-toggle-button fa-solid fa-chevron-up" id="documenter-article-toggle-button" href="javascript:;" title="Collapse all docstrings"></a></div></header><article class="content" id="documenter-page"><h1 id="Key-Rate-Sensitivities"><a class="docs-heading-anchor" href="#Key-Rate-Sensitivities">Key Rate Sensitivities</a><a id="Key-Rate-Sensitivities-1"></a><a class="docs-heading-anchor-permalink" href="#Key-Rate-Sensitivities" title="Permalink"></a></h1><p>Compute key rate durations, DV01s, and convexities via automatic differentiation using <code>ZeroRateCurve</code> from <a href="https://github.com/JuliaActuary/FinanceModels.jl">FinanceModels.jl</a>.</p><p>This approach uses ForwardDiff to differentiate through the curve construction, giving exact (machine-precision) sensitivities in a single pass. See the <a href="https://modernfinancialmodeling.com/autodiff_alm">autodiff ALM chapter</a> for background.</p><h2 id="Basic-Usage"><a class="docs-heading-anchor" href="#Basic-Usage">Basic Usage</a><a id="Basic-Usage-1"></a><a class="docs-heading-anchor-permalink" href="#Basic-Usage" title="Permalink"></a></h2><p>Construct a <code>ZeroRateCurve</code> with continuously-compounded zero rates and tenor times, then pass it to <code>duration</code>, <code>convexity</code>, or <code>sensitivities</code>:</p><pre><code class="language-julia hljs">using ActuaryUtilities, FinanceModels
+
+rates = [0.03, 0.03, 0.03, 0.03, 0.03]
+tenors = [1.0, 2.0, 3.0, 4.0, 5.0]
+zrc = ZeroRateCurve(rates, tenors)
+
+cfs = [5.0, 5.0, 5.0, 5.0, 105.0]
+
+# Scalar modified duration (default)
+dur = duration(zrc, cfs, tenors)
+
+# Scalar DV01
+dv01 = duration(DV01(), zrc, cfs, tenors)
+
+# Scalar convexity
+conv = convexity(zrc, cfs, tenors)</code></pre><p>To get the full key-rate decomposition (vectors/matrices), use <code>KeyRates()</code>:</p><pre><code class="language-julia hljs"># Key rate durations (modified): vector of -∂V/∂rᵢ / V
+krds = duration(KeyRates(), zrc, cfs, tenors)
+
+# Key rate DV01s: vector of -∂V/∂rᵢ / 10000
+dv01s = duration(DV01(), KeyRates(), zrc, cfs, tenors)
+
+# Key rate convexity matrix: ∂²V/∂rᵢ∂rⱼ / V
+conv_matrix = convexity(KeyRates(), zrc, cfs, tenors)</code></pre><p>For a complete set of key-rate results in a single AD pass, use <code>sensitivities</code>:</p><pre><code class="language-julia hljs">result = sensitivities(zrc, cfs, tenors)
+# result.value       — present value
+# result.durations   — key rate durations (modified) — vector
+# result.convexities — cross-convexity matrix — matrix
+
+# For DV01s instead of durations:
+dv01_result = sensitivities(DV01(), zrc, cfs, tenors)
+# dv01_result.value       — present value
+# dv01_result.dv01s       — key rate DV01s — vector
+# dv01_result.convexities — cross-convexity matrix — matrix</code></pre><h2 id="Scalar-vs-Key-Rate-Decomposition"><a class="docs-heading-anchor" href="#Scalar-vs-Key-Rate-Decomposition">Scalar vs Key-Rate Decomposition</a><a id="Scalar-vs-Key-Rate-Decomposition-1"></a><a class="docs-heading-anchor-permalink" href="#Scalar-vs-Key-Rate-Decomposition" title="Permalink"></a></h2><p>By default, <code>duration</code> and <code>convexity</code> with a <code>ZeroRateCurve</code> return <strong>scalars</strong> — the total modified duration, DV01, or convexity. This is consistent with the yield-based API (<code>duration(0.03, cfs, times)</code>).</p><p>To obtain the per-tenor decomposition, pass <code>KeyRates()</code> as the first argument:</p><pre><code class="language-julia hljs"># Scalar (default) — same as sum of key-rate decomposition
+duration(zrc, cfs, tenors)                          # scalar
+duration(DV01(), zrc, cfs, tenors)                   # scalar
+convexity(zrc, cfs, tenors)                          # scalar
+
+# Key-rate decomposition
+duration(KeyRates(), zrc, cfs, tenors)               # vector
+duration(DV01(), KeyRates(), zrc, cfs, tenors)       # vector
+convexity(KeyRates(), zrc, cfs, tenors)              # matrix</code></pre><p>The scalar value equals the sum of the key-rate decomposition:</p><pre><code class="language-julia hljs">duration(zrc, cfs, tenors) ≈ sum(duration(KeyRates(), zrc, cfs, tenors))</code></pre><p>For a flat curve, the scalar modified duration matches the yield-based API:</p><pre><code class="language-julia hljs">using ActuaryUtilities
+
+cfs = [5.0, 5.0, 5.0, 5.0, 105.0]
+tenors = [1.0, 2.0, 3.0, 4.0, 5.0]
+zrc = ZeroRateCurve(fill(0.03, 5), tenors)
+
+duration(zrc, cfs, tenors)                            # ≈ 4.57
+duration(0.03, cfs, tenors)                            # ≈ 4.57 (same)</code></pre><p>For Macaulay duration, use the scalar yield API directly — there is no <code>ZeroRateCurve</code> dispatch:</p><pre><code class="language-julia hljs">duration(Macaulay(), 0.03, cfs, tenors)</code></pre><h2 id="Interest-Sensitive-Instruments"><a class="docs-heading-anchor" href="#Interest-Sensitive-Instruments">Interest-Sensitive Instruments</a><a id="Interest-Sensitive-Instruments-1"></a><a class="docs-heading-anchor-permalink" href="#Interest-Sensitive-Instruments" title="Permalink"></a></h2><p>For instruments whose cashflows depend on the rate environment (callable bonds, floaters, etc.), use the do-block syntax to pass a custom valuation function:</p><pre><code class="language-julia hljs"># Callable bond: key rate durations (vector)
+callable_krds = duration(KeyRates(), zrc) do curve
+    ncv = pv(curve, cfs, tenors)
+    called_value = pv(curve, cfs[1:3], tenors[1:3]) + 102.0 * curve(3.0)
+    min(ncv, called_value)
+end
+
+# Scalar duration (default)
+callable_dur = duration(zrc) do curve
+    ncv = pv(curve, cfs, tenors)
+    called_value = pv(curve, cfs[1:3], tenors[1:3]) + 102.0 * curve(3.0)
+    min(ncv, called_value)
+end</code></pre><p>The function receives a curve object and must return a scalar value. ForwardDiff differentiates through the entire valuation, capturing any rate-dependent optionality.</p><h2 id="Two-Curve-Decomposition"><a class="docs-heading-anchor" href="#Two-Curve-Decomposition">Two-Curve Decomposition</a><a id="Two-Curve-Decomposition-1"></a><a class="docs-heading-anchor-permalink" href="#Two-Curve-Decomposition" title="Permalink"></a></h2><p>Decompose sensitivities into base (risk-free) and credit spread components using <code>IR01</code> and <code>CS01</code>:</p><pre><code class="language-julia hljs">base = ZeroRateCurve([0.03, 0.03, 0.03, 0.03, 0.03], tenors)
+credit = ZeroRateCurve([0.02, 0.02, 0.02, 0.02, 0.02], tenors)
+
+# Scalar IR01 and CS01
+ir01 = duration(IR01(), base, credit, cfs, tenors)
+cs01 = duration(CS01(), base, credit, cfs, tenors)
+
+# Key-rate decomposition (vectors)
+ir01s = duration(IR01(), KeyRates(), base, credit, cfs, tenors)
+cs01s = duration(CS01(), KeyRates(), base, credit, cfs, tenors)
+
+# Two-curve convexity — scalars by default
+conv = convexity(base, credit, cfs, tenors)
+# conv.base, conv.credit, conv.cross (all scalars)
+
+# Key-rate decomposition (matrices)
+conv_kr = convexity(KeyRates(), base, credit, cfs, tenors)
+# conv_kr.base, conv_kr.credit, conv_kr.cross (all matrices)
+
+# Full two-curve sensitivities (always key-rate decomposition)
+result = sensitivities(base, credit, cfs, tenors)</code></pre><p>The default two-curve valuation uses multiplicative discount factors: <code>V = Σ cf × base(t) × credit(t)</code>, which corresponds to additive rates.</p><h3 id="Example:-Credit-Risky-Floating-Rate-Bond"><a class="docs-heading-anchor" href="#Example:-Credit-Risky-Floating-Rate-Bond">Example: Credit-Risky Floating Rate Bond</a><a id="Example:-Credit-Risky-Floating-Rate-Bond-1"></a><a class="docs-heading-anchor-permalink" href="#Example:-Credit-Risky-Floating-Rate-Bond" title="Permalink"></a></h3><p>For fixed cashflows, IR01 and CS01 are identical because base and credit rates enter additively. A <strong>credit-risky floating rate bond</strong> breaks this symmetry — its coupons reset to the risk-free forward rate plus a fixed credit spread, so bumping base rates changes both coupon amounts and discount factors (partially canceling), while bumping credit rates only affects discounting:</p><pre><code class="language-julia hljs">base = ZeroRateCurve([0.03, 0.03, 0.03, 0.03, 0.03], tenors)
+credit = ZeroRateCurve([0.02, 0.02, 0.02, 0.02, 0.02], tenors)
+
+# Floating rate bond: coupon = risk-free forward + 200bp credit spread
+# Discounted at the combined base + credit rate
+spread = 0.02
+face = 100.0
+
+result = sensitivities(base, credit) do base_curve, credit_curve
+    total = 0.0
+    for t in 1:5
+        df_base = base_curve(Float64(t))
+        df_credit = credit_curve(Float64(t))
+        df_base_prev = t == 1 ? 1.0 : base_curve(Float64(t - 1))
+
+        # Coupon resets to risk-free forward rate + fixed credit spread
+        fwd = df_base_prev / df_base - 1.0
+        total += face * (fwd + spread) * df_base * df_credit
+
+        # Principal at maturity
+        t == 5 &amp;&amp; (total += face * df_base * df_credit)
+    end
+    total
+end
+
+sum(result.base_durations)    # IR01 — small, coupon reset offsets base rate sensitivity
+sum(result.credit_durations)  # CS01 — larger, credit spread only affects discounting</code></pre><p>Bumping base rates changes both the floating coupon amounts and the discount factors (partially canceling), while bumping credit rates only affects discounting. This asymmetry is why the IR01/CS01 decomposition matters for instruments with rate-dependent cashflows.</p><h2 id="Portfolio-Sensitivity"><a class="docs-heading-anchor" href="#Portfolio-Sensitivity">Portfolio Sensitivity</a><a id="Portfolio-Sensitivity-1"></a><a class="docs-heading-anchor-permalink" href="#Portfolio-Sensitivity" title="Permalink"></a></h2><p>DV01s are additive across positions, so a portfolio&#39;s DV01 vector equals the sum of individual DV01s:</p><pre><code class="language-julia hljs">zrc = ZeroRateCurve(rates, tenors)
+
+# Compute portfolio DV01 vector in a single AD pass
+# bond1_cfs, bond2_cfs are Vector{Cashflow} (from FinanceCore)
+portfolio_dv01 = duration(DV01(), KeyRates(), zrc) do curve
+    pv(curve, bond1_cfs) + pv(curve, bond2_cfs)
+end
+
+# Equivalently (but two AD passes):
+dv01_1 = duration(DV01(), KeyRates(), zrc, bond1_cfs, bond1_times)
+dv01_2 = duration(DV01(), KeyRates(), zrc, bond2_cfs, bond2_times)
+portfolio_dv01 ≈ dv01_1 .+ dv01_2</code></pre><h3 id="Example:-Portfolio-of-Floating-Rate-Bonds"><a class="docs-heading-anchor" href="#Example:-Portfolio-of-Floating-Rate-Bonds">Example: Portfolio of Floating Rate Bonds</a><a id="Example:-Portfolio-of-Floating-Rate-Bonds-1"></a><a class="docs-heading-anchor-permalink" href="#Example:-Portfolio-of-Floating-Rate-Bonds" title="Permalink"></a></h3><p>Floating rate bonds have coupons that reset to the prevailing market rate, so their cashflows depend on the rate curve itself. The do-block captures this dependency through AD — differentiating through both the discount factors and the coupon amounts in a single pass:</p><pre><code class="language-julia hljs">using ActuaryUtilities, FinanceModels
+
+rates = [0.02, 0.025, 0.03, 0.035, 0.04, 0.042, 0.044, 0.046, 0.048, 0.05]
+tenors = collect(1.0:10.0)
+zrc = ZeroRateCurve(rates, tenors)
+
+# 10 floating rate bonds: maturities 1yr to 10yr, face 100 each,
+# annual coupons = 1yr forward rate + 50bp credit spread
+notionals = fill(100.0, 10)
+maturities = 1:10
+spread = 0.005
+
+# The do-block receives the curve and returns the total present value
+# of all cashflows across the portfolio.
+# The curve is constructed once per AD evaluation — valuing all 10 bonds
+# inside a single do-block avoids rebuilding the curve for each bond.
+result = sensitivities(zrc) do curve
+    total = 0.0
+    for (notional, mat) in zip(notionals, maturities)
+        # For each bond, loop over annual payment dates t = 1, 2, ..., maturity
+        for t in 1:mat
+            # Discount factors: df = P(0,t), df_prev = P(0,t-1)
+            df = curve(Float64(t))
+            df_prev = t == 1 ? 1.0 : curve(Float64(t - 1))
+
+            # 1yr simple forward rate from t-1 to t: F = P(0,t-1)/P(0,t) - 1
+            fwd = df_prev / df - 1.0
+
+            # Floating coupon PV: notional × (forward rate + spread) × P(0,t)
+            total += notional * (fwd + spread) * df
+
+            # Return principal at maturity
+            t == mat &amp;&amp; (total += notional * df)
+        end
+    end
+    total
+end
+
+result.value       # portfolio present value (≈ 10 × 100 + spread premium)
+result.durations   # key rate durations — small, since floaters reset</code></pre><p>Without the spread, a floater prices at par and has near-zero duration (coupons offset discount factor changes). The spread introduces duration because its fixed cashflows are rate-sensitive — similar to a portfolio of small fixed-rate annuities layered on top of the par-valued floaters.</p><h2 id="Stochastic-Model-Sensitivities"><a class="docs-heading-anchor" href="#Stochastic-Model-Sensitivities">Stochastic Model Sensitivities</a><a id="Stochastic-Model-Sensitivities-1"></a><a class="docs-heading-anchor-permalink" href="#Stochastic-Model-Sensitivities" title="Permalink"></a></h2><p>ForwardDiff&#39;s dual numbers propagate through the full Monte Carlo simulation pipeline in FinanceModels.jl, including the Euler-Maruyama path generation. This means you can compute exact sensitivities of expected present values under stochastic short-rate models — differentiating through thousands of simulated rate paths in a single AD pass.</p><h3 id="What-is-being-differentiated?"><a class="docs-heading-anchor" href="#What-is-being-differentiated?">What is being differentiated?</a><a id="What-is-being-differentiated?-1"></a><a class="docs-heading-anchor-permalink" href="#What-is-being-differentiated?" title="Permalink"></a></h3><p>The <code>sensitivities</code> function always differentiates with respect to the <strong>zero rates in the <code>ZeroRateCurve</code></strong> — these are the market-observable inputs. When you wrap a stochastic model inside the do-block:</p><pre><code class="language-julia hljs">hw = ShortRate.HullWhite(0.1, 0.01, zrc)
+sensitivities(hw, cfs, times; n_scenarios=500, rng=Xoshiro(42))</code></pre><p>the chain of differentiation is:</p><ol><li>ForwardDiff perturbs zero rate <code>rᵢ</code></li><li>The perturbed <code>curve</code> changes the forward curve <code>f(0, t)</code></li><li>Hull-White recalibrates <code>θ(t)</code> from the new forwards</li><li>All simulated paths shift (same random draws, different drift)</li><li>The expected PV changes → this change is the KRD at tenor <code>i</code></li></ol><p>The stochastic model parameters (<code>a</code>, <code>σ</code>) are <strong>not</strong> being differentiated — they are constants in this computation. The KRDs answer: <em>&quot;if the market yield curve shifts, how does my model-valued portfolio respond?&quot;</em> This is the relevant question for hedging with market instruments (bonds, swaps), which is the primary use case for key rate durations.</p><h3 id="Model-parameter-sensitivities-(vega,-mean-reversion-sensitivity)"><a class="docs-heading-anchor" href="#Model-parameter-sensitivities-(vega,-mean-reversion-sensitivity)">Model parameter sensitivities (vega, mean-reversion sensitivity)</a><a id="Model-parameter-sensitivities-(vega,-mean-reversion-sensitivity)-1"></a><a class="docs-heading-anchor-permalink" href="#Model-parameter-sensitivities-(vega,-mean-reversion-sensitivity)" title="Permalink"></a></h3><p>A separate question is: <em>&quot;how does expected PV change if I change the model parameters <code>a</code> or <code>σ</code>?&quot;</em> These are <strong>model risk</strong> sensitivities, useful for understanding calibration sensitivity and model uncertainty. They are conceptually different from curve KRDs:</p><table><tr><th style="text-align: right"></th><th style="text-align: right">Curve KRDs (<code>∂V/∂rᵢ</code>)</th><th style="text-align: right">Model Greeks (<code>∂V/∂a</code>, <code>∂V/∂σ</code>)</th></tr><tr><td style="text-align: right"><strong>What moves</strong></td><td style="text-align: right">Market zero rates</td><td style="text-align: right">Model calibration parameters</td></tr><tr><td style="text-align: right"><strong>Use case</strong></td><td style="text-align: right">Hedging with bonds/swaps</td><td style="text-align: right">Model risk, calibration stability</td></tr><tr><td style="text-align: right"><strong>Hedgeable?</strong></td><td style="text-align: right">Yes (with market instruments)</td><td style="text-align: right">No (not directly tradeable)</td></tr></table><p>Model parameter sensitivities (<code>∂V/∂a</code>, <code>∂V/∂σ</code>) are <strong>not currently supported</strong> by the AD pathway. The <code>simulate</code> function in FinanceModels.jl uses <code>Float64</code> arrays internally for simulation paths, which prevents ForwardDiff dual numbers from propagating through the model parameters. Dual numbers flow through the <em>curve rates</em> (because <code>build_model</code> and <code>θ(t)</code> calibration handle generic numeric types), but <code>a</code> and <code>σ</code> must be plain <code>Float64</code>.</p><p>For model parameter sensitivities, use finite differences as a workaround:</p><pre><code class="language-julia hljs">using FinanceModels: ShortRate, simulate
+using FinanceCore: discount
+using Random: Xoshiro
+
+rates = [0.03, 0.03, 0.03, 0.03, 0.03]
+tenors = [1.0, 2.0, 3.0, 4.0, 5.0]
+cfs = [5.0, 5.0, 5.0, 5.0, 105.0]
+
+function mc_value(a, σ)
+    curve = ZeroRateCurve(rates, tenors)
+    hw = ShortRate.HullWhite(a, σ, curve)
+    scenarios = simulate(hw; n_scenarios=1000, timestep=1/12, horizon=6.0, rng=Xoshiro(42))
+    sum(pv(sc, cfs, tenors) for sc in scenarios) / 1000
+end
+
+# Finite-difference sensitivities
+ε = 1e-5
+dV_da = (mc_value(0.1 + ε, 0.01) - mc_value(0.1 - ε, 0.01)) / (2ε)   # mean reversion
+dV_dσ = (mc_value(0.1, 0.01 + ε) - mc_value(0.1, 0.01 - ε)) / (2ε)   # volatility (vega)</code></pre><div class="admonition is-info" id="Note-421e89baeab4a806"><header class="admonition-header">Note<a class="admonition-anchor" href="#Note-421e89baeab4a806" title="Permalink"></a></header><div class="admonition-body"><p>Supporting AD through model parameters would require parameterizing the element type of internal simulation arrays on the model parameter types in FinanceModels.jl. This is a potential future enhancement.</p></div></div><h3 id="Hull-White:-sensitivities-w.r.t.-the-initial-term-structure"><a class="docs-heading-anchor" href="#Hull-White:-sensitivities-w.r.t.-the-initial-term-structure">Hull-White: sensitivities w.r.t. the initial term structure</a><a id="Hull-White:-sensitivities-w.r.t.-the-initial-term-structure-1"></a><a class="docs-heading-anchor-permalink" href="#Hull-White:-sensitivities-w.r.t.-the-initial-term-structure" title="Permalink"></a></h3><p>A Hull-White model calibrates its drift θ(t) to match an initial yield curve. When that curve is a <code>ZeroRateCurve</code>, you can compute how the Monte Carlo expected value responds to movements in the initial zero rates:</p><pre><code class="language-julia hljs">using ActuaryUtilities, FinanceModels
+using FinanceModels: ShortRate, simulate
+using FinanceCore: discount
+using Random
+
+rates = [0.03, 0.03, 0.03, 0.03, 0.03]
+tenors = [1.0, 2.0, 3.0, 4.0, 5.0]
+zrc = ZeroRateCurve(rates, tenors)
+
+cfs = [5.0, 5.0, 5.0, 5.0, 105.0]
+times = [1.0, 2.0, 3.0, 4.0, 5.0]
+
+# Key rate sensitivities of E[V] under Hull-White dynamics
+hw = ShortRate.HullWhite(0.1, 0.01, zrc)
+hw_result = sensitivities(hw, cfs, times; n_scenarios=500, timestep=1/12, horizon=6.0, rng=Xoshiro(42))
+
+hw_result.durations   # key rate durations under stochastic dynamics
+hw_result.convexities # cross-convexity matrix</code></pre><p>This involves nested AD: the outer ForwardDiff differentiates w.r.t. zero rates, while Hull-White&#39;s θ(t) calibration internally uses ForwardDiff to compute instantaneous forward rates from the curve. ForwardDiff&#39;s <a href="https://github.com/JuliaDiff/ForwardDiff.jl/issues/83">tag system</a> disambiguates the two differentiation passes automatically.</p><h3 id="Comparison:-deterministic-vs-model-based-sensitivities"><a class="docs-heading-anchor" href="#Comparison:-deterministic-vs-model-based-sensitivities">Comparison: deterministic vs model-based sensitivities</a><a id="Comparison:-deterministic-vs-model-based-sensitivities-1"></a><a class="docs-heading-anchor-permalink" href="#Comparison:-deterministic-vs-model-based-sensitivities" title="Permalink"></a></h3><p>The deterministic <code>ZeroRateCurve</code> and Hull-White MC valuations produce the same total duration for fixed cashflows (a consequence of the <a href="https://en.wikipedia.org/wiki/Risk-neutral_measure">risk-neutral pricing theorem</a>), but decompose it across tenors differently:</p><pre><code class="language-julia hljs"># Deterministic: discount directly off the initial curve
+det_result = sensitivities(zrc, cfs, tenors)
+
+# Model-based: average across simulated rate paths
+hw = ShortRate.HullWhite(0.1, 0.01, zrc)
+hw_result = sensitivities(hw, cfs, times; n_scenarios=1000, timestep=1/12, horizon=6.0, rng=Xoshiro(42))
+
+det_result.durations  # [0.04, 0.09, 0.13, 0.16, 4.15]  (localized at each tenor)
+hw_result.durations   # [-1.01, 1.04, 1.70, 1.85, 0.99]  (redistributed across tenors)
+
+sum(det_result.durations) # 4.57  — total modified duration (= duration(zrc, cfs, tenors))
+sum(hw_result.durations)  # 4.57  — same total (risk-neutral guarantee)</code></pre><p><strong>Why the totals match:</strong> For fixed cashflows, E[V] = Σ cf<em>i × P(0, t</em>i) under any risk-neutral model (<a href="https://link.springer.com/book/10.1007/978-0-387-21617-1">Glasserman, 2003, Ch. 7</a>), so a parallel shift of all zero rates produces the same ΔV regardless of whether we compute it by direct discounting or via Monte Carlo. This implies Σ KRD<em>det = Σ KRD</em>HW.</p><p><strong>Why the decomposition differs:</strong> The two approaches construct discount factors through different mathematical pathways. <code>ZeroRateCurve</code> with linear interpolation gives <code>df(t) = exp(-r_interp(t) × t)</code>, where bumping rate<em>j only affects the interpolated rate near tenor j — producing localized KRDs. Hull-White constructs discount factors by integrating a calibrated short-rate ODE: bumping rate</em>j changes the forward curve f(0,t), which changes θ(t) = ∂f/∂t + a·f + σ²(1−e^{−2at})/2a everywhere, altering the short-rate path at all times via the mean-reversion dynamics (<a href="https://link.springer.com/book/10.1007/978-3-540-34604-3">Brigo &amp; Mercurio, 2006, Ch. 3</a>). This creates non-local sensitivity even in the σ→0 limit — it is the model&#39;s parametric structure, not stochastic volatility, that redistributes duration.</p><p>This phenomenon is well-established in derivatives pricing as &quot;model-dependent Greeks&quot;: different models calibrated to the same curve produce identical prices but different sensitivities. The pathwise differentiation technique used here (<a href="https://people.maths.ox.ac.uk/~gilesm/files/mc_greeks.pdf">Giles &amp; Glasserman, 2006</a>) computes exact derivatives of the Monte Carlo estimate in a single forward pass, capturing the full chain of dependencies from initial curve through θ(t) calibration through path simulation to valuation.</p><div class="admonition is-info" id="Note-15f6cd3d11097cc8"><header class="admonition-header">Note<a class="admonition-anchor" href="#Note-15f6cd3d11097cc8" title="Permalink"></a></header><div class="admonition-body"><p>The fixed <code>rng</code> seed ensures reproducibility: the same random draws are used for every AD perturbation, giving exact pathwise derivatives. Without a fixed seed, each call would use different paths, introducing MC noise into the gradient.</p></div></div><h2 id="Choosing-Interpolation"><a class="docs-heading-anchor" href="#Choosing-Interpolation">Choosing Interpolation</a><a id="Choosing-Interpolation-1"></a><a class="docs-heading-anchor-permalink" href="#Choosing-Interpolation" title="Permalink"></a></h2><p><code>ZeroRateCurve</code> accepts an optional third argument for the interpolation method:</p><pre><code class="language-julia hljs">zrc = ZeroRateCurve(rates, tenors)                              # default: MonotoneConvex
+zrc_pchip = ZeroRateCurve(rates, tenors, Spline.PCHIP())        # PCHIP
+zrc_lin = ZeroRateCurve(rates, tenors, Spline.Linear())          # linear
+zrc_cub = ZeroRateCurve(rates, tenors, Spline.Cubic())           # cubic spline
+zrc_aki = ZeroRateCurve(rates, tenors, Spline.Akima())           # Akima</code></pre><p><strong>MonotoneConvex</strong> (<code>Spline.MonotoneConvex()</code>, default): Finance-aware interpolation (<a href="https://doi.org/10.1080/13504860600829233">Hagan &amp; West, 2006</a>). Guarantees positive continuous forward rates, best KRD locality among smooth methods, and fastest AD performance.</p><p><strong>PCHIP</strong> (<code>Spline.PCHIP()</code>): Smooth forward curves (C1), local sensitivity, monotonicity-preserving. Good general-purpose alternative.</p><p><strong>Linear</strong> (<code>Spline.Linear()</code>): Perfectly local KRDs (zero sensitivity outside adjacent intervals), but kinks in the forward curve at tenor points.</p><p><strong>Akima</strong> (<code>Spline.Akima()</code>): Alternative to PCHIP with different behavior near inflection points. Slightly more non-local leakage than PCHIP.</p><p><strong>Cubic spline</strong> (<code>Spline.Cubic()</code>): Smoothest (C2), but bumps have non-local effects. KRDs at distant tenors may be negative. Use when smoothness matters most.</p><p>See the <a href="https://juliaactuary.github.io/FinanceModels.jl/dev/interpolation/">FinanceModels interpolation guide</a> for detailed benchmarks and tradeoff analysis. On a flat curve, all methods produce identical results.</p><h2 id="Validating-AD-vs-Bump-and-Reprice"><a class="docs-heading-anchor" href="#Validating-AD-vs-Bump-and-Reprice">Validating AD vs Bump-and-Reprice</a><a id="Validating-AD-vs-Bump-and-Reprice-1"></a><a class="docs-heading-anchor-permalink" href="#Validating-AD-vs-Bump-and-Reprice" title="Permalink"></a></h2><p>AD sensitivities can be cross-validated against traditional finite-difference (bump-and-reprice) results. The AD approach gives exact derivatives in a single pass, while FD has O(ε²) truncation error:</p><pre><code class="language-julia hljs">using ActuaryUtilities, FinanceModels, Test
+
+rates = [0.02, 0.03, 0.04, 0.05]
+tenors = [1.0, 3.0, 5.0, 10.0]
+zrc = ZeroRateCurve(rates, tenors)
+cfs = [3.0, 3.0, 3.0, 103.0]
+
+# AD (exact) — use KeyRates() for the per-tenor vector
+ad_dv01 = duration(DV01(), KeyRates(), zrc, cfs, tenors)
+
+# Finite difference (bump-and-reprice)
+ε = 1e-5
+for i in 1:4
+    rates_up = copy(rates); rates_up[i] += ε
+    rates_dn = copy(rates); rates_dn[i] -= ε
+    v_up = pv(ZeroRateCurve(rates_up, tenors), cfs, tenors)
+    v_dn = pv(ZeroRateCurve(rates_dn, tenors), cfs, tenors)
+    fd_dv01 = -(v_up - v_dn) / (2ε) / 10_000
+    @test ad_dv01[i] ≈ fd_dv01 atol = 1e-4
+end</code></pre></article><nav class="docs-footer"><a class="docs-footer-prevpage" href="../financial_math/">« Financial Math</a><a class="docs-footer-nextpage" href="../risk_measures/">Risk Measures »</a><div class="flexbox-break"></div><p class="footer-message">Powered by <a href="https://github.com/JuliaDocs/Documenter.jl">Documenter.jl</a> and the <a href="https://julialang.org/">Julia Programming Language</a>.</p></nav></div><div class="modal" id="documenter-settings"><div class="modal-background"></div><div class="modal-card"><header class="modal-card-head"><p class="modal-card-title">Settings</p><button class="delete"></button></header><section class="modal-card-body"><p><label class="label">Theme</label><div class="select"><select id="documenter-themepicker"><option value="auto">Automatic (OS)</option><option value="documenter-light">documenter-light</option><option value="documenter-dark">documenter-dark</option><option value="catppuccin-latte">catppuccin-latte</option><option value="catppuccin-frappe">catppuccin-frappe</option><option value="catppuccin-macchiato">catppuccin-macchiato</option><option value="catppuccin-mocha">catppuccin-mocha</option></select></div></p><hr/><p>This document was generated with <a href="https://github.com/JuliaDocs/Documenter.jl">Documenter.jl</a> version 1.16.1 on <span class="colophon-date" title="Sunday 15 February 2026 21:46">Sunday 15 February 2026</span>. Using Julia version 1.10.10.</p></section><footer class="modal-card-foot"></footer></div></div></div></body></html>
