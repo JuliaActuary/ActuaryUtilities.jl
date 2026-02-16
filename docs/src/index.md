@@ -114,7 +114,7 @@ For more on Rates, see [FinanceCore.jl](https://github.com/JuliaActuary/FinanceC
 
 ## Documentation
 
-Full documentation is [available here](https://JuliaActuary.github.io/ActuaryUtilities.jl/stable/).
+Full documentation is [available here](https://docs.juliaactuary.org/ActuaryUtilities/stable/).
 
 ## Examples
 
