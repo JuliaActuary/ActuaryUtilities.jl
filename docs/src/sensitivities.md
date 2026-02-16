@@ -393,7 +393,7 @@ zrc_aki = ZeroRateCurve(rates, tenors, Spline.Akima())           # Akima
 
 **Cubic spline** (`Spline.Cubic()`): Smoothest (C2), but bumps have non-local effects. KRDs at distant tenors may be negative. Use when smoothness matters most.
 
-See the [FinanceModels interpolation guide](https://juliaactuary.github.io/FinanceModels.jl/dev/interpolation/) for detailed benchmarks and tradeoff analysis. On a flat curve, all methods produce identical results.
+See the [FinanceModels interpolation guide](https://docs.juliaactuary.org/FinanceModels/dev/interpolation/) for detailed benchmarks and tradeoff analysis. On a flat curve, all methods produce identical results.
 
 ## Validating AD vs Bump-and-Reprice
 

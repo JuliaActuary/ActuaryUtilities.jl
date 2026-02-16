@@ -1,7 +1,7 @@
 # ActuaryUtilities
 
-[![Stable](https://img.shields.io/badge/docs-stable-blue.svg)](https://JuliaActuary.github.io/ActuaryUtilities.jl/stable/) 
-[![Dev](https://img.shields.io/badge/docs-dev-blue.svg)](https://JuliaActuary.github.io/ActuaryUtilities.jl/dev/)
+[![Stable](https://img.shields.io/badge/docs-stable-blue.svg)](https://docs.juliaactuary.org/ActuaryUtilities/stable/)
+[![Dev](https://img.shields.io/badge/docs-dev-blue.svg)](https://docs.juliaactuary.org/ActuaryUtilities/dev/)
 ![CI](https://github.com/JuliaActuary/ActuaryUtilities.jl/workflows/CI/badge.svg)
 [![Codecov](https://codecov.io/gh/JuliaActuary/ActuaryUtilities.jl/branch/master/graph/badge.svg)](https://codecov.io/gh/JuliaActuary/ActuaryUtilities.jl)
 
@@ -67,7 +67,7 @@ hw_result = sensitivities(hw, cfs, tenors; n_scenarios=1000, rng=Xoshiro(42))
 hw_result.durations   # key rate durations under stochastic dynamics
 ```
 
-See the [Key Rate Sensitivities documentation](https://JuliaActuary.github.io/ActuaryUtilities.jl/stable/sensitivities/) for details.
+See the [Key Rate Sensitivities documentation](https://docs.juliaactuary.org/ActuaryUtilities/stable/sensitivities/) for details.
 
 ### Risk Measures
 
@@ -120,7 +120,7 @@ For more on Rates, see [FinanceCore.jl](https://github.com/JuliaActuary/FinanceC
 
 ## Documentation
 
-Full documentation is [available here](https://JuliaActuary.github.io/ActuaryUtilities.jl/stable/).
+Full documentation is [available here](https://docs.juliaactuary.org/ActuaryUtilities/stable/).
 
 ## Examples
 
