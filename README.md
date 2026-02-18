@@ -40,15 +40,17 @@ A collection of common functions/manipulations used in Actuarial Calculations.
 Compute exact key rate durations, DV01s, and convexities using ForwardDiff through `ZeroRateCurve` from [FinanceModels.jl](https://github.com/JuliaActuary/FinanceModels.jl) -- machine-precision sensitivities in a single pass, no bump-and-reprice required.
 
 ```julia
-using ActuaryUtilities, FinanceModels
+using ActuaryUtilities, FinanceModels, FinanceCore
 
 rates = [0.03, 0.03, 0.03, 0.03, 0.03]
 tenors = [1.0, 2.0, 3.0, 4.0, 5.0]
 zrc = ZeroRateCurve(rates, tenors)
-cfs = [5.0, 5.0, 5.0, 5.0, 105.0]
+
+# Works with amounts + times or Cashflow objects directly
+cfs = Cashflow.([5.0, 5.0, 5.0, 5.0, 105.0], tenors)
 
 # All key rate sensitivities in one AD pass
-result = sensitivities(zrc, cfs, tenors)
+result = sensitivities(zrc, cfs)
 result.value       # present value
 result.durations   # key rate durations (vector)
 result.convexities # cross-convexity matrix

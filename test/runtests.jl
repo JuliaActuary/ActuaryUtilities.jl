@@ -919,3 +919,79 @@ end
 
     @test s ≈ FC.Periodic(0.01, 1) atol = 1.0e-6
 end
+
+@testset "ZeroRateCurve Cashflow support" begin
+    rates = [0.04, 0.04, 0.04, 0.04, 0.04]
+    tenors = [1.0, 2.0, 3.0, 4.0, 5.0]
+    zrc = FM.ZeroRateCurve(rates, tenors, FM.Spline.Linear())
+    amounts = [5.0, 5.0, 5.0, 5.0, 105.0]
+    cfs = FC.Cashflow.(amounts, tenors)
+
+    # single-curve duration
+    @test duration(zrc, cfs) ≈ duration(zrc, amounts, tenors)
+    @test duration(KeyRates(), zrc, cfs) ≈ duration(KeyRates(), zrc, amounts, tenors)
+    @test duration(DV01(), zrc, cfs) ≈ duration(DV01(), zrc, amounts, tenors)
+    @test duration(DV01(), KeyRates(), zrc, cfs) ≈ duration(DV01(), KeyRates(), zrc, amounts, tenors)
+
+    # single-curve convexity
+    @test convexity(zrc, cfs) ≈ convexity(zrc, amounts, tenors)
+    @test convexity(KeyRates(), zrc, cfs) ≈ convexity(KeyRates(), zrc, amounts, tenors)
+
+    # single-curve sensitivities
+    s_cf = sensitivities(zrc, cfs)
+    s_raw = sensitivities(zrc, amounts, tenors)
+    @test s_cf.value ≈ s_raw.value
+    @test s_cf.durations ≈ s_raw.durations
+
+    s_dv01_cf = sensitivities(DV01(), zrc, cfs)
+    s_dv01_raw = sensitivities(DV01(), zrc, amounts, tenors)
+    @test s_dv01_cf.dv01s ≈ s_dv01_raw.dv01s
+
+    # two-curve duration
+    base_rates = [0.03, 0.03, 0.03, 0.03, 0.03]
+    credit_rates = [0.02, 0.02, 0.02, 0.02, 0.02]
+    base = FM.ZeroRateCurve(base_rates, tenors, FM.Spline.Linear())
+    credit = FM.ZeroRateCurve(credit_rates, tenors, FM.Spline.Linear())
+
+    @test duration(IR01(), base, credit, cfs) ≈ duration(IR01(), base, credit, amounts, tenors)
+    @test duration(IR01(), KeyRates(), base, credit, cfs) ≈ duration(IR01(), KeyRates(), base, credit, amounts, tenors)
+    @test duration(CS01(), base, credit, cfs) ≈ duration(CS01(), base, credit, amounts, tenors)
+    @test duration(CS01(), KeyRates(), base, credit, cfs) ≈ duration(CS01(), KeyRates(), base, credit, amounts, tenors)
+
+    # two-curve convexity
+    conv_cf = convexity(base, credit, cfs)
+    conv_raw = convexity(base, credit, amounts, tenors)
+    @test conv_cf.base ≈ conv_raw.base
+    @test conv_cf.credit ≈ conv_raw.credit
+
+    conv_kr_cf = convexity(KeyRates(), base, credit, cfs)
+    conv_kr_raw = convexity(KeyRates(), base, credit, amounts, tenors)
+    @test conv_kr_cf.base ≈ conv_kr_raw.base
+
+    # two-curve sensitivities
+    s2_cf = sensitivities(base, credit, cfs)
+    s2_raw = sensitivities(base, credit, amounts, tenors)
+    @test s2_cf.base_durations ≈ s2_raw.base_durations
+
+    s2_dv01_cf = sensitivities(DV01(), base, credit, cfs)
+    s2_dv01_raw = sensitivities(DV01(), base, credit, amounts, tenors)
+    @test s2_dv01_cf.base_dv01s ≈ s2_dv01_raw.base_dv01s
+end
+
+@testset "do-block with AbstractYieldModel" begin
+    c = FM.Yield.Constant(0.04)
+    cfs = [5, 5, 5, 105]
+    times = 1:4
+
+    # duration with do-block (function-first argument order)
+    d = duration(c) do i
+        price(i, cfs, times)
+    end
+    @test d ≈ duration(c, cfs, times)
+
+    # convexity with do-block
+    cv = convexity(c) do i
+        price(i, cfs, times)
+    end
+    @test cv ≈ convexity(c, cfs, times)
+end
