@@ -235,7 +235,7 @@ KeyRate = KeyRateZero
 
 Calculates the Macaulay, Modified, DV01, IR01, or CS01 duration. `times` may be ommitted and the valuation will assume evenly spaced cashflows starting at the end of the first period.
 
-`cfs` can be a `Vector{Cashflow}` (from FinanceCore), in which case `times` is extracted automatically and should be omitted.
+`cfs` can be an `AbstractVector{<:Cashflow}` (from FinanceCore), in which case `times` is extracted automatically and should be omitted.
 
 Note that the calculated duration will depend on the periodicity convention of the `interest_rate`: a `Periodic` yield (or yield model with that convention) will be a slightly different computed duration than a `Continous` which follows from the present value differing according to the periodicity.
 
@@ -665,12 +665,12 @@ _standard_valuation_2curve(cfs, times) = (base, credit) -> sum(cf * base(t) * cr
 
 """
     duration(zrc::ZeroRateCurve, cfs, times) -> scalar
-    duration(zrc::ZeroRateCurve, cfs::Vector{Cashflow}) -> scalar
+    duration(zrc::ZeroRateCurve, cfs::AbstractVector{<:Cashflow}) -> scalar
     duration(valuation_fn::Function, zrc::ZeroRateCurve) -> scalar
 
 Compute the scalar modified duration for a `ZeroRateCurve`: the sum of all key rate durations.
 
-`cfs` can be a `Vector{Cashflow}`, in which case `times` is extracted automatically.
+`cfs` can be an `AbstractVector{<:Cashflow}`, in which case `times` is extracted automatically.
 
 For the full key-rate decomposition (a vector), use [`KeyRates()`](@ref KeyRates):
 
@@ -694,12 +694,12 @@ end
 
 """
     duration(::KeyRates, zrc::ZeroRateCurve, cfs, times) -> Vector
-    duration(::KeyRates, zrc::ZeroRateCurve, cfs::Vector{Cashflow}) -> Vector
+    duration(::KeyRates, zrc::ZeroRateCurve, cfs::AbstractVector{<:Cashflow}) -> Vector
     duration(::KeyRates, valuation_fn::Function, zrc::ZeroRateCurve) -> Vector
 
 Compute key rate durations (modified) as a vector: `-∂V/∂rᵢ / V` for each tenor.
 
-`cfs` can be a `Vector{Cashflow}`, in which case `times` is extracted automatically.
+`cfs` can be an `AbstractVector{<:Cashflow}`, in which case `times` is extracted automatically.
 When called with a function, it receives a curve and returns a scalar value (do-block syntax).
 
 # Examples
@@ -1016,11 +1016,11 @@ end
 """
     sensitivities(zrc::ZeroRateCurve, valuation_fn::Function)
     sensitivities(zrc::ZeroRateCurve, cfs, times)
-    sensitivities(zrc::ZeroRateCurve, cfs::Vector{Cashflow})
+    sensitivities(zrc::ZeroRateCurve, cfs::AbstractVector{<:Cashflow})
 
 Compute value, key rate durations, and convexity matrix in a single efficient AD pass.
 
-`cfs` can be a `Vector{Cashflow}`, in which case `times` is extracted automatically.
+`cfs` can be an `AbstractVector{<:Cashflow}`, in which case `times` is extracted automatically.
 
 Always returns the full key-rate decomposition (vectors and matrices), equivalent to the
 `KeyRates()` dispatch of `duration` and `convexity`. Use `duration(zrc, ...)` or
@@ -1110,11 +1110,11 @@ end
 """
     sensitivities(valuation_fn, base::ZeroRateCurve, credit::ZeroRateCurve)
     sensitivities(base::ZeroRateCurve, credit::ZeroRateCurve, cfs, times)
-    sensitivities(base::ZeroRateCurve, credit::ZeroRateCurve, cfs::Vector{Cashflow})
+    sensitivities(base::ZeroRateCurve, credit::ZeroRateCurve, cfs::AbstractVector{<:Cashflow})
 
 Two-curve sensitivities. Returns base/credit durations and convexity matrices.
 
-`cfs` can be a `Vector{Cashflow}`, in which case `times` is extracted automatically.
+`cfs` can be an `AbstractVector{<:Cashflow}`, in which case `times` is extracted automatically.
 
 For DV01s instead of durations, use `sensitivities(DV01(), base, credit, cfs, times)`.
 

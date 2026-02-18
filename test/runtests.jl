@@ -963,19 +963,37 @@ end
     conv_raw = convexity(base, credit, amounts, tenors)
     @test conv_cf.base ≈ conv_raw.base
     @test conv_cf.credit ≈ conv_raw.credit
+    @test conv_cf.cross ≈ conv_raw.cross
 
     conv_kr_cf = convexity(KeyRates(), base, credit, cfs)
     conv_kr_raw = convexity(KeyRates(), base, credit, amounts, tenors)
     @test conv_kr_cf.base ≈ conv_kr_raw.base
+    @test conv_kr_cf.credit ≈ conv_kr_raw.credit
+    @test conv_kr_cf.cross ≈ conv_kr_raw.cross
 
     # two-curve sensitivities
     s2_cf = sensitivities(base, credit, cfs)
     s2_raw = sensitivities(base, credit, amounts, tenors)
     @test s2_cf.base_durations ≈ s2_raw.base_durations
+    @test s2_cf.credit_durations ≈ s2_raw.credit_durations
 
     s2_dv01_cf = sensitivities(DV01(), base, credit, cfs)
     s2_dv01_raw = sensitivities(DV01(), base, credit, amounts, tenors)
     @test s2_dv01_cf.base_dv01s ≈ s2_dv01_raw.base_dv01s
+    @test s2_dv01_cf.credit_dv01s ≈ s2_dv01_raw.credit_dv01s
+
+    @testset "Cashflow with non-tenor times" begin
+        # ZRC has annual tenors, but cashflows are semi-annual
+        rates = [0.04, 0.04, 0.04, 0.04, 0.04]
+        tenors = [1.0, 2.0, 3.0, 4.0, 5.0]
+        zrc = FM.ZeroRateCurve(rates, tenors, FM.Spline.Linear())
+        semi_times = [0.5, 1.0, 1.5, 2.0, 2.5, 3.0]
+        semi_amounts = [2.5, 2.5, 2.5, 2.5, 2.5, 102.5]
+        semi_cfs = FC.Cashflow.(semi_amounts, semi_times)
+
+        @test duration(zrc, semi_cfs) ≈ duration(zrc, semi_amounts, semi_times)
+        @test duration(KeyRates(), zrc, semi_cfs) ≈ duration(KeyRates(), zrc, semi_amounts, semi_times)
+    end
 end
 
 @testset "do-block with AbstractYieldModel" begin
