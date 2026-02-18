@@ -942,10 +942,12 @@ end
     s_raw = sensitivities(zrc, amounts, tenors)
     @test s_cf.value ≈ s_raw.value
     @test s_cf.durations ≈ s_raw.durations
+    @test s_cf.convexities ≈ s_raw.convexities
 
     s_dv01_cf = sensitivities(DV01(), zrc, cfs)
     s_dv01_raw = sensitivities(DV01(), zrc, amounts, tenors)
     @test s_dv01_cf.dv01s ≈ s_dv01_raw.dv01s
+    @test s_dv01_cf.convexities ≈ s_dv01_raw.convexities
 
     # two-curve duration
     base_rates = [0.03, 0.03, 0.03, 0.03, 0.03]
@@ -1012,4 +1014,27 @@ end
         price(i, cfs, times)
     end
     @test cv ≈ convexity(c, cfs, times)
+end
+
+@testset "ZRC dispatch priority over AbstractYieldModel forwarding" begin
+    rates = [0.04, 0.04, 0.04, 0.04, 0.04]
+    tenors = [1.0, 2.0, 3.0, 4.0, 5.0]
+    zrc = FM.ZeroRateCurve(rates, tenors, FM.Spline.Linear())
+    cfs = [5.0, 5.0, 5.0, 5.0, 105.0]
+    times = [1.0, 2.0, 3.0, 4.0, 5.0]
+
+    # duration(fn, zrc) should use ZRC AD path (= sum of key rate durations)
+    # The AD path passes a callable model (not a full ZRC), so use curve(t) not discount(curve, t)
+    vf_dur = duration(zrc) do curve
+        sum(cf * curve(t) for (cf, t) in zip(cfs, times))
+    end
+    kr_dur = sum(duration(KeyRates(), zrc, cfs, times))
+    @test vf_dur ≈ kr_dur atol = 1e-10
+
+    # convexity(fn, zrc) should use ZRC AD path
+    vf_conv = convexity(zrc) do curve
+        sum(cf * curve(t) for (cf, t) in zip(cfs, times))
+    end
+    kr_conv = sum(convexity(KeyRates(), zrc, cfs, times))
+    @test vf_conv ≈ kr_conv atol = 1e-10
 end
