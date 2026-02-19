@@ -55,6 +55,43 @@ dv01_result = sensitivities(DV01(), zrc, cfs, tenors)
 # dv01_result.convexities — cross-convexity matrix — matrix
 ```
 
+## Using Cashflow Objects
+
+All `ZeroRateCurve`-based methods accept `Vector{Cashflow}` directly, eliminating the need to manually split into amounts and times:
+
+```julia
+using ActuaryUtilities, FinanceModels, FinanceCore
+
+cfs = Cashflow.([5.0, 5.0, 5.0, 5.0, 105.0], [1.0, 2.0, 3.0, 4.0, 5.0])
+
+# These are equivalent:
+duration(zrc, cfs)                              # using Cashflow objects
+duration(zrc, [5.0, 5.0, 5.0, 5.0, 105.0], [1.0, 2.0, 3.0, 4.0, 5.0])  # using amounts + times
+
+# Works with all dispatch variants:
+duration(KeyRates(), zrc, cfs)
+duration(DV01(), zrc, cfs)
+duration(DV01(), KeyRates(), zrc, cfs)
+duration(IR01(), base, credit, cfs)
+duration(CS01(), KeyRates(), base, credit, cfs)
+convexity(zrc, cfs)
+convexity(KeyRates(), base, credit, cfs)
+sensitivities(zrc, cfs)
+sensitivities(DV01(), base, credit, cfs)
+```
+
+## Constructing a ZeroRateCurve from Other Models
+
+If you have a fitted yield model (e.g. `NelsonSiegel`, `Constant`, a bootstrapped spline), convert it to a `ZeroRateCurve` for key rate analysis:
+
+```julia
+ns = Yield.NelsonSiegel(1.0, 0.04, -0.02, 0.01)
+zrc = ZeroRateCurve(ns, [1.0, 2.0, 5.0, 10.0, 20.0])
+
+# Now use with sensitivities:
+result = sensitivities(zrc, cfs)
+```
+
 ## Scalar vs Key-Rate Decomposition
 
 By default, `duration` and `convexity` with a `ZeroRateCurve` return **scalars** — the total modified duration, DV01, or convexity. This is consistent with the yield-based API (`duration(0.03, cfs, times)`).

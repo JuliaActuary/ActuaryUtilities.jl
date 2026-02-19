@@ -919,3 +919,122 @@ end
 
     @test s ≈ FC.Periodic(0.01, 1) atol = 1.0e-6
 end
+
+@testset "ZeroRateCurve Cashflow support" begin
+    rates = [0.04, 0.04, 0.04, 0.04, 0.04]
+    tenors = [1.0, 2.0, 3.0, 4.0, 5.0]
+    zrc = FM.ZeroRateCurve(rates, tenors, FM.Spline.Linear())
+    amounts = [5.0, 5.0, 5.0, 5.0, 105.0]
+    cfs = FC.Cashflow.(amounts, tenors)
+
+    # single-curve duration
+    @test duration(zrc, cfs) ≈ duration(zrc, amounts, tenors)
+    @test duration(KeyRates(), zrc, cfs) ≈ duration(KeyRates(), zrc, amounts, tenors)
+    @test duration(DV01(), zrc, cfs) ≈ duration(DV01(), zrc, amounts, tenors)
+    @test duration(DV01(), KeyRates(), zrc, cfs) ≈ duration(DV01(), KeyRates(), zrc, amounts, tenors)
+
+    # single-curve convexity
+    @test convexity(zrc, cfs) ≈ convexity(zrc, amounts, tenors)
+    @test convexity(KeyRates(), zrc, cfs) ≈ convexity(KeyRates(), zrc, amounts, tenors)
+
+    # single-curve sensitivities
+    s_cf = sensitivities(zrc, cfs)
+    s_raw = sensitivities(zrc, amounts, tenors)
+    @test s_cf.value ≈ s_raw.value
+    @test s_cf.durations ≈ s_raw.durations
+    @test s_cf.convexities ≈ s_raw.convexities
+
+    s_dv01_cf = sensitivities(DV01(), zrc, cfs)
+    s_dv01_raw = sensitivities(DV01(), zrc, amounts, tenors)
+    @test s_dv01_cf.dv01s ≈ s_dv01_raw.dv01s
+    @test s_dv01_cf.convexities ≈ s_dv01_raw.convexities
+
+    # two-curve duration
+    base_rates = [0.03, 0.03, 0.03, 0.03, 0.03]
+    credit_rates = [0.02, 0.02, 0.02, 0.02, 0.02]
+    base = FM.ZeroRateCurve(base_rates, tenors, FM.Spline.Linear())
+    credit = FM.ZeroRateCurve(credit_rates, tenors, FM.Spline.Linear())
+
+    @test duration(IR01(), base, credit, cfs) ≈ duration(IR01(), base, credit, amounts, tenors)
+    @test duration(IR01(), KeyRates(), base, credit, cfs) ≈ duration(IR01(), KeyRates(), base, credit, amounts, tenors)
+    @test duration(CS01(), base, credit, cfs) ≈ duration(CS01(), base, credit, amounts, tenors)
+    @test duration(CS01(), KeyRates(), base, credit, cfs) ≈ duration(CS01(), KeyRates(), base, credit, amounts, tenors)
+
+    # two-curve convexity
+    conv_cf = convexity(base, credit, cfs)
+    conv_raw = convexity(base, credit, amounts, tenors)
+    @test conv_cf.base ≈ conv_raw.base
+    @test conv_cf.credit ≈ conv_raw.credit
+    @test conv_cf.cross ≈ conv_raw.cross
+
+    conv_kr_cf = convexity(KeyRates(), base, credit, cfs)
+    conv_kr_raw = convexity(KeyRates(), base, credit, amounts, tenors)
+    @test conv_kr_cf.base ≈ conv_kr_raw.base
+    @test conv_kr_cf.credit ≈ conv_kr_raw.credit
+    @test conv_kr_cf.cross ≈ conv_kr_raw.cross
+
+    # two-curve sensitivities
+    s2_cf = sensitivities(base, credit, cfs)
+    s2_raw = sensitivities(base, credit, amounts, tenors)
+    @test s2_cf.base_durations ≈ s2_raw.base_durations
+    @test s2_cf.credit_durations ≈ s2_raw.credit_durations
+
+    s2_dv01_cf = sensitivities(DV01(), base, credit, cfs)
+    s2_dv01_raw = sensitivities(DV01(), base, credit, amounts, tenors)
+    @test s2_dv01_cf.base_dv01s ≈ s2_dv01_raw.base_dv01s
+    @test s2_dv01_cf.credit_dv01s ≈ s2_dv01_raw.credit_dv01s
+
+    @testset "Cashflow with non-tenor times" begin
+        # ZRC has annual tenors, but cashflows are semi-annual
+        rates = [0.04, 0.04, 0.04, 0.04, 0.04]
+        tenors = [1.0, 2.0, 3.0, 4.0, 5.0]
+        zrc = FM.ZeroRateCurve(rates, tenors, FM.Spline.Linear())
+        semi_times = [0.5, 1.0, 1.5, 2.0, 2.5, 3.0]
+        semi_amounts = [2.5, 2.5, 2.5, 2.5, 2.5, 102.5]
+        semi_cfs = FC.Cashflow.(semi_amounts, semi_times)
+
+        @test duration(zrc, semi_cfs) ≈ duration(zrc, semi_amounts, semi_times)
+        @test duration(KeyRates(), zrc, semi_cfs) ≈ duration(KeyRates(), zrc, semi_amounts, semi_times)
+    end
+end
+
+@testset "do-block with AbstractYieldModel" begin
+    c = FM.Yield.Constant(0.04)
+    cfs = [5, 5, 5, 105]
+    times = 1:4
+
+    # duration with do-block (function-first argument order)
+    d = duration(c) do i
+        price(i, cfs, times)
+    end
+    @test d ≈ duration(c, cfs, times)
+
+    # convexity with do-block
+    cv = convexity(c) do i
+        price(i, cfs, times)
+    end
+    @test cv ≈ convexity(c, cfs, times)
+end
+
+@testset "ZRC dispatch priority over AbstractYieldModel forwarding" begin
+    rates = [0.04, 0.04, 0.04, 0.04, 0.04]
+    tenors = [1.0, 2.0, 3.0, 4.0, 5.0]
+    zrc = FM.ZeroRateCurve(rates, tenors, FM.Spline.Linear())
+    cfs = [5.0, 5.0, 5.0, 5.0, 105.0]
+    times = [1.0, 2.0, 3.0, 4.0, 5.0]
+
+    # duration(fn, zrc) should use ZRC AD path (= sum of key rate durations)
+    # The AD path passes a callable model (not a full ZRC), so use curve(t) not discount(curve, t)
+    vf_dur = duration(zrc) do curve
+        sum(cf * curve(t) for (cf, t) in zip(cfs, times))
+    end
+    kr_dur = sum(duration(KeyRates(), zrc, cfs, times))
+    @test vf_dur ≈ kr_dur atol = 1e-10
+
+    # convexity(fn, zrc) should use ZRC AD path
+    vf_conv = convexity(zrc) do curve
+        sum(cf * curve(t) for (cf, t) in zip(cfs, times))
+    end
+    kr_conv = sum(convexity(KeyRates(), zrc, cfs, times))
+    @test vf_conv ≈ kr_conv atol = 1e-10
+end
