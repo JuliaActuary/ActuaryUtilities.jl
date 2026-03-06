@@ -169,9 +169,11 @@ end
         @test duration(r, cfs) ≈ duration(r, cfs, 1:4)
         @test duration(DV01(), r, cfs) ≈ duration(DV01(), r, cfs, 1:4)
 
-        @test duration(FM.Yield.Constant(0.04), cfs, times) ≈ 1.777570320376649 / (1 + 0.04)
-        @test duration(FM.Yield.Constant(0.04), -1 .* cfs, times) ≈ 1.777570320376649 / (1 + 0.04) atol = 0.00001
-        @test duration(FM.fit(FM.Spline.Linear(), FM.ForwardYields([0.04, 0.04]), FM.Fit.Bootstrap()), cfs, times) ≈ 1.777570320376649 / (1 + 0.04) atol = 0.00001
+        # FM v5 CompositeYield operates in continuous zero-rate space,
+        # so bump-and-reprice gives continuous modified duration (= Macaulay duration)
+        @test duration(FM.Yield.Constant(0.04), cfs, times) ≈ 1.777570320376649
+        @test duration(FM.Yield.Constant(0.04), -1 .* cfs, times) ≈ 1.777570320376649 atol = 0.00001
+        @test duration(FM.fit(FM.Spline.Linear(), FM.ForwardYield([0.04, 0.04]), FM.Fit.Bootstrap()), cfs, times) ≈ 1.777570320376649 atol = 0.00001
 
         # test that dispatch resolves the ambiguity between duration(FM.Yield,vec) and duration(FM.Yield, function)
         @test duration(FM.Yield.Constant(0.03), cfs) > 0
@@ -293,6 +295,49 @@ end
 
 
         end
+    end
+
+    @testset "KeyRateZero TransformedYield" begin
+        krd_points = 1:10
+        shift = 0.001
+
+        # Interior point: triangle bump at τ=5
+        bump_fn = FinancialMath._tent_bump(shift, 5, krd_points)
+        base_z = FC.Continuous(0.05)
+        @test bump_fn(base_z, 5).continuous_value ≈ 0.05 + shift       # peak
+        @test bump_fn(base_z, 4).continuous_value ≈ 0.05               # left neighbor
+        @test bump_fn(base_z, 6).continuous_value ≈ 0.05               # right neighbor
+        @test bump_fn(base_z, 4.5).continuous_value ≈ 0.05 + shift / 2 # midpoint of ramp
+
+        # First point: flat left, ramp right
+        bump_first = FinancialMath._tent_bump(shift, 1, krd_points)
+        @test bump_first(base_z, 0.5).continuous_value ≈ 0.05 + shift  # flat left
+        @test bump_first(base_z, 1.0).continuous_value ≈ 0.05 + shift  # at τ
+        @test bump_first(base_z, 2.0).continuous_value ≈ 0.05          # right neighbor
+        @test bump_first(base_z, 1.5).continuous_value ≈ 0.05 + shift / 2
+
+        # Last point: ramp left, flat right
+        bump_last = FinancialMath._tent_bump(shift, 10, krd_points)
+        @test bump_last(base_z, 9.0).continuous_value ≈ 0.05           # left neighbor
+        @test bump_last(base_z, 10.0).continuous_value ≈ 0.05 + shift  # at τ
+        @test bump_last(base_z, 11.0).continuous_value ≈ 0.05 + shift  # flat right
+
+        # Returns TransformedYield type
+        c = FM.Yield.Constant(FC.Continuous(0.05))
+        cz = FinancialMath._krd_new_curve(KeyRateZero(5), c, krd_points)
+        @test cz isa FM.Yield.TransformedYield
+
+        # Rate input properly wrapped in Constant
+        cz_rate = FinancialMath._krd_new_curve(KeyRateZero(5), FC.Continuous(0.05), krd_points)
+        @test cz_rate isa FM.Yield.TransformedYield
+
+        # Sum of KRDs ≈ total modified duration (flat curve sanity check)
+        bond_cfs = [3.0, 3.0, 3.0, 3.0, 103.0]
+        bond_times = [1.0, 2.0, 3.0, 4.0, 5.0]
+        flat = FM.Yield.Constant(FC.Continuous(0.05))
+        krd_sum = sum(duration(KeyRateZero(t), flat, bond_cfs, bond_times, 1:5) for t in 1:5)
+        mod_dur = duration(flat, bond_cfs, bond_times)
+        @test krd_sum ≈ mod_dur atol = 0.01
     end
 
 end

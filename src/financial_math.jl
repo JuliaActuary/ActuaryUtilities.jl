@@ -498,21 +498,67 @@ end
 opposite(kr::KeyRateZero) = KeyRateZero(kr.timepoint, -kr.shift)
 opposite(kr::KeyRatePar) = KeyRatePar(kr.timepoint, -kr.shift)
 
+"""
+    _tent_bump(shift, τ, krd_points)
+
+Return a closure `(z, t) -> z + Continuous(bump)` implementing the Ho (1992)
+tent function for key-rate duration bump-and-reprice:
+
+- **First KRD point:** flat `shift` for `t ≤ τ`, linear ramp to 0 at next neighbor.
+- **Last KRD point:** linear ramp from 0 at previous neighbor, flat `shift` for `t ≥ τ`.
+- **Interior:** triangle with peak `shift` at `τ`, zero at both neighbors.
+"""
+function _tent_bump(shift, τ, krd_points)
+    idx = findfirst(==(τ), krd_points)
+    n = length(krd_points)
+
+    τ_left = idx > 1 ? krd_points[idx-1] : nothing
+    τ_right = idx < n ? krd_points[idx+1] : nothing
+
+    return function (z, t)
+        if τ_left === nothing && τ_right === nothing
+            # Single KRD point: flat shift everywhere
+            bump = shift
+        elseif τ_left === nothing
+            # First point: flat left, ramp right
+            if t <= τ
+                bump = shift
+            elseif t >= τ_right
+                bump = oftype(shift, 0)
+            else
+                bump = shift * (τ_right - t) / (τ_right - τ)
+            end
+        elseif τ_right === nothing
+            # Last point: ramp left, flat right
+            if t >= τ
+                bump = shift
+            elseif t <= τ_left
+                bump = oftype(shift, 0)
+            else
+                bump = shift * (t - τ_left) / (τ - τ_left)
+            end
+        else
+            # Interior: triangle peak at τ
+            if t <= τ_left || t >= τ_right
+                bump = oftype(shift, 0)
+            elseif t <= τ
+                bump = shift * (t - τ_left) / (τ - τ_left)
+            else
+                bump = shift * (τ_right - t) / (τ_right - τ)
+            end
+        end
+        return z + FinanceCore.Continuous(bump)
+    end
+end
+
+_ensure_yield_model(curve::FinanceModels.Yield.AbstractYieldModel) = curve
+_ensure_yield_model(curve::FinanceCore.Rate) = FinanceModels.Yield.Constant(curve)
+_ensure_yield_model(curve::Real) = FinanceModels.Yield.Constant(curve)
+
 function _krd_new_curve(keyrate::KeyRateZero, curve, krd_points)
-    curve_times = krd_points
-    shift = keyrate.shift
-
-    zeros = FinanceModels.zero.(curve, curve_times)
-
-    zero_index = findfirst(==(keyrate.timepoint), curve_times)
-
-    target_rate = zeros[zero_index]
-
-    zeros[zero_index] += FinanceModels.Rate(shift, target_rate.compounding)
-
-    new_curve = FinanceModels.fit(FinanceModels.Spline.Linear(), FinanceModels.ZCBYield.(zeros, curve_times), FinanceModels.Fit.Bootstrap())
-
-    return new_curve
+    bump = _tent_bump(keyrate.shift, keyrate.timepoint, krd_points)
+    base = _ensure_yield_model(curve)
+    return FinanceModels.Yield.TransformedYield(base, bump)
 end
 
 function _krd_new_curve(keyrate::KeyRatePar, curve, krd_points)
