@@ -169,9 +169,11 @@ end
         @test duration(r, cfs) ≈ duration(r, cfs, 1:4)
         @test duration(DV01(), r, cfs) ≈ duration(DV01(), r, cfs, 1:4)
 
-        @test duration(FM.Yield.Constant(0.04), cfs, times) ≈ 1.777570320376649 / (1 + 0.04)
-        @test duration(FM.Yield.Constant(0.04), -1 .* cfs, times) ≈ 1.777570320376649 / (1 + 0.04) atol = 0.00001
-        @test duration(FM.fit(FM.Spline.Linear(), FM.ForwardYields([0.04, 0.04]), FM.Fit.Bootstrap()), cfs, times) ≈ 1.777570320376649 / (1 + 0.04) atol = 0.00001
+        # FM v5 CompositeYield operates in continuous zero-rate space,
+        # so bump-and-reprice gives continuous modified duration (= Macaulay duration)
+        @test duration(FM.Yield.Constant(0.04), cfs, times) ≈ 1.777570320376649
+        @test duration(FM.Yield.Constant(0.04), -1 .* cfs, times) ≈ 1.777570320376649 atol = 0.00001
+        @test duration(FM.fit(FM.Spline.Linear(), FM.ForwardYield([0.04, 0.04]), FM.Fit.Bootstrap()), cfs, times) ≈ 1.777570320376649 atol = 0.00001
 
         # test that dispatch resolves the ambiguity between duration(FM.Yield,vec) and duration(FM.Yield, function)
         @test duration(FM.Yield.Constant(0.03), cfs) > 0
