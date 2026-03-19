@@ -162,6 +162,9 @@ end
         @test duration(r, cfs, times) ≈ 1.777570320376649 / (1 + 0.04)
         @test duration(DV01(), r, cfs, times) ≈ 1.777570320376649 / (1 + 0.04) * V / 10000
 
+        # Macaulay duration: mixed-sign cashflows should use signed PVs
+        @test duration(Macaulay(), 0.04, -1 .* cfs, times) ≈ duration(Macaulay(), 0.04, cfs, times)
+
         #test without times
         r = FC.Periodic(0.04, 1)
         @test duration(Macaulay(), r, cfs) ≈ duration(Macaulay(), r, cfs, 1:4)
@@ -243,6 +246,7 @@ end
 
         @test duration(0.03, sum(cfs, dims = 2), times) ≈ 2.780101622010806
 
+        @test duration(Macaulay(), 0.03, sum(cfs, dims = 2), times) ≈ 2.863504670671131
 
     end
 
