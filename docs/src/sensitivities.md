@@ -458,3 +458,35 @@ for i in 1:4
     @test ad_dv01[i] ≈ fd_dv01 atol = 1e-4
 end
 ```
+
+## Validating AD with TransformedYield
+
+AD gives the instantaneous rate of change (the derivative), while `TransformedYield` lets you apply an actual finite shift and observe the PV change. Comparing the two is a useful sanity check — the AD-predicted change should closely match the actual change for small shifts:
+
+```@example sensitivities
+using ActuaryUtilities, FinanceModels, FinanceCore
+
+rates = [0.02, 0.03, 0.04, 0.05]
+tenors = [1.0, 3.0, 5.0, 10.0]
+zrc = ZeroRateCurve(rates, tenors)
+cfs = [3.0, 3.0, 3.0, 103.0]
+
+# AD: exact DV01 per tenor
+ad_dv01 = duration(DV01(), KeyRates(), zrc, cfs, tenors)
+total_dv01 = sum(ad_dv01)
+
+# TransformedYield: actual PV change under a +1 bp parallel shift
+pv_base = present_value(zrc, cfs, tenors)
+shifted = zrc + (z, t) -> z + Continuous(0.0001)  # +1 bp
+pv_shifted = present_value(shifted, cfs, tenors)
+actual_change = -(pv_shifted - pv_base)
+
+# DV01 predicts the per-unit change; scale to 1 bp = 0.0001
+predicted_change = total_dv01 / 10_000
+
+(; predicted_change = round(predicted_change, digits=6),
+   actual_change = round(actual_change, digits=6),
+   ratio = round(actual_change / predicted_change, digits=6))
+```
+
+The ratio is very close to 1.0, confirming AD and TransformedYield agree. The small deviation is due to convexity — DV01 is a first-order (linear) approximation, while the actual PV change includes higher-order effects.
