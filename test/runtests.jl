@@ -1083,3 +1083,53 @@ end
     kr_conv = sum(convexity(KeyRates(), zrc, cfs, times))
     @test vf_conv ≈ kr_conv atol = 1e-10
 end
+
+@testset "AbstractDeflator ecosystem integration" begin
+    # FinanceCore 2.6+ introduced AbstractDeflator. FinanceModels yield curves
+    # and MortalityTables mortality models both subtype it, so ActuaryUtilities's
+    # pv (re-exported from FinanceCore) works on composite deflators directly.
+
+    @testset "yield × default-survival composition" begin
+        yield = FM.Yield.Constant(FC.Continuous(0.03))
+        λ_d   = FC.Continuous(0.012)         # 1.2% default hazard
+        deflator = FC.compose(yield, λ_d)
+
+        @test deflator isa FC.AbstractDeflator
+
+        cfs = [FC.Cashflow(100.0, t) for t in 1.0:5.0]
+        expected = sum(100.0 * exp(-0.042 * t) for t in 1.0:5.0)
+        @test pv(deflator, cfs) ≈ expected
+    end
+
+    @testset "ELGD-adjusted defaultable bond price" begin
+        # Recovery-of-market-value: bake (1-R)·λ into the default process.
+        yield      = FM.Yield.Constant(FC.Continuous(0.03))
+        λ_marginal = FC.Continuous(0.012)
+        ELGD       = 0.60
+        λ_loss_adj = λ_marginal * ELGD
+
+        cfs = [FC.Cashflow(100.0, t) for t in 1.0:5.0]
+        no_recovery = pv(FC.compose(yield, λ_marginal), cfs)
+        with_recovery = pv(FC.compose(yield, λ_loss_adj), cfs)
+
+        # Recovery raises the present value (lower effective hazard)
+        @test with_recovery > no_recovery
+        # Numerical match to the ELGD * λ formula
+        @test with_recovery ≈ sum(100.0 * exp(-(0.03 + 0.0072) * t) for t in 1.0:5.0)
+    end
+
+    @testset "yield curve × constant decrement" begin
+        # Non-trivial term-structure yield composed with a mortality force
+        rates = [0.03, 0.035, 0.04, 0.045, 0.05]
+        mats  = [1.0, 2.0, 3.0, 5.0, 10.0]
+        yc = FM.fit(FM.Spline.Cubic(),
+                    FM.ZCBYield.(rates, mats),
+                    FM.Fit.Bootstrap())
+        μ = FC.Continuous(0.012)
+        deflator = FC.compose(yc, μ)
+
+        # PV of a 5-year cashflow contingent on survival
+        cf = FC.Cashflow(100.0, 5.0)
+        @test pv(deflator, [cf]) ≈ 100.0 * FC.factor(yc, 5) * exp(-0.012 * 5)
+    end
+end
