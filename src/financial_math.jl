@@ -434,9 +434,9 @@ function convexity(yield, cfs)
 end
 
 function convexity(yield, valuation_function::T) where {T <: Function}
-    v(x) = abs(valuation_function(yield + x[1]))
-    ∂²P = ForwardDiff.hessian(v, [0.0])
-    return ∂²P[1] / v([0.0])
+    v(x) = abs(valuation_function(yield + x))
+    ∂²P = ForwardDiff.derivative(y -> ForwardDiff.derivative(v, y), 0.0)
+    return ∂²P / v(0.0)
 end
 
 
