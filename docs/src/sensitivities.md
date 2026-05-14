@@ -436,8 +436,8 @@ See the [FinanceModels interpolation guide](https://docs.juliaactuary.org/Financ
 
 AD sensitivities can be cross-validated against traditional finite-difference (bump-and-reprice) results. The AD approach gives exact derivatives in a single pass, while FD has O(ε²) truncation error:
 
-```julia
-using ActuaryUtilities, FinanceModels, Test
+```@example sensitivities-validation
+using ActuaryUtilities, FinanceModels
 
 rates = [0.02, 0.03, 0.04, 0.05]
 tenors = [1.0, 3.0, 5.0, 10.0]
@@ -449,14 +449,15 @@ ad_dv01 = duration(DV01(), KeyRates(), zrc, cfs, tenors)
 
 # Finite difference (bump-and-reprice)
 ε = 1e-5
-for i in 1:4
+fd_dv01 = map(1:4) do i
     rates_up = copy(rates); rates_up[i] += ε
     rates_dn = copy(rates); rates_dn[i] -= ε
     v_up = pv(ZeroRateCurve(rates_up, tenors), cfs, tenors)
     v_dn = pv(ZeroRateCurve(rates_dn, tenors), cfs, tenors)
-    fd_dv01 = -(v_up - v_dn) / (2ε) / 10_000
-    @test ad_dv01[i] ≈ fd_dv01 atol = 1e-4
+    -(v_up - v_dn) / (2ε) / 10_000
 end
+
+(; ad_dv01, fd_dv01, max_abs_diff = maximum(abs.(ad_dv01 .- fd_dv01)))
 ```
 
 ## Validating AD with TransformedYield
