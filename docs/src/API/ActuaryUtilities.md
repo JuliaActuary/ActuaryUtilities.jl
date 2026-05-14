@@ -1,33 +1,18 @@
 # ActuaryUtilities API Reference
 
 ```@index
-Modules = [
-    ActuaryUtilities,
-    ActuaryUtilities.FinancialMath,
-    ActuaryUtilities.RiskMeasures,
-    ActuaryUtilities.Utilities,
-]
+Modules = [ActuaryUtilities]
 ```
 
 ## Exported API
 ```@autodocs
-Modules = [
-    ActuaryUtilities,
-    ActuaryUtilities.FinancialMath,
-    ActuaryUtilities.RiskMeasures,
-    ActuaryUtilities.Utilities,
-]
+Modules = [ActuaryUtilities]
 Private = false
 ```
 
 ## Unexported API
 ```@autodocs
-Modules = [
-    ActuaryUtilities,
-    ActuaryUtilities.FinancialMath,
-    ActuaryUtilities.RiskMeasures,
-    ActuaryUtilities.Utilities,
-]
+Modules = [ActuaryUtilities]
 Public = false
 ```
 
