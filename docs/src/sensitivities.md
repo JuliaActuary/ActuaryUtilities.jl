@@ -8,88 +8,91 @@ This approach uses ForwardDiff to differentiate through the curve construction, 
 
 Construct a `ZeroRateCurve` with continuously-compounded zero rates and tenor times, then pass it to `duration`, `convexity`, or `sensitivities`:
 
-```julia
-using ActuaryUtilities, FinanceModels
+```@example sensitivities
+using ActuaryUtilities, FinanceModels, FinanceCore
 
-rates = [0.03, 0.03, 0.03, 0.03, 0.03]
+rates  = [0.03, 0.03, 0.03, 0.03, 0.03]
 tenors = [1.0, 2.0, 3.0, 4.0, 5.0]
-zrc = ZeroRateCurve(rates, tenors)
+zrc    = ZeroRateCurve(rates, tenors)
 
 cfs = [5.0, 5.0, 5.0, 5.0, 105.0]
 
 # Scalar modified duration (default)
 dur = duration(zrc, cfs, tenors)
+```
 
+```@example sensitivities
 # Scalar DV01
 dv01 = duration(DV01(), zrc, cfs, tenors)
+```
 
+```@example sensitivities
 # Scalar convexity
 conv = convexity(zrc, cfs, tenors)
 ```
 
 To get the full key-rate decomposition (vectors/matrices), use `KeyRates()`:
 
-```julia
+```@example sensitivities
 # Key rate durations (modified): vector of -∂V/∂rᵢ / V
 krds = duration(KeyRates(), zrc, cfs, tenors)
+```
 
+```@example sensitivities
 # Key rate DV01s: vector of -∂V/∂rᵢ / 10000
 dv01s = duration(DV01(), KeyRates(), zrc, cfs, tenors)
+```
 
+```@example sensitivities
 # Key rate convexity matrix: ∂²V/∂rᵢ∂rⱼ / V
 conv_matrix = convexity(KeyRates(), zrc, cfs, tenors)
 ```
 
 For a complete set of key-rate results in a single AD pass, use `sensitivities`:
 
-```julia
+```@example sensitivities
 result = sensitivities(zrc, cfs, tenors)
 # result.value       — present value
 # result.durations   — key rate durations (modified) — vector
 # result.convexities — cross-convexity matrix — matrix
+result
+```
 
+```@example sensitivities
 # For DV01s instead of durations:
 dv01_result = sensitivities(DV01(), zrc, cfs, tenors)
 # dv01_result.value       — present value
 # dv01_result.dv01s       — key rate DV01s — vector
 # dv01_result.convexities — cross-convexity matrix — matrix
+dv01_result
 ```
 
 ## Using Cashflow Objects
 
 All `ZeroRateCurve`-based methods accept `Vector{Cashflow}` directly, eliminating the need to manually split into amounts and times:
 
-```julia
-using ActuaryUtilities, FinanceModels, FinanceCore
-
-cfs = Cashflow.([5.0, 5.0, 5.0, 5.0, 105.0], [1.0, 2.0, 3.0, 4.0, 5.0])
+```@example sensitivities
+cfs_obj = Cashflow.([5.0, 5.0, 5.0, 5.0, 105.0], [1.0, 2.0, 3.0, 4.0, 5.0])
 
 # These are equivalent:
-duration(zrc, cfs)                              # using Cashflow objects
-duration(zrc, [5.0, 5.0, 5.0, 5.0, 105.0], [1.0, 2.0, 3.0, 4.0, 5.0])  # using amounts + times
-
-# Works with all dispatch variants:
-duration(KeyRates(), zrc, cfs)
-duration(DV01(), zrc, cfs)
-duration(DV01(), KeyRates(), zrc, cfs)
-duration(IR01(), base, credit, cfs)
-duration(CS01(), KeyRates(), base, credit, cfs)
-convexity(zrc, cfs)
-convexity(KeyRates(), base, credit, cfs)
-sensitivities(zrc, cfs)
-sensitivities(DV01(), base, credit, cfs)
+a = duration(zrc, cfs_obj)                                              # using Cashflow objects
+b = duration(zrc, [5.0, 5.0, 5.0, 5.0, 105.0], [1.0, 2.0, 3.0, 4.0, 5.0])  # using amounts + times
+(a, b, a ≈ b)
 ```
+
+The same dispatch works with all method variants — `KeyRates()`, `DV01()`, two-curve `IR01()`/`CS01()`, `convexity`, and `sensitivities`.
 
 ## Constructing a ZeroRateCurve from Other Models
 
 If you have a fitted yield model (e.g. `NelsonSiegel`, `Constant`, a bootstrapped spline), convert it to a `ZeroRateCurve` for key rate analysis:
 
-```julia
-ns = Yield.NelsonSiegel(1.0, 0.04, -0.02, 0.01)
-zrc = ZeroRateCurve(ns, [1.0, 2.0, 5.0, 10.0, 20.0])
+```@example sensitivities
+ns      = Yield.NelsonSiegel(1.0, 0.04, -0.02, 0.01)
+zrc_ns  = ZeroRateCurve(ns, [1.0, 2.0, 5.0, 10.0, 20.0])
 
 # Now use with sensitivities:
-result = sensitivities(zrc, cfs)
+ns_result = sensitivities(zrc_ns, [5.0, 5.0, 5.0, 5.0, 105.0], [1.0, 2.0, 5.0, 10.0, 20.0])
+ns_result.durations
 ```
 
 ## Scalar vs Key-Rate Decomposition
@@ -98,55 +101,57 @@ By default, `duration` and `convexity` with a `ZeroRateCurve` return **scalars**
 
 To obtain the per-tenor decomposition, pass `KeyRates()` as the first argument:
 
-```julia
+```@example sensitivities
 # Scalar (default) — same as sum of key-rate decomposition
-duration(zrc, cfs, tenors)                          # scalar
-duration(DV01(), zrc, cfs, tenors)                   # scalar
-convexity(zrc, cfs, tenors)                          # scalar
+scalar_dur   = duration(zrc, cfs, tenors)
+scalar_dv01  = duration(DV01(), zrc, cfs, tenors)
+scalar_conv  = convexity(zrc, cfs, tenors)
 
 # Key-rate decomposition
-duration(KeyRates(), zrc, cfs, tenors)               # vector
-duration(DV01(), KeyRates(), zrc, cfs, tenors)       # vector
-convexity(KeyRates(), zrc, cfs, tenors)              # matrix
+vector_dur   = duration(KeyRates(), zrc, cfs, tenors)
+vector_dv01  = duration(DV01(), KeyRates(), zrc, cfs, tenors)
+matrix_conv  = convexity(KeyRates(), zrc, cfs, tenors)
+
+(scalar_dur, sum(vector_dur))
 ```
 
 The scalar value equals the sum of the key-rate decomposition:
 
-```julia
+```@example sensitivities
 duration(zrc, cfs, tenors) ≈ sum(duration(KeyRates(), zrc, cfs, tenors))
 ```
 
 For a flat curve, the scalar modified duration matches the yield-based API:
 
-```julia
-using ActuaryUtilities
+```@example sensitivities
+flat_cfs    = [5.0, 5.0, 5.0, 5.0, 105.0]
+flat_tenors = [1.0, 2.0, 3.0, 4.0, 5.0]
+flat_zrc    = ZeroRateCurve(fill(0.03, 5), flat_tenors)
 
-cfs = [5.0, 5.0, 5.0, 5.0, 105.0]
-tenors = [1.0, 2.0, 3.0, 4.0, 5.0]
-zrc = ZeroRateCurve(fill(0.03, 5), tenors)
-
-duration(zrc, cfs, tenors)                            # ≈ 4.57
-duration(0.03, cfs, tenors)                            # ≈ 4.57 (same)
+(zrc_dur     = duration(flat_zrc, flat_cfs, flat_tenors),
+ yield_dur   = duration(0.03, flat_cfs, flat_tenors))
 ```
 
 For Macaulay duration, use the scalar yield API directly — there is no `ZeroRateCurve` dispatch:
 
-```julia
-duration(Macaulay(), 0.03, cfs, tenors)
+```@example sensitivities
+duration(Macaulay(), 0.03, flat_cfs, flat_tenors)
 ```
 
 ## Interest-Sensitive Instruments
 
 For instruments whose cashflows depend on the rate environment (callable bonds, floaters, etc.), use the do-block syntax to pass a custom valuation function:
 
-```julia
+```@example sensitivities
 # Callable bond: key rate durations (vector)
 callable_krds = duration(KeyRates(), zrc) do curve
     ncv = pv(curve, cfs, tenors)
     called_value = pv(curve, cfs[1:3], tenors[1:3]) + 102.0 * curve(3.0)
     min(ncv, called_value)
 end
+```
 
+```@example sensitivities
 # Scalar duration (default)
 callable_dur = duration(zrc) do curve
     ncv = pv(curve, cfs, tenors)
@@ -161,28 +166,39 @@ The function receives a curve object and must return a scalar value. ForwardDiff
 
 Decompose sensitivities into base (risk-free) and credit spread components using `IR01` and `CS01`:
 
-```julia
-base = ZeroRateCurve([0.03, 0.03, 0.03, 0.03, 0.03], tenors)
+```@example sensitivities
+base   = ZeroRateCurve([0.03, 0.03, 0.03, 0.03, 0.03], tenors)
 credit = ZeroRateCurve([0.02, 0.02, 0.02, 0.02, 0.02], tenors)
 
 # Scalar IR01 and CS01
 ir01 = duration(IR01(), base, credit, cfs, tenors)
 cs01 = duration(CS01(), base, credit, cfs, tenors)
+(ir01, cs01)
+```
 
+```@example sensitivities
 # Key-rate decomposition (vectors)
 ir01s = duration(IR01(), KeyRates(), base, credit, cfs, tenors)
 cs01s = duration(CS01(), KeyRates(), base, credit, cfs, tenors)
+(ir01s, cs01s)
+```
 
+```@example sensitivities
 # Two-curve convexity — scalars by default
-conv = convexity(base, credit, cfs, tenors)
-# conv.base, conv.credit, conv.cross (all scalars)
+conv_2c = convexity(base, credit, cfs, tenors)
+# conv_2c.base, conv_2c.credit, conv_2c.cross (all scalars)
+```
 
+```@example sensitivities
 # Key-rate decomposition (matrices)
-conv_kr = convexity(KeyRates(), base, credit, cfs, tenors)
-# conv_kr.base, conv_kr.credit, conv_kr.cross (all matrices)
+conv_2c_kr = convexity(KeyRates(), base, credit, cfs, tenors)
+# conv_2c_kr.base, conv_2c_kr.credit, conv_2c_kr.cross (all matrices)
+```
 
+```@example sensitivities
 # Full two-curve sensitivities (always key-rate decomposition)
-result = sensitivities(base, credit, cfs, tenors)
+twocurve_result = sensitivities(base, credit, cfs, tenors)
+twocurve_result.base_durations
 ```
 
 The default two-curve valuation uses multiplicative discount factors: `V = Σ cf × base(t) × credit(t)`, which corresponds to additive rates.
@@ -191,20 +207,15 @@ The default two-curve valuation uses multiplicative discount factors: `V = Σ cf
 
 For fixed cashflows, IR01 and CS01 are identical because base and credit rates enter additively. A **credit-risky floating rate bond** breaks this symmetry — its coupons reset to the risk-free forward rate plus a fixed credit spread, so bumping base rates changes both coupon amounts and discount factors (partially canceling), while bumping credit rates only affects discounting:
 
-```julia
-base = ZeroRateCurve([0.03, 0.03, 0.03, 0.03, 0.03], tenors)
-credit = ZeroRateCurve([0.02, 0.02, 0.02, 0.02, 0.02], tenors)
-
-# Floating rate bond: coupon = risk-free forward + 200bp credit spread
-# Discounted at the combined base + credit rate
+```@example sensitivities
 spread = 0.02
-face = 100.0
+face   = 100.0
 
-result = sensitivities(base, credit) do base_curve, credit_curve
+floater_result = sensitivities(base, credit) do base_curve, credit_curve
     total = 0.0
     for t in 1:5
-        df_base = base_curve(Float64(t))
-        df_credit = credit_curve(Float64(t))
+        df_base      = base_curve(Float64(t))
+        df_credit    = credit_curve(Float64(t))
         df_base_prev = t == 1 ? 1.0 : base_curve(Float64(t - 1))
 
         # Coupon resets to risk-free forward rate + fixed credit spread
@@ -217,8 +228,8 @@ result = sensitivities(base, credit) do base_curve, credit_curve
     total
 end
 
-sum(result.base_durations)    # IR01 — small, coupon reset offsets base rate sensitivity
-sum(result.credit_durations)  # CS01 — larger, credit spread only affects discounting
+(IR01 = sum(floater_result.base_durations),
+ CS01 = sum(floater_result.credit_durations))
 ```
 
 Bumping base rates changes both the floating coupon amounts and the discount factors (partially canceling), while bumping credit rates only affects discounting. This asymmetry is why the IR01/CS01 decomposition matters for instruments with rate-dependent cashflows.
@@ -227,56 +238,55 @@ Bumping base rates changes both the floating coupon amounts and the discount fac
 
 DV01s are additive across positions, so a portfolio's DV01 vector equals the sum of individual DV01s:
 
-```julia
-zrc = ZeroRateCurve(rates, tenors)
+```@example sensitivities
+# Two bonds: 5-year 5% coupon and 5-year 3% coupon
+bond1_cfs   = [5.0, 5.0, 5.0, 5.0, 105.0]
+bond1_times = [1.0, 2.0, 3.0, 4.0, 5.0]
+bond2_cfs   = [3.0, 3.0, 3.0, 3.0, 103.0]
+bond2_times = [1.0, 2.0, 3.0, 4.0, 5.0]
 
 # Compute portfolio DV01 vector in a single AD pass
-# bond1_cfs, bond2_cfs are Vector{Cashflow} (from FinanceCore)
 portfolio_dv01 = duration(DV01(), KeyRates(), zrc) do curve
-    pv(curve, bond1_cfs) + pv(curve, bond2_cfs)
+    pv(curve, bond1_cfs, bond1_times) + pv(curve, bond2_cfs, bond2_times)
 end
 
 # Equivalently (but two AD passes):
 dv01_1 = duration(DV01(), KeyRates(), zrc, bond1_cfs, bond1_times)
 dv01_2 = duration(DV01(), KeyRates(), zrc, bond2_cfs, bond2_times)
-portfolio_dv01 ≈ dv01_1 .+ dv01_2
+
+(portfolio_dv01, dv01_1 .+ dv01_2, portfolio_dv01 ≈ dv01_1 .+ dv01_2)
 ```
 
 ### Example: Portfolio of Floating Rate Bonds
 
 Floating rate bonds have coupons that reset to the prevailing market rate, so their cashflows depend on the rate curve itself. The do-block captures this dependency through AD — differentiating through both the discount factors and the coupon amounts in a single pass:
 
-```julia
-using ActuaryUtilities, FinanceModels
-
-rates = [0.02, 0.025, 0.03, 0.035, 0.04, 0.042, 0.044, 0.046, 0.048, 0.05]
-tenors = collect(1.0:10.0)
-zrc = ZeroRateCurve(rates, tenors)
+```@example sensitivities
+flt_rates  = [0.02, 0.025, 0.03, 0.035, 0.04, 0.042, 0.044, 0.046, 0.048, 0.05]
+flt_tenors = collect(1.0:10.0)
+flt_zrc    = ZeroRateCurve(flt_rates, flt_tenors)
 
 # 10 floating rate bonds: maturities 1yr to 10yr, face 100 each,
 # annual coupons = 1yr forward rate + 50bp credit spread
-notionals = fill(100.0, 10)
+notionals  = fill(100.0, 10)
 maturities = 1:10
-spread = 0.005
+flt_spread = 0.005
 
 # The do-block receives the curve and returns the total present value
 # of all cashflows across the portfolio.
-# The curve is constructed once per AD evaluation — valuing all 10 bonds
-# inside a single do-block avoids rebuilding the curve for each bond.
-result = sensitivities(zrc) do curve
+floater_portfolio = sensitivities(flt_zrc) do curve
     total = 0.0
     for (notional, mat) in zip(notionals, maturities)
         # For each bond, loop over annual payment dates t = 1, 2, ..., maturity
         for t in 1:mat
-            # Discount factors: df = P(0,t), df_prev = P(0,t-1)
-            df = curve(Float64(t))
+            df      = curve(Float64(t))
             df_prev = t == 1 ? 1.0 : curve(Float64(t - 1))
 
             # 1yr simple forward rate from t-1 to t: F = P(0,t-1)/P(0,t) - 1
             fwd = df_prev / df - 1.0
 
             # Floating coupon PV: notional × (forward rate + spread) × P(0,t)
-            total += notional * (fwd + spread) * df
+            total += notional * (fwd + flt_spread) * df
 
             # Return principal at maturity
             t == mat && (total += notional * df)
@@ -285,8 +295,8 @@ result = sensitivities(zrc) do curve
     total
 end
 
-result.value       # portfolio present value (≈ 10 × 100 + spread premium)
-result.durations   # key rate durations — small, since floaters reset
+(value = floater_portfolio.value,
+ total_duration = sum(floater_portfolio.durations))
 ```
 
 Without the spread, a floater prices at par and has near-zero duration (coupons offset discount factor changes). The spread introduces duration because its fixed cashflows are rate-sensitive — similar to a portfolio of small fixed-rate annuities layered on top of the par-valued floaters.
@@ -328,26 +338,28 @@ Model parameter sensitivities (`∂V/∂a`, `∂V/∂σ`) are **not currently su
 
 For model parameter sensitivities, use finite differences as a workaround:
 
-```julia
+```@example sensitivities
 using FinanceModels: ShortRate, simulate
 using FinanceCore: discount
 using Random: Xoshiro
 
-rates = [0.03, 0.03, 0.03, 0.03, 0.03]
-tenors = [1.0, 2.0, 3.0, 4.0, 5.0]
-cfs = [5.0, 5.0, 5.0, 5.0, 105.0]
+mc_rates  = [0.03, 0.03, 0.03, 0.03, 0.03]
+mc_tenors = [1.0, 2.0, 3.0, 4.0, 5.0]
+mc_cfs    = [5.0, 5.0, 5.0, 5.0, 105.0]
 
 function mc_value(a, σ)
-    curve = ZeroRateCurve(rates, tenors)
-    hw = ShortRate.HullWhite(a, σ, curve)
-    scenarios = simulate(hw; n_scenarios=1000, timestep=1/12, horizon=6.0, rng=Xoshiro(42))
-    sum(pv(sc, cfs, tenors) for sc in scenarios) / 1000
+    curve     = ZeroRateCurve(mc_rates, mc_tenors)
+    hw        = ShortRate.HullWhite(a, σ, curve)
+    scenarios = simulate(hw; n_scenarios = 1000, timestep = 1/12, horizon = 6.0, rng = Xoshiro(42))
+    sum(pv(sc, mc_cfs, mc_tenors) for sc in scenarios) / 1000
 end
 
 # Finite-difference sensitivities
-ε = 1e-5
-dV_da = (mc_value(0.1 + ε, 0.01) - mc_value(0.1 - ε, 0.01)) / (2ε)   # mean reversion
-dV_dσ = (mc_value(0.1, 0.01 + ε) - mc_value(0.1, 0.01 - ε)) / (2ε)   # volatility (vega)
+ε       = 1e-5
+dV_da   = (mc_value(0.1 + ε, 0.01) - mc_value(0.1 - ε, 0.01)) / (2ε)   # mean reversion
+dV_dσ   = (mc_value(0.1, 0.01 + ε) - mc_value(0.1, 0.01 - ε)) / (2ε)   # volatility (vega)
+
+(dV_da, dV_dσ)
 ```
 
 !!! note
@@ -357,25 +369,18 @@ dV_dσ = (mc_value(0.1, 0.01 + ε) - mc_value(0.1, 0.01 - ε)) / (2ε)   # volat
 
 A Hull-White model calibrates its drift θ(t) to match an initial yield curve. When that curve is a `ZeroRateCurve`, you can compute how the Monte Carlo expected value responds to movements in the initial zero rates:
 
-```julia
-using ActuaryUtilities, FinanceModels
-using FinanceModels: ShortRate, simulate
-using FinanceCore: discount
-using Random
-
-rates = [0.03, 0.03, 0.03, 0.03, 0.03]
-tenors = [1.0, 2.0, 3.0, 4.0, 5.0]
-zrc = ZeroRateCurve(rates, tenors)
-
-cfs = [5.0, 5.0, 5.0, 5.0, 105.0]
-times = [1.0, 2.0, 3.0, 4.0, 5.0]
-
+```@example sensitivities
 # Key rate sensitivities of E[V] under Hull-White dynamics
-hw = ShortRate.HullWhite(0.1, 0.01, zrc)
-hw_result = sensitivities(hw, cfs, times; n_scenarios=500, timestep=1/12, horizon=6.0, rng=Xoshiro(42))
+hw_curve = ZeroRateCurve(mc_rates, mc_tenors)
+hw       = ShortRate.HullWhite(0.1, 0.01, hw_curve)
+hw_result = sensitivities(hw, mc_cfs, mc_tenors;
+                          n_scenarios = 500,
+                          timestep    = 1/12,
+                          horizon     = 6.0,
+                          rng         = Xoshiro(42))
 
-hw_result.durations   # key rate durations under stochastic dynamics
-hw_result.convexities # cross-convexity matrix
+(durations = hw_result.durations,
+ sum_durations = sum(hw_result.durations))
 ```
 
 This involves nested AD: the outer ForwardDiff differentiates w.r.t. zero rates, while Hull-White's θ(t) calibration internally uses ForwardDiff to compute instantaneous forward rates from the curve. ForwardDiff's [tag system](https://github.com/JuliaDiff/ForwardDiff.jl/issues/83) disambiguates the two differentiation passes automatically.
@@ -384,19 +389,15 @@ This involves nested AD: the outer ForwardDiff differentiates w.r.t. zero rates,
 
 The deterministic `ZeroRateCurve` and Hull-White MC valuations produce the same total duration for fixed cashflows (a consequence of the [risk-neutral pricing theorem](https://en.wikipedia.org/wiki/Risk-neutral_measure)), but decompose it across tenors differently:
 
-```julia
+```@example sensitivities
 # Deterministic: discount directly off the initial curve
-det_result = sensitivities(zrc, cfs, tenors)
+det_result = sensitivities(hw_curve, mc_cfs, mc_tenors)
 
-# Model-based: average across simulated rate paths
-hw = ShortRate.HullWhite(0.1, 0.01, zrc)
-hw_result = sensitivities(hw, cfs, times; n_scenarios=1000, timestep=1/12, horizon=6.0, rng=Xoshiro(42))
-
-det_result.durations  # [0.04, 0.09, 0.13, 0.16, 4.15]  (localized at each tenor)
-hw_result.durations   # [-1.01, 1.04, 1.70, 1.85, 0.99]  (redistributed across tenors)
-
-sum(det_result.durations) # 4.57  — total modified duration (= duration(zrc, cfs, tenors))
-sum(hw_result.durations)  # 4.57  — same total (risk-neutral guarantee)
+# Model-based: average across simulated rate paths (computed above as hw_result)
+(det_durations  = det_result.durations,
+ hw_durations   = hw_result.durations,
+ sum_det        = sum(det_result.durations),
+ sum_hw         = sum(hw_result.durations))
 ```
 
 **Why the totals match:** For fixed cashflows, E[V] = Σ cf_i × P(0, t_i) under any risk-neutral model ([Glasserman, 2003, Ch. 7](https://link.springer.com/book/10.1007/978-0-387-21617-1)), so a parallel shift of all zero rates produces the same ΔV regardless of whether we compute it by direct discounting or via Monte Carlo. This implies Σ KRD_det = Σ KRD_HW.
@@ -412,12 +413,20 @@ This phenomenon is well-established in derivatives pricing as "model-dependent G
 
 `ZeroRateCurve` accepts an optional third argument for the interpolation method:
 
-```julia
-zrc = ZeroRateCurve(rates, tenors)                              # default: MonotoneConvex
-zrc_pchip = ZeroRateCurve(rates, tenors, Spline.PCHIP())        # PCHIP
-zrc_lin = ZeroRateCurve(rates, tenors, Spline.Linear())          # linear
-zrc_cub = ZeroRateCurve(rates, tenors, Spline.Cubic())           # cubic spline
-zrc_aki = ZeroRateCurve(rates, tenors, Spline.Akima())           # Akima
+```@example sensitivities
+interp_rates  = [0.02, 0.03, 0.04, 0.05]
+interp_tenors = [1.0, 3.0, 5.0, 10.0]
+
+zrc_default = ZeroRateCurve(interp_rates, interp_tenors)                       # default: MonotoneConvex
+zrc_pchip   = ZeroRateCurve(interp_rates, interp_tenors, Spline.PCHIP())       # PCHIP
+zrc_lin     = ZeroRateCurve(interp_rates, interp_tenors, Spline.Linear())      # linear
+zrc_cub     = ZeroRateCurve(interp_rates, interp_tenors, Spline.Cubic())       # cubic spline
+zrc_aki     = ZeroRateCurve(interp_rates, interp_tenors, Spline.Akima())       # Akima
+
+# All can be passed into the same sensitivities API:
+interp_cfs = [3.0, 3.0, 3.0, 103.0]
+(default_durs = sensitivities(zrc_default, interp_cfs, interp_tenors).durations,
+ linear_durs  = sensitivities(zrc_lin,     interp_cfs, interp_tenors).durations)
 ```
 
 **MonotoneConvex** (`Spline.MonotoneConvex()`, default): Finance-aware interpolation ([Hagan & West, 2006](https://doi.org/10.1080/13504860600829233)). Guarantees positive continuous forward rates, best KRD locality among smooth methods, and fastest AD performance.
@@ -436,24 +445,22 @@ See the [FinanceModels interpolation guide](https://docs.juliaactuary.org/Financ
 
 AD sensitivities can be cross-validated against traditional finite-difference (bump-and-reprice) results. The AD approach gives exact derivatives in a single pass, while FD has O(ε²) truncation error:
 
-```@example sensitivities-validation
-using ActuaryUtilities, FinanceModels
-
-rates = [0.02, 0.03, 0.04, 0.05]
-tenors = [1.0, 3.0, 5.0, 10.0]
-zrc = ZeroRateCurve(rates, tenors)
-cfs = [3.0, 3.0, 3.0, 103.0]
+```@example sensitivities
+val_rates  = [0.02, 0.03, 0.04, 0.05]
+val_tenors = [1.0, 3.0, 5.0, 10.0]
+val_zrc    = ZeroRateCurve(val_rates, val_tenors)
+val_cfs    = [3.0, 3.0, 3.0, 103.0]
 
 # AD (exact) — use KeyRates() for the per-tenor vector
-ad_dv01 = duration(DV01(), KeyRates(), zrc, cfs, tenors)
+ad_dv01 = duration(DV01(), KeyRates(), val_zrc, val_cfs, val_tenors)
 
 # Finite difference (bump-and-reprice)
 ε = 1e-5
 fd_dv01 = map(1:4) do i
-    rates_up = copy(rates); rates_up[i] += ε
-    rates_dn = copy(rates); rates_dn[i] -= ε
-    v_up = pv(ZeroRateCurve(rates_up, tenors), cfs, tenors)
-    v_dn = pv(ZeroRateCurve(rates_dn, tenors), cfs, tenors)
+    rates_up      = copy(val_rates); rates_up[i] += ε
+    rates_dn      = copy(val_rates); rates_dn[i] -= ε
+    v_up = pv(ZeroRateCurve(rates_up, val_tenors), val_cfs, val_tenors)
+    v_dn = pv(ZeroRateCurve(rates_dn, val_tenors), val_cfs, val_tenors)
     -(v_up - v_dn) / (2ε) / 10_000
 end
 
@@ -465,29 +472,21 @@ end
 AD gives the instantaneous rate of change (the derivative), while `TransformedYield` lets you apply an actual finite shift and observe the PV change. Comparing the two is a useful sanity check — the AD-predicted change should closely match the actual change for small shifts:
 
 ```@example sensitivities
-using ActuaryUtilities, FinanceModels, FinanceCore
-
-rates = [0.02, 0.03, 0.04, 0.05]
-tenors = [1.0, 3.0, 5.0, 10.0]
-zrc = ZeroRateCurve(rates, tenors)
-cfs = [3.0, 3.0, 3.0, 103.0]
-
-# AD: exact DV01 per tenor
-ad_dv01 = duration(DV01(), KeyRates(), zrc, cfs, tenors)
-total_dv01 = sum(ad_dv01)
+# AD: total DV01 across all tenors — already in dollar-per-1bp units
+total_dv01 = sum(duration(DV01(), KeyRates(), val_zrc, val_cfs, val_tenors))
 
 # TransformedYield: actual PV change under a +1 bp parallel shift
-pv_base = present_value(zrc, cfs, tenors)
-shifted = zrc + (z, t) -> z + Continuous(0.0001)  # +1 bp
-pv_shifted = present_value(shifted, cfs, tenors)
+pv_base    = present_value(val_zrc, val_cfs, val_tenors)
+shifted    = val_zrc + (z, t) -> z + Continuous(0.0001)  # +1 bp
+pv_shifted = present_value(shifted, val_cfs, val_tenors)
 actual_change = -(pv_shifted - pv_base)
 
-# DV01 predicts the per-unit change; scale to 1 bp = 0.0001
-predicted_change = total_dv01 / 10_000
+# DV01 is per-1bp, so it directly predicts the 1bp PV change
+predicted_change = total_dv01
 
-(; predicted_change = round(predicted_change, digits=6),
-   actual_change = round(actual_change, digits=6),
-   ratio = round(actual_change / predicted_change, digits=6))
+(; predicted_change = round(predicted_change, digits = 6),
+   actual_change    = round(actual_change,    digits = 6),
+   ratio            = round(actual_change / predicted_change, digits = 6))
 ```
 
 The ratio is very close to 1.0, confirming AD and TransformedYield agree. The small deviation is due to convexity — DV01 is a first-order (linear) approximation, while the actual PV change includes higher-order effects.
