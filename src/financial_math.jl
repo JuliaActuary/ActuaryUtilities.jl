@@ -288,7 +288,9 @@ julia> convexity(0.03,my_lump_sum_value)
 ```
 """
 function duration(::Macaulay, yield, cfs, times)
-    return sum(FinanceCore.timepoint.(cfs, times) .* price.(yield, cfs, times) / price(yield, cfs, times))
+    cfs = vec(cfs)
+    weights = FinanceCore.present_value.(yield, cfs, times)
+    return sum(FinanceCore.timepoint.(cfs, times) .* weights) / sum(weights)
 end
 
 function duration(::Modified, yield, cfs, times)
