@@ -749,7 +749,7 @@ _standard_valuation_2curve(cfs, times) = (base, credit) -> sum(cf * base(t) * cr
 Scalar modified duration for any `AbstractYieldModel` evaluated against a KRD
 knot grid. Equivalent to `sum(duration(KeyRates(), ..., tenors))`.
 
-See [`duration(::KeyRates, ...)`](@ref) for the full key-rate decomposition.
+Use [`KeyRates`](@ref) to obtain the per-knot vector decomposition.
 
 # Example
 ```julia
