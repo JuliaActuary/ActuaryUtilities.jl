@@ -824,8 +824,6 @@ function duration(::KeyRates, curve::AYM, tenors, cfs::AbstractVector{<:FinanceC
     amounts, times = _extract_cfs_times(cfs)
     return duration(KeyRates(), curve, tenors, amounts, times)
 end
-duration(valuation_fn::Function, ::KeyRates, curve::AYM, tenors) =
-    duration(KeyRates(), valuation_fn, curve, tenors)
 
 """
     duration(::DV01, valuation_fn, curve::AbstractYieldModel, tenors) -> scalar
@@ -846,8 +844,6 @@ function duration(::DV01, curve::AYM, tenors, cfs::AbstractVector{<:FinanceCore.
     amounts, times = _extract_cfs_times(cfs)
     return duration(DV01(), curve, tenors, amounts, times)
 end
-duration(valuation_fn::Function, ::DV01, curve::AYM, tenors) =
-    duration(DV01(), valuation_fn, curve, tenors)
 
 function duration(::DV01, ::KeyRates, valuation_fn::Function, curve::AYM, tenors)
     ad = _keyrate_ad(curve, tenors, valuation_fn)
@@ -860,8 +856,6 @@ function duration(::DV01, ::KeyRates, curve::AYM, tenors, cfs::AbstractVector{<:
     amounts, times = _extract_cfs_times(cfs)
     return duration(DV01(), KeyRates(), curve, tenors, amounts, times)
 end
-duration(valuation_fn::Function, ::DV01, ::KeyRates, curve::AYM, tenors) =
-    duration(DV01(), KeyRates(), valuation_fn, curve, tenors)
 
 """
     duration(::IR01, valuation_fn, base::AbstractYieldModel, credit::AbstractYieldModel, tenors) -> scalar
@@ -884,8 +878,6 @@ function duration(::IR01, base::AYM, credit::AYM, tenors, cfs::AbstractVector{<:
     amounts, times = _extract_cfs_times(cfs)
     return duration(IR01(), base, credit, tenors, amounts, times)
 end
-duration(valuation_fn::Function, ::IR01, base::AYM, credit::AYM, tenors) =
-    duration(IR01(), valuation_fn, base, credit, tenors)
 
 function duration(::IR01, ::KeyRates, valuation_fn::Function, base::AYM, credit::AYM, tenors)
     ad = _keyrate_ad(base, credit, tenors, valuation_fn)
@@ -898,8 +890,6 @@ function duration(::IR01, ::KeyRates, base::AYM, credit::AYM, tenors, cfs::Abstr
     amounts, times = _extract_cfs_times(cfs)
     return duration(IR01(), KeyRates(), base, credit, tenors, amounts, times)
 end
-duration(valuation_fn::Function, ::IR01, ::KeyRates, base::AYM, credit::AYM, tenors) =
-    duration(IR01(), KeyRates(), valuation_fn, base, credit, tenors)
 
 function duration(::CS01, valuation_fn::Function, base::AYM, credit::AYM, tenors)
     return sum(duration(CS01(), KeyRates(), valuation_fn, base, credit, tenors))
@@ -911,8 +901,6 @@ function duration(::CS01, base::AYM, credit::AYM, tenors, cfs::AbstractVector{<:
     amounts, times = _extract_cfs_times(cfs)
     return duration(CS01(), base, credit, tenors, amounts, times)
 end
-duration(valuation_fn::Function, ::CS01, base::AYM, credit::AYM, tenors) =
-    duration(CS01(), valuation_fn, base, credit, tenors)
 
 function duration(::CS01, ::KeyRates, valuation_fn::Function, base::AYM, credit::AYM, tenors)
     ad = _keyrate_ad(base, credit, tenors, valuation_fn)
@@ -925,8 +913,15 @@ function duration(::CS01, ::KeyRates, base::AYM, credit::AYM, tenors, cfs::Abstr
     amounts, times = _extract_cfs_times(cfs)
     return duration(CS01(), KeyRates(), base, credit, tenors, amounts, times)
 end
-duration(valuation_fn::Function, ::CS01, ::KeyRates, base::AYM, credit::AYM, tenors) =
-    duration(CS01(), KeyRates(), valuation_fn, base, credit, tenors)
+
+# Do-block-first forwarders (support `f(args...) do x; ...; end` syntax)
+duration(vf::Function, ::KeyRates, curve::AYM, tenors)         = duration(KeyRates(), vf, curve, tenors)
+duration(vf::Function, ::DV01,     curve::AYM, tenors)         = duration(DV01(),     vf, curve, tenors)
+duration(vf::Function, ::DV01, ::KeyRates, curve::AYM, tenors) = duration(DV01(), KeyRates(), vf, curve, tenors)
+duration(vf::Function, ::IR01, base::AYM, credit::AYM, tenors) = duration(IR01(),     vf, base, credit, tenors)
+duration(vf::Function, ::IR01, ::KeyRates, base::AYM, credit::AYM, tenors) = duration(IR01(), KeyRates(), vf, base, credit, tenors)
+duration(vf::Function, ::CS01, base::AYM, credit::AYM, tenors) = duration(CS01(),     vf, base, credit, tenors)
+duration(vf::Function, ::CS01, ::KeyRates, base::AYM, credit::AYM, tenors) = duration(CS01(), KeyRates(), vf, base, credit, tenors)
 
 """
     convexity(valuation_fn, curve::AbstractYieldModel, tenors) -> scalar
@@ -938,6 +933,9 @@ duration(valuation_fn::Function, ::CS01, ::KeyRates, base::AYM, credit::AYM, ten
 
 Key-rate convexity (matrix) and scalar convexity for any `AbstractYieldModel`
 or pair. Mirrors `duration` but returns ∂²V/∂rᵢ∂rⱼ rather than ∂V/∂rᵢ.
+
+If you also want the durations / DV01s, prefer [`sensitivities`](@ref) — it returns
+the value, gradient, and Hessian from one AD pass at the same cost.
 """
 function convexity(valuation_fn::Function, curve::AYM, tenors)
     return sum(convexity(KeyRates(), valuation_fn, curve, tenors))
@@ -961,8 +959,6 @@ function convexity(::KeyRates, curve::AYM, tenors, cfs::AbstractVector{<:Finance
     amounts, times = _extract_cfs_times(cfs)
     return convexity(KeyRates(), curve, tenors, amounts, times)
 end
-convexity(valuation_fn::Function, ::KeyRates, curve::AYM, tenors) =
-    convexity(KeyRates(), valuation_fn, curve, tenors)
 
 function convexity(valuation_fn::Function, base::AYM, credit::AYM, tenors)
     kr = convexity(KeyRates(), valuation_fn, base, credit, tenors)
@@ -991,8 +987,10 @@ function convexity(::KeyRates, base::AYM, credit::AYM, tenors, cfs::AbstractVect
     amounts, times = _extract_cfs_times(cfs)
     return convexity(KeyRates(), base, credit, tenors, amounts, times)
 end
-convexity(valuation_fn::Function, ::KeyRates, base::AYM, credit::AYM, tenors) =
-    convexity(KeyRates(), valuation_fn, base, credit, tenors)
+
+# Do-block-first forwarders (support `f(args...) do x; ...; end` syntax)
+convexity(vf::Function, ::KeyRates, curve::AYM, tenors)                    = convexity(KeyRates(), vf, curve, tenors)
+convexity(vf::Function, ::KeyRates, base::AYM, credit::AYM, tenors)        = convexity(KeyRates(), vf, base, credit, tenors)
 
 """
     sensitivities(valuation_fn, curve::AbstractYieldModel, tenors) -> NamedTuple
@@ -1035,8 +1033,6 @@ function sensitivities(::DV01, curve::AYM, tenors, cfs::AbstractVector{<:Finance
     amounts, times = _extract_cfs_times(cfs)
     return sensitivities(DV01(), curve, tenors, amounts, times)
 end
-sensitivities(valuation_fn::Function, ::DV01, curve::AYM, tenors) =
-    sensitivities(DV01(), valuation_fn, curve, tenors)
 
 function sensitivities(valuation_fn::Function, base::AYM, credit::AYM, tenors)
     ad = _keyrate_ad(base, credit, tenors, valuation_fn; order = 2)
@@ -1079,8 +1075,10 @@ function sensitivities(::DV01, base::AYM, credit::AYM, tenors, cfs::AbstractVect
     amounts, times = _extract_cfs_times(cfs)
     return sensitivities(DV01(), base, credit, tenors, amounts, times)
 end
-sensitivities(valuation_fn::Function, ::DV01, base::AYM, credit::AYM, tenors) =
-    sensitivities(DV01(), valuation_fn, base, credit, tenors)
+
+# Do-block-first forwarders (support `f(args...) do x; ...; end` syntax)
+sensitivities(vf::Function, ::DV01, curve::AYM, tenors)                    = sensitivities(DV01(), vf, curve, tenors)
+sensitivities(vf::Function, ::DV01, base::AYM, credit::AYM, tenors)        = sensitivities(DV01(), vf, base, credit, tenors)
 
 ## Hull-White convenience methods
 #
@@ -1089,38 +1087,18 @@ sensitivities(valuation_fn::Function, ::DV01, base::AYM, credit::AYM, tenors) =
 
 const HW = FinanceModels.ShortRate.HullWhite
 
-# Fixed cashflows: sensitivities(hw, tenors, cfs, times; ...)
-function sensitivities(hw::HW, tenors, cfs, times;
-                       n_scenarios=1000, timestep=1/12, horizon=nothing,
-                       rng=Random.default_rng())
-    h = horizon === nothing ? maximum(times) + 1.0 : Float64(horizon)
-    sensitivities(hw.curve, tenors) do curve
-        hw_new = FinanceModels.ShortRate.HullWhite(hw.a, hw.σ, curve)
-        scenarios = FinanceModels.simulate(hw_new; n_scenarios, timestep, horizon=h, rng)
-        sum(FinanceCore.pv(sc, cfs, times) for sc in scenarios) / n_scenarios
-    end
+# Rebuild HW under a perturbed curve and produce its scenario set under the same dynamics.
+function _hw_paths(hw::HW, curve; n_scenarios, timestep, horizon, rng)
+    hw_new = FinanceModels.ShortRate.HullWhite(hw.a, hw.σ, curve)
+    return FinanceModels.simulate(hw_new; n_scenarios, timestep, horizon, rng)
 end
 
-# Do-block: sensitivities(hw, tenors; ...) do scenarios ... end
+# Do-block primary forms
 function sensitivities(valuation_fn::Function, hw::HW, tenors;
                        n_scenarios=1000, timestep=1/12, horizon=30.0,
                        rng=Random.default_rng())
     sensitivities(hw.curve, tenors) do curve
-        hw_new = FinanceModels.ShortRate.HullWhite(hw.a, hw.σ, curve)
-        scenarios = FinanceModels.simulate(hw_new; n_scenarios, timestep, horizon, rng)
-        valuation_fn(scenarios)
-    end
-end
-
-# DV01 variants
-function sensitivities(::DV01, hw::HW, tenors, cfs, times;
-                       n_scenarios=1000, timestep=1/12, horizon=nothing,
-                       rng=Random.default_rng())
-    h = horizon === nothing ? maximum(times) + 1.0 : Float64(horizon)
-    sensitivities(DV01(), hw.curve, tenors) do curve
-        hw_new = FinanceModels.ShortRate.HullWhite(hw.a, hw.σ, curve)
-        scenarios = FinanceModels.simulate(hw_new; n_scenarios, timestep, horizon=h, rng)
-        sum(FinanceCore.pv(sc, cfs, times) for sc in scenarios) / n_scenarios
+        valuation_fn(_hw_paths(hw, curve; n_scenarios, timestep, horizon, rng))
     end
 end
 
@@ -1128,9 +1106,26 @@ function sensitivities(valuation_fn::Function, ::DV01, hw::HW, tenors;
                        n_scenarios=1000, timestep=1/12, horizon=30.0,
                        rng=Random.default_rng())
     sensitivities(DV01(), hw.curve, tenors) do curve
-        hw_new = FinanceModels.ShortRate.HullWhite(hw.a, hw.σ, curve)
-        scenarios = FinanceModels.simulate(hw_new; n_scenarios, timestep, horizon, rng)
-        valuation_fn(scenarios)
+        valuation_fn(_hw_paths(hw, curve; n_scenarios, timestep, horizon, rng))
+    end
+end
+
+# Cashflow-form wrappers that delegate to the do-block forms above
+function sensitivities(hw::HW, tenors, cfs, times;
+                       n_scenarios=1000, timestep=1/12, horizon=nothing,
+                       rng=Random.default_rng())
+    h = horizon === nothing ? maximum(times) + 1.0 : Float64(horizon)
+    sensitivities(hw, tenors; n_scenarios, timestep, horizon=h, rng) do scenarios
+        sum(FinanceCore.pv(sc, cfs, times) for sc in scenarios) / n_scenarios
+    end
+end
+
+function sensitivities(::DV01, hw::HW, tenors, cfs, times;
+                       n_scenarios=1000, timestep=1/12, horizon=nothing,
+                       rng=Random.default_rng())
+    h = horizon === nothing ? maximum(times) + 1.0 : Float64(horizon)
+    sensitivities(DV01(), hw, tenors; n_scenarios, timestep, horizon=h, rng) do scenarios
+        sum(FinanceCore.pv(sc, cfs, times) for sc in scenarios) / n_scenarios
     end
 end
 
