@@ -1083,3 +1083,98 @@ end
     kr_conv = sum(convexity(KeyRates(), zrc, cfs, times))
     @test vf_conv ≈ kr_conv atol = 1e-10
 end
+
+# Custom AbstractYieldModel: a composite of two flat curves, multiplicative in
+# discount space. Has no `.rates`/`.tenors`/`.spline` field, so the only way
+# AU can compute KRDs is via TenorShift bumps over the curve's own `discount`.
+struct CompositeTwoFlatYield{A, B} <: FM.Yield.AbstractYieldModel
+    base::A
+    spread::B
+end
+FC.discount(c::CompositeTwoFlatYield, t) = FC.discount(c.base, t) * FC.discount(c.spread, t)
+
+@testset "Custom AbstractYieldModel: KRD/IR01/CS01 on a non-ZRC curve" begin
+    base = FM.Yield.Constant(FC.Continuous(0.04))
+    spread = FM.Yield.Constant(FC.Continuous(0.012))
+    curve = CompositeTwoFlatYield(base, spread)
+
+    tenors = [0.25, 0.5, 1.0, 2.0, 3.0, 5.0, 7.0, 10.0, 15.0, 20.0, 30.0]
+    cfs = vcat(fill(5.0, 29), [105.0])
+    times = collect(1.0:30.0)
+    pv(c) = sum(cf * FC.discount(c, t) for (cf, t) in zip(cfs, times))
+
+    @testset "scalar duration matches sum of KRDs" begin
+        sd = duration(pv, curve, tenors)
+        krds = duration(KeyRates(), pv, curve, tenors)
+        @test sd ≈ sum(krds) atol = 1e-10
+    end
+
+    @testset "do-block and cashflow forms agree" begin
+        krds_db = duration(KeyRates(), curve, tenors) do c
+            pv(c)
+        end
+        krds_cf = duration(KeyRates(), curve, tenors, cfs, times)
+        @test krds_db ≈ krds_cf atol = 1e-10
+    end
+
+    @testset "scalar matches parallel-shift modified duration" begin
+        # Total rate is 5.2% continuous; on annual coupon CFs, modified ≈ Macaulay.
+        rate = 0.04 + 0.012
+        dfs = [exp(-rate * t) for t in times]
+        V = sum(cf * df for (cf, df) in zip(cfs, dfs))
+        mac = sum(t * cf * df for (t, cf, df) in zip(times, cfs, dfs)) / V
+        @test duration(pv, curve, tenors) ≈ mac atol = 1e-6
+    end
+
+    @testset "DV01" begin
+        dv01 = duration(DV01(), pv, curve, tenors)
+        krd_dv01 = duration(DV01(), KeyRates(), pv, curve, tenors)
+        @test dv01 ≈ sum(krd_dv01) atol = 1e-10
+        @test all(krd_dv01 .≥ 0)
+    end
+
+    @testset "IR01 ≈ CS01 ≈ DV01 (flat additive case)" begin
+        # Per the docstring: in a flat additive decomposition, bumping base
+        # alone, credit alone, or the composite all shift the total zero rate
+        # by 1bp — so IR01 ≈ CS01 ≈ DV01 individually.
+        pv2c(b, c) = sum(cf * FC.discount(b, t) * FC.discount(c, t) for (cf, t) in zip(cfs, times))
+        ir01 = duration(IR01(), pv2c, base, spread, tenors)
+        cs01 = duration(CS01(), pv2c, base, spread, tenors)
+        dv01 = duration(DV01(), pv, curve, tenors)
+        @test ir01 ≈ cs01 atol = 1e-10
+        @test ir01 ≈ dv01 atol = 1e-10
+    end
+
+    @testset "convexity matrix symmetric, scalar = sum" begin
+        cmat = convexity(KeyRates(), pv, curve, tenors)
+        @test cmat ≈ cmat' atol = 1e-10
+        @test convexity(pv, curve, tenors) ≈ sum(cmat) atol = 1e-10
+    end
+
+    @testset "sensitivities bundle" begin
+        r = sensitivities(curve, tenors, cfs, times)
+        @test r.value ≈ pv(curve) atol = 1e-10        # exact baseline; no resampling
+        @test r.durations ≈ duration(KeyRates(), pv, curve, tenors) atol = 1e-10
+        @test sum(r.durations) ≈ duration(pv, curve, tenors) atol = 1e-10
+        @test r.convexities ≈ r.convexities' atol = 1e-10
+
+        r_dv01 = sensitivities(DV01(), curve, tenors, cfs, times)
+        @test r_dv01.dv01s ≈ duration(DV01(), KeyRates(), pv, curve, tenors) atol = 1e-10
+    end
+
+    @testset "two-curve sensitivities" begin
+        pv2c(b, c) = sum(cf * FC.discount(b, t) * FC.discount(c, t) for (cf, t) in zip(cfs, times))
+        r = sensitivities(pv2c, base, spread, tenors)
+        @test r.value ≈ pv2c(base, spread) atol = 1e-10
+        @test r.base_durations ≈ r.credit_durations atol = 1e-10   # additive ⇒ symmetric
+    end
+
+    @testset "ZRC promotion equivalence (Linear spline)" begin
+        # With Spline.Linear, ZRC's KRDs match TenorShift+hat exactly because
+        # linear interpolation in zero-rate space ≡ triangular-hat bumps.
+        zrc = FM.Yield.ZeroRateCurve(curve, tenors, spline = FM.Spline.Linear())
+        krds_zrc = duration(KeyRates(), pv, zrc)
+        krds_custom = duration(KeyRates(), pv, curve, tenors)
+        @test krds_custom ≈ krds_zrc atol = 1e-10
+    end
+end
