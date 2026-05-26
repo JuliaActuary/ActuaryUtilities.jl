@@ -1179,7 +1179,7 @@ FC.discount(c::CompositeTwoFlatYield, t) = FC.discount(c.base, t) * FC.discount(
         # With Spline.Linear, ZRC's KRDs match TenorShift+hat exactly because
         # linear interpolation in zero-rate space ≡ triangular-hat bumps.
         zrc = FM.Yield.ZeroRateCurve(curve, tenors, spline = FM.Spline.Linear())
-        krds_zrc = duration(KeyRates(), pv, zrc, zrc.tenors)
+        krds_zrc = duration(KeyRates(), pv, zrc, tenors)
         krds_custom = duration(KeyRates(), pv, curve, tenors)
         @test krds_custom ≈ krds_zrc atol = 1e-10
     end
