@@ -4,13 +4,13 @@
 
 ### Overview
 
-The key-rate sensitivity API (`duration(KeyRates(), …)`, `convexity(KeyRates(), …)`, `sensitivities`, `IR01`, `CS01`, two-curve variants) now takes the **KRD knot grid as a required positional argument**. There is no longer a `ZeroRateCurve`-specific dispatch that pulled the grid implicitly from `zrc.tenors`.
+The key-rate sensitivity API (`duration`, `convexity`, `sensitivities`, with `KeyRates`, `IR01`, `CS01`, and two-curve variants) now carries the KRD knot grid on the `KeyRates` marker itself: `KeyRates(tenors)`. The previous `ZeroRateCurve`-specific dispatch that pulled the grid implicitly from `zrc.tenors` is gone — `KeyRates(tenors)` is now the single uniform way to specify the knot grid.
 
 The AD pathway is also rewritten: it now layers a triangular-hat zero-rate bump on top of the user's curve via `FinanceModels.Yield.TenorShift` rather than rebuilding the curve from AD-tagged rates. This works on any `AbstractYieldModel` — composites, UFR extrapolators, fitted Nelson-Siegel models, etc. — without requiring the user to first convert to `ZeroRateCurve`.
 
 ### API Changes
 
-**Breaking — vector / matrix KRD calls now require an explicit `tenors` argument.** The migration is mechanical: insert the knot grid immediately after the curve.
+**Breaking — vector / matrix key-rate calls now require `KeyRates(tenors)` carrying the knot grid.** The migration is a one-symbol replacement: `KeyRates()` → `KeyRates(tenors)`, and any trailing `tenors` argument falls out of the call. `sensitivities` also adopts the `KeyRates(tenors)` marker for uniformity.
 
 ```julia
 # v5.6
@@ -21,21 +21,22 @@ sensitivities(zrc, cfs, times)
 duration(IR01(), KeyRates(), base, credit, cfs, times)
 sensitivities(hw, cfs, times)                       # Hull-White MC
 
-# v5.7 (typical migration: use zrc.tenors)
-duration(KeyRates(), zrc, zrc.tenors, cfs, times)
-duration(DV01(), KeyRates(), zrc, zrc.tenors, cfs, times)
-convexity(KeyRates(), zrc, zrc.tenors, cfs, times)
-sensitivities(zrc, zrc.tenors, cfs, times)
-duration(IR01(), KeyRates(), base, credit, zrc.tenors, cfs, times)
-sensitivities(hw, zrc.tenors, cfs, times)
+# v5.7 (typical migration: use zrc.tenors as the grid)
+tenors = zrc.tenors
+duration(KeyRates(tenors), zrc, cfs, times)
+duration(DV01(), KeyRates(tenors), zrc, cfs, times)
+convexity(KeyRates(tenors), zrc, cfs, times)
+sensitivities(KeyRates(tenors), zrc, cfs, times)
+duration(IR01(), KeyRates(tenors), base, credit, cfs, times)
+sensitivities(KeyRates(tenors), hw, cfs, times)
 ```
 
-You can also pass any other knot grid — KRD buckets are now an explicit modeling choice, not tied to the curve's storage tenors:
+You can pass any knot grid — KRD buckets are now an explicit modeling choice, not tied to the curve's storage tenors:
 
 ```julia
 # A curve fit on monthly observations, KRDs reported at FRTB buckets
 FRTB = [0.25, 0.5, 1, 2, 3, 5, 10, 15, 20, 30]
-duration(KeyRates(), pv, fitted_curve, FRTB)
+duration(KeyRates(FRTB), pv, fitted_curve)
 ```
 
 **Non-breaking — scalar duration / convexity / DV01 calls** fall through to the generic finite-difference scalar path and continue to work without `tenors`:
@@ -51,9 +52,9 @@ Numerical values agree with the v5.6 AD-based scalars to FD precision (~1e-6).
 
 **Per-knot KRDs may shift slightly for non-Linear-spline `ZeroRateCurve` inputs.** The new AD path uses triangular-hat bumps; the old path propagated AD through the curve's spline. For `Spline.Linear()` ZRCs the answers are bitwise identical. For `Spline.MonotoneConvex()` (the default), `PCHIP`, `Cubic`, etc., per-knot KRDs differ by sub-bp on discount factors at typical knot spacing. **Sum of KRDs, scalar modified duration, and parallel-shift sensitivity are all invariant.** The new convention matches the textbook KRD definition and is independent of the curve's interpolator choice.
 
-**Hull-White** no longer requires `hw.curve` to be a `ZeroRateCurve`. Any `AbstractYieldModel` works, and `tenors` is supplied at the `sensitivities(hw, tenors, cfs, times)` call site.
+**Hull-White** no longer requires `hw.curve` to be a `ZeroRateCurve`. Any `AbstractYieldModel` works, and the knot grid is supplied via `KeyRates(tenors)` at the call site: `sensitivities(KeyRates(tenors), hw, cfs, times)`.
 
-**Two-curve API:** the previous `ArgumentError` on mismatched `base.tenors != credit.tenors` is gone — supply your own knot grid and the two curves can have any storage structure.
+**Two-curve API:** the previous `ArgumentError` on mismatched `base.tenors != credit.tenors` is gone — supply your own knot grid via `KeyRates(tenors)` and the two curves can have any storage structure.
 
 ## v3 to v4
 

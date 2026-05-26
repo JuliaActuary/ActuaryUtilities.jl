@@ -41,7 +41,7 @@ zrc = ZeroRateCurve(rates, tenors)
 cfs = [5.0, 5.0, 5.0, 5.0, 105.0]
 
 # All key rate sensitivities in one AD pass
-result = sensitivities(zrc, cfs, tenors)
+result = sensitivities(KeyRates(tenors), zrc, cfs, tenors)
 result.value       # present value
 result.durations   # key rate durations (vector)
 result.convexities # cross-convexity matrix
@@ -56,7 +56,7 @@ result.convexities # cross-convexity matrix
 using FinanceModels: ShortRate
 
 hw = ShortRate.HullWhite(0.1, 0.01, zrc)
-hw_result = sensitivities(hw, cfs, tenors; n_scenarios=1000, rng=Xoshiro(42))
+hw_result = sensitivities(KeyRates(tenors), hw, cfs, tenors; n_scenarios=1000, rng=Xoshiro(42))
 hw_result.durations   # key rate durations under stochastic dynamics
 ```
 

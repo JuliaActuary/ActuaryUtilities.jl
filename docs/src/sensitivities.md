@@ -9,7 +9,7 @@ The AD pathway layers a triangular-hat zero-rate bump on top of the user's curve
 Every key-rate API takes the **curve** and an **explicit `tenors` vector**:
 
 ```julia
-duration(KeyRates(), curve, knots, cfs, times)
+duration(KeyRates(knots), curve, cfs, times)
 ```
 
 The KRD knot grid is a separate modeling choice from any tenor structure baked into the curve itself. For a `ZeroRateCurve`, `zrc.tenors` is the natural default; for other curves you supply your preferred bucket convention (Bloomberg, FRTB, BMA SBA, etc.).
@@ -43,27 +43,27 @@ dv01 = duration(DV01(), zrc, tenors, cfs, tenors)
 conv = convexity(zrc, tenors, cfs, tenors)
 ```
 
-To get the full key-rate decomposition (vectors/matrices), use `KeyRates()`:
+To get the full key-rate decomposition (vectors/matrices), use `KeyRates(tenors)`:
 
 ```@example sensitivities
 # Key rate durations (modified): vector of -∂V/∂rᵢ / V
-krds = duration(KeyRates(), zrc, tenors, cfs, tenors)
+krds = duration(KeyRates(tenors), zrc, cfs, tenors)
 ```
 
 ```@example sensitivities
 # Key rate DV01s: vector of -∂V/∂rᵢ / 10000
-dv01s = duration(DV01(), KeyRates(), zrc, tenors, cfs, tenors)
+dv01s = duration(DV01(), KeyRates(tenors), zrc, cfs, tenors)
 ```
 
 ```@example sensitivities
 # Key rate convexity matrix: ∂²V/∂rᵢ∂rⱼ / V
-conv_matrix = convexity(KeyRates(), zrc, tenors, cfs, tenors)
+conv_matrix = convexity(KeyRates(tenors), zrc, cfs, tenors)
 ```
 
 For a complete set of key-rate results in a single AD pass, use `sensitivities`:
 
 ```@example sensitivities
-result = sensitivities(zrc, tenors, cfs, tenors)
+result = sensitivities(KeyRates(tenors), zrc, cfs, tenors)
 # result.value       — present value
 # result.durations   — key rate durations (modified) — vector
 # result.convexities — cross-convexity matrix — matrix
@@ -72,7 +72,7 @@ result
 
 ```@example sensitivities
 # For DV01s instead of durations:
-dv01_result = sensitivities(DV01(), zrc, tenors, cfs, tenors)
+dv01_result = sensitivities(DV01(), KeyRates(tenors), zrc, cfs, tenors)
 # dv01_result.value       — present value
 # dv01_result.dv01s       — key rate DV01s — vector
 # dv01_result.convexities — cross-convexity matrix — matrix
@@ -92,7 +92,7 @@ b = duration(zrc, tenors, [5.0, 5.0, 5.0, 5.0, 105.0], [1.0, 2.0, 3.0, 4.0, 5.0]
 (a, b, a ≈ b)
 ```
 
-The same dispatch works with all method variants — `KeyRates()`, `DV01()`, two-curve `IR01()`/`CS01()`, `convexity`, and `sensitivities`.
+The same dispatch works with all method variants — `KeyRates(tenors)`, `DV01()`, two-curve `IR01()`/`CS01()`, `convexity`, and `sensitivities`.
 
 ## Any AbstractYieldModel — no resampling required
 
@@ -101,7 +101,7 @@ Because the AD path is curve-agnostic, you can compute key rates directly agains
 ```@example sensitivities
 ns        = Yield.NelsonSiegel(1.0, 0.04, -0.02, 0.01)
 ns_knots  = [1.0, 2.0, 5.0, 10.0, 20.0]
-ns_result = sensitivities(ns, ns_knots,
+ns_result = sensitivities(KeyRates(ns_knots), ns,
                           [5.0, 5.0, 5.0, 5.0, 105.0], [1.0, 2.0, 5.0, 10.0, 20.0])
 ns_result.durations
 ```
@@ -110,9 +110,9 @@ The Nelson-Siegel parameters stay fixed; only the layered zero-rate bumps move u
 
 ## Scalar vs Key-Rate Decomposition
 
-By default, `duration` and `convexity` (without `KeyRates()`) return **scalars** — the total modified duration, DV01, or convexity. This is consistent with the yield-based API (`duration(0.03, cfs, times)`).
+By default, `duration` and `convexity` (without `KeyRates`) return **scalars** — the total modified duration, DV01, or convexity. This is consistent with the yield-based API (`duration(0.03, cfs, times)`).
 
-To obtain the per-tenor decomposition, pass `KeyRates()` as the first argument:
+To obtain the per-tenor decomposition, pass `KeyRates(tenors)` as the first argument:
 
 ```@example sensitivities
 # Scalar (default) — same as sum of key-rate decomposition
@@ -121,9 +121,9 @@ scalar_dv01  = duration(DV01(), zrc, tenors, cfs, tenors)
 scalar_conv  = convexity(zrc, tenors, cfs, tenors)
 
 # Key-rate decomposition
-vector_dur   = duration(KeyRates(), zrc, tenors, cfs, tenors)
-vector_dv01  = duration(DV01(), KeyRates(), zrc, tenors, cfs, tenors)
-matrix_conv  = convexity(KeyRates(), zrc, tenors, cfs, tenors)
+vector_dur   = duration(KeyRates(tenors), zrc, cfs, tenors)
+vector_dv01  = duration(DV01(), KeyRates(tenors), zrc, cfs, tenors)
+matrix_conv  = convexity(KeyRates(tenors), zrc, cfs, tenors)
 
 (scalar_dur, sum(vector_dur))
 ```
@@ -131,7 +131,7 @@ matrix_conv  = convexity(KeyRates(), zrc, tenors, cfs, tenors)
 The scalar value equals the sum of the key-rate decomposition:
 
 ```@example sensitivities
-duration(zrc, tenors, cfs, tenors) ≈ sum(duration(KeyRates(), zrc, tenors, cfs, tenors))
+duration(zrc, tenors, cfs, tenors) ≈ sum(duration(KeyRates(tenors), zrc, cfs, tenors))
 ```
 
 For a flat curve, the scalar modified duration matches the yield-based API:
@@ -157,7 +157,7 @@ For instruments whose cashflows depend on the rate environment (callable bonds, 
 
 ```@example sensitivities
 # Callable bond: key rate durations (vector)
-callable_krds = duration(KeyRates(), zrc, tenors) do curve
+callable_krds = duration(KeyRates(tenors), zrc) do curve
     ncv = pv(curve, cfs, tenors)
     called_value = pv(curve, cfs[1:3], tenors[1:3]) + 102.0 * curve(3.0)
     min(ncv, called_value)
@@ -191,8 +191,8 @@ cs01 = duration(CS01(), base, credit, tenors, cfs, tenors)
 
 ```@example sensitivities
 # Key-rate decomposition (vectors)
-ir01s = duration(IR01(), KeyRates(), base, credit, tenors, cfs, tenors)
-cs01s = duration(CS01(), KeyRates(), base, credit, tenors, cfs, tenors)
+ir01s = duration(IR01(), KeyRates(tenors), base, credit, cfs, tenors)
+cs01s = duration(CS01(), KeyRates(tenors), base, credit, cfs, tenors)
 (ir01s, cs01s)
 ```
 
@@ -204,13 +204,13 @@ conv_2c = convexity(base, credit, tenors, cfs, tenors)
 
 ```@example sensitivities
 # Key-rate decomposition (matrices)
-conv_2c_kr = convexity(KeyRates(), base, credit, tenors, cfs, tenors)
+conv_2c_kr = convexity(KeyRates(tenors), base, credit, cfs, tenors)
 # conv_2c_kr.base, conv_2c_kr.credit, conv_2c_kr.cross (all matrices)
 ```
 
 ```@example sensitivities
 # Full two-curve sensitivities (always key-rate decomposition)
-twocurve_result = sensitivities(base, credit, tenors, cfs, tenors)
+twocurve_result = sensitivities(KeyRates(tenors), base, credit, cfs, tenors)
 twocurve_result.base_durations
 ```
 
@@ -224,7 +224,7 @@ For fixed cashflows, IR01 and CS01 are identical because base and credit rates e
 spread = 0.02
 face   = 100.0
 
-floater_result = sensitivities(base, credit, tenors) do base_curve, credit_curve
+floater_result = sensitivities(KeyRates(tenors), base, credit) do base_curve, credit_curve
     total = 0.0
     for t in 1:5
         df_base      = base_curve(Float64(t))
@@ -259,13 +259,13 @@ bond2_cfs   = [3.0, 3.0, 3.0, 3.0, 103.0]
 bond2_times = [1.0, 2.0, 3.0, 4.0, 5.0]
 
 # Compute portfolio DV01 vector in a single AD pass
-portfolio_dv01 = duration(DV01(), KeyRates(), zrc, tenors) do curve
+portfolio_dv01 = duration(DV01(), KeyRates(tenors), zrc) do curve
     pv(curve, bond1_cfs, bond1_times) + pv(curve, bond2_cfs, bond2_times)
 end
 
 # Equivalently (but two AD passes):
-dv01_1 = duration(DV01(), KeyRates(), zrc, tenors, bond1_cfs, bond1_times)
-dv01_2 = duration(DV01(), KeyRates(), zrc, tenors, bond2_cfs, bond2_times)
+dv01_1 = duration(DV01(), KeyRates(tenors), zrc, bond1_cfs, bond1_times)
+dv01_2 = duration(DV01(), KeyRates(tenors), zrc, bond2_cfs, bond2_times)
 
 (portfolio_dv01, dv01_1 .+ dv01_2, portfolio_dv01 ≈ dv01_1 .+ dv01_2)
 ```
@@ -287,7 +287,7 @@ flt_spread = 0.005
 
 # The do-block receives the curve and returns the total present value
 # of all cashflows across the portfolio.
-floater_portfolio = sensitivities(flt_zrc, flt_tenors) do curve
+floater_portfolio = sensitivities(KeyRates(flt_tenors), flt_zrc) do curve
     total = 0.0
     for (notional, mat) in zip(notionals, maturities)
         # For each bond, loop over annual payment dates t = 1, 2, ..., maturity
@@ -324,7 +324,7 @@ The `sensitivities` function always differentiates with respect to the **zero ra
 
 ```julia
 hw = ShortRate.HullWhite(0.1, 0.01, zrc)
-sensitivities(hw, cfs, times; n_scenarios=500, rng=Xoshiro(42))
+sensitivities(KeyRates(tenors), hw, cfs, times; n_scenarios=500, rng=Xoshiro(42))
 ```
 
 the chain of differentiation is:
@@ -386,7 +386,7 @@ A Hull-White model calibrates its drift θ(t) to match an initial yield curve. W
 # Key rate sensitivities of E[V] under Hull-White dynamics
 hw_curve = ZeroRateCurve(mc_rates, mc_tenors)
 hw       = ShortRate.HullWhite(0.1, 0.01, hw_curve)
-hw_result = sensitivities(hw, mc_tenors, mc_cfs, mc_tenors;
+hw_result = sensitivities(KeyRates(mc_tenors), hw, mc_cfs, mc_tenors;
                           n_scenarios = 500,
                           timestep    = 1/12,
                           horizon     = 6.0,
@@ -404,7 +404,7 @@ The deterministic `ZeroRateCurve` and Hull-White MC valuations produce the same 
 
 ```@example sensitivities
 # Deterministic: discount directly off the initial curve
-det_result = sensitivities(hw_curve, mc_tenors, mc_cfs, mc_tenors)
+det_result = sensitivities(KeyRates(mc_tenors), hw_curve, mc_cfs, mc_tenors)
 
 # Model-based: average across simulated rate paths (computed above as hw_result)
 (det_durations  = det_result.durations,
@@ -438,8 +438,8 @@ zrc_aki     = ZeroRateCurve(interp_rates, interp_tenors, Spline.Akima())       #
 
 # All can be passed into the same sensitivities API:
 interp_cfs = [3.0, 3.0, 3.0, 103.0]
-(default_durs = sensitivities(zrc_default, interp_tenors, interp_cfs, interp_tenors).durations,
- linear_durs  = sensitivities(zrc_lin,     interp_tenors, interp_cfs, interp_tenors).durations)
+(default_durs = sensitivities(KeyRates(interp_tenors), zrc_default, interp_cfs, interp_tenors).durations,
+ linear_durs  = sensitivities(KeyRates(interp_tenors), zrc_lin,     interp_cfs, interp_tenors).durations)
 ```
 
 **MonotoneConvex** (`Spline.MonotoneConvex()`, default): Finance-aware interpolation ([Hagan & West, 2006](https://doi.org/10.1080/13504860600829233)). Guarantees positive continuous forward rates, best KRD locality among smooth methods, and fastest AD performance.
@@ -464,8 +464,8 @@ val_tenors = [1.0, 3.0, 5.0, 10.0]
 val_zrc    = ZeroRateCurve(val_rates, val_tenors)
 val_cfs    = [3.0, 3.0, 3.0, 103.0]
 
-# AD (exact) — use KeyRates() for the per-tenor vector
-ad_dv01 = duration(DV01(), KeyRates(), val_zrc, val_tenors, val_cfs, val_tenors)
+# AD (exact) — use KeyRates(tenors) for the per-tenor vector
+ad_dv01 = duration(DV01(), KeyRates(val_tenors), val_zrc, val_cfs, val_tenors)
 
 # Finite difference (bump-and-reprice)
 ε = 1e-5
@@ -486,7 +486,7 @@ AD gives the instantaneous rate of change (the derivative), while `TransformedYi
 
 ```@example sensitivities
 # AD: total DV01 across all tenors — already in dollar-per-1bp units
-total_dv01 = sum(duration(DV01(), KeyRates(), val_zrc, val_tenors, val_cfs, val_tenors))
+total_dv01 = sum(duration(DV01(), KeyRates(val_tenors), val_zrc, val_cfs, val_tenors))
 
 # TransformedYield: actual PV change under a +1 bp parallel shift
 pv_base    = present_value(val_zrc, val_cfs, val_tenors)
