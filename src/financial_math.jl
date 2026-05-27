@@ -156,24 +156,37 @@ See also: [`IR01`](@ref), [`DV01`](@ref)
 struct CS01 <: Duration end
 
 """
-    KeyRates <: Duration
+    KeyRates(tenors) <: Duration
 
-Dispatch type that requests the full key-rate decomposition (vector of durations or matrix
-of convexities) instead of the default scalar summary.
+Marker type carrying the key-rate knot grid `tenors` for use with [`duration`](@ref),
+[`convexity`](@ref), and [`sensitivities`](@ref). Requests the full key-rate
+decomposition (vector of durations, matrix of convexities) instead of the default
+scalar summary.
 
-Use with `duration` and `convexity` when a `ZeroRateCurve` is the rate input:
+`tenors` is any `AbstractVector{<:Real}` of positive knot times. The knot grid is
+carried with the measurement intent — "key rate durations at these tenors" lives in
+one object.
 
 ```julia
-duration(KeyRates(), zrc, cfs, times)            # vector of key rate durations
-duration(DV01(), KeyRates(), zrc, cfs, times)     # vector of key rate DV01s
-convexity(KeyRates(), zrc, cfs, times)            # matrix of key rate convexities
+tenors = [1.0, 2.0, 5.0, 10.0, 30.0]
+duration(KeyRates(tenors), curve, cfs, times)            # vector of key rate durations
+duration(DV01(), KeyRates(tenors), curve, cfs, times)    # vector of key rate DV01s
+convexity(KeyRates(tenors), curve, cfs, times)           # matrix of key rate convexities
+sensitivities(KeyRates(tenors), curve, cfs, times)       # value + durations + convexities
 ```
-
-Without `KeyRates()`, these functions return a scalar (the sum of the decomposition).
 
 See also: [`DV01`](@ref), [`IR01`](@ref), [`CS01`](@ref)
 """
-struct KeyRates <: Duration end
+struct KeyRates{T<:AbstractVector{<:Real}} <: Duration
+    tenors::T
+    function KeyRates(tenors::T) where {T<:AbstractVector{<:Real}}
+        isempty(tenors)   && throw(ArgumentError("KeyRates tenors must be non-empty"))
+        issorted(tenors)  || throw(ArgumentError("KeyRates tenors must be sorted ascending"))
+        allunique(tenors) || throw(ArgumentError("KeyRates tenors must be distinct"))
+        all(>(0), tenors) || throw(ArgumentError("KeyRates tenors must be strictly positive"))
+        return new{T}(tenors)
+    end
+end
 
 abstract type KeyRateDuration <: Duration end
 
@@ -645,7 +658,10 @@ function _extract_cfs_times(cfs::AbstractVector{<:FinanceCore.Cashflow})
     return FinanceCore.amount.(cfs), FinanceCore.timepoint.(cfs)
 end
 
-## Do-block forwarding for non-ZRC AbstractYieldModel
+## Scalar do-block forwarding for AbstractYieldModel
+#
+# Forwards `duration(vf, curve)` and `convexity(vf, curve)` (no tenors) to the
+# generic finite-difference scalar path that works on any yield-like input.
 
 function duration(valuation_fn::Function, yield::FinanceModels.Yield.AbstractYieldModel)
     return duration(yield, valuation_fn)
@@ -654,48 +670,66 @@ function convexity(valuation_fn::Function, yield::FinanceModels.Yield.AbstractYi
     return convexity(yield, valuation_fn)
 end
 
-## ZeroRateCurve-based key rate sensitivities via AD
+## Key rate sensitivities via AD on zero-rate bumps (Yield.TenorShift)
+#
+# KRDs are computed by layering a triangular-hat zero-rate bump on top of the
+# user's curve via `FinanceModels.Yield.TenorShift`, then taking ForwardDiff
+# gradients/hessians w.r.t. the bump magnitudes. This works on any
+# `AbstractYieldModel` — no curve-internal field is required, and there is no
+# special dispatch for `ZeroRateCurve`. Callers always pass `tenors` (the KRD
+# knot grid) explicitly; for a ZRC, the natural choice is `zrc.tenors`.
 
-const ZRC = FinanceModels.Yield.ZeroRateCurve
+const AYM = FinanceModels.Yield.AbstractYieldModel
 
-# Internal AD helper: computes value, gradient, and optionally hessian w.r.t. rates
-# Builds the interpolation model once per gradient step (not per discount call)
-function _keyrate_ad(zrc::ZRC, valuation_fn; order = 1)
-    function f(r)
-        model = FinanceModels.Yield.build_model(zrc.spline, zrc.tenors, r)
-        valuation_fn(model)
-    end
-    v = f(zrc.rates)
-    grad = ForwardDiff.gradient(f, zrc.rates)
+# Triangular hats with flat extrapolation outside the knot range.
+# At a knot τᵢ the bump equals bᵢ; between τᵢ and τᵢ₊₁ it is linear.
+function _hat_bump(tenors, bumps, t)
+    t <= first(tenors) && return first(bumps)
+    t >= last(tenors)  && return last(bumps)
+    i = searchsortedlast(tenors, t)
+    w = (t - tenors[i]) / (tenors[i+1] - tenors[i])
+    return (one(w) - w) * bumps[i] + w * bumps[i+1]
+end
+
+# Layer a hat-function zero-rate bump over `curve` lazily.
+_bumped(curve, tenors, bumps) = FinanceModels.Yield.TenorShift(
+    curve,
+    (z, t) -> z + FinanceCore.Continuous(_hat_bump(tenors, bumps, t)),
+)
+
+# Single-curve AD helper: value, gradient, optional hessian w.r.t. zero-rate bumps.
+function _keyrate_ad(curve::AYM, tenors::AbstractVector, valuation_fn; order = 1)
+    f(b) = valuation_fn(_bumped(curve, tenors, b))
+    z = zeros(length(tenors))
+    v = f(z)
+    grad = ForwardDiff.gradient(f, z)
     order >= 2 || return (; value = v, gradient = grad)
-    hess = ForwardDiff.hessian(f, zrc.rates)
+    hess = ForwardDiff.hessian(f, z)
     return (; value = v, gradient = grad, hessian = hess)
 end
 
-# Two-curve AD helper: concatenates rates, one AD pass, partitions results
-function _keyrate_ad(base::ZRC, credit::ZRC, valuation_fn; order = 1)
-    base.tenors == credit.tenors || throw(ArgumentError(
-        "base and credit curves must have identical tenors"))
-    n = length(base.rates)
+# Two-curve AD helper: bumps for base and credit are concatenated, one AD pass, partitioned.
+function _keyrate_ad(base::AYM, credit::AYM, tenors::AbstractVector, valuation_fn; order = 1)
+    n = length(tenors)
     function f(combined)
-        base_model = FinanceModels.Yield.build_model(base.spline, base.tenors, combined[1:n])
-        credit_model = FinanceModels.Yield.build_model(credit.spline, credit.tenors, combined[n+1:2n])
-        valuation_fn(base_model, credit_model)
+        base_shift   = _bumped(base,   tenors, @view combined[1:n])
+        credit_shift = _bumped(credit, tenors, @view combined[(n+1):(2n)])
+        valuation_fn(base_shift, credit_shift)
     end
-    combined = [base.rates; credit.rates]
-    v = f(combined)
-    grad = ForwardDiff.gradient(f, combined)
+    z = zeros(2n)
+    v = f(z)
+    grad = ForwardDiff.gradient(f, z)
     base_grad = grad[1:n]
-    credit_grad = grad[n+1:2n]
+    credit_grad = grad[(n+1):(2n)]
     if order >= 2
-        hess = ForwardDiff.hessian(f, combined)
+        hess = ForwardDiff.hessian(f, z)
         return (;
             value = v,
             base_gradient = base_grad,
             credit_gradient = credit_grad,
             base_hessian = hess[1:n, 1:n],
-            credit_hessian = hess[n+1:2n, n+1:2n],
-            cross_hessian = hess[1:n, n+1:2n],
+            credit_hessian = hess[(n+1):(2n), (n+1):(2n)],
+            cross_hessian = hess[1:n, (n+1):(2n)],
         )
     end
     return (; value = v, base_gradient = base_grad, credit_gradient = credit_grad)
@@ -707,469 +741,314 @@ _standard_valuation(cfs, times) = curve -> sum(cf * curve(t) for (cf, t) in zip(
 # Two-curve standard valuation (additive on rates → multiplicative on discount factors)
 _standard_valuation_2curve(cfs, times) = (base, credit) -> sum(cf * base(t) * credit(t) for (cf, t) in zip(cfs, times))
 
-## duration methods for ZeroRateCurve
+## AbstractYieldModel + KeyRates(tenors): KRD / IR01 / CS01 / convexity / sensitivities
+#
+# These dispatches accept any `FinanceModels.Yield.AbstractYieldModel`. The
+# KRD knot grid is carried by `KeyRates(tenors)`. Internally the AD path layers
+# a hat-function zero-rate bump over the user's curve via `Yield.TenorShift`;
+# the user's curve is never resampled or rebuilt.
+#
+# `ZeroRateCurve` inputs go through the same path — it has no special dispatch.
+#
+# Tenor grid is required (no default) because KRD bucket conventions vary
+# (Bloomberg, FRTB, BMA SBA, etc.); downstream should choose explicitly.
 
 """
-    duration(zrc::ZeroRateCurve, cfs, times) -> scalar
-    duration(zrc::ZeroRateCurve, cfs::AbstractVector{<:Cashflow}) -> scalar
-    duration(valuation_fn::Function, zrc::ZeroRateCurve) -> scalar
+    duration(valuation_fn, curve::AbstractYieldModel, tenors) -> scalar
+    duration(curve::AbstractYieldModel, tenors, cfs, times) -> scalar
+    duration(curve::AbstractYieldModel, tenors, cfs::AbstractVector{<:Cashflow}) -> scalar
 
-Compute the scalar modified duration for a `ZeroRateCurve`: the sum of all key rate durations.
+Scalar modified duration for any `AbstractYieldModel` evaluated against a KRD
+knot grid. Equivalent to `sum(duration(KeyRates(tenors), ...))`.
 
-`cfs` can be an `AbstractVector{<:Cashflow}`, in which case `times` is extracted automatically.
+Use [`KeyRates`](@ref) to obtain the per-knot vector decomposition.
 
-For the full key-rate decomposition (a vector), use [`KeyRates()`](@ref KeyRates):
-
+# Example
 ```julia
-duration(KeyRates(), zrc, cfs, times)   # vector
-duration(zrc, cfs, times)               # scalar (≡ sum of above)
+duration(pv, my_composite_curve, [0.25, 1, 5, 10, 30])
 ```
 """
-function duration(valuation_fn::Function, zrc::ZRC)
-    return sum(duration(KeyRates(), valuation_fn, zrc))
+function duration(valuation_fn::Function, curve::AYM, tenors)
+    return sum(duration(KeyRates(tenors), valuation_fn, curve))
 end
-
-function duration(zrc::ZRC, cfs, times)
-    return sum(duration(KeyRates(), zrc, cfs, times))
+function duration(curve::AYM, tenors, cfs, times)
+    return sum(duration(KeyRates(tenors), curve, cfs, times))
 end
-
-function duration(zrc::ZRC, cfs::AbstractVector{<:FinanceCore.Cashflow})
+function duration(curve::AYM, tenors, cfs::AbstractVector{<:FinanceCore.Cashflow})
     amounts, times = _extract_cfs_times(cfs)
-    return duration(zrc, amounts, times)
+    return duration(curve, tenors, amounts, times)
 end
 
 """
-    duration(::KeyRates, zrc::ZeroRateCurve, cfs, times) -> Vector
-    duration(::KeyRates, zrc::ZeroRateCurve, cfs::AbstractVector{<:Cashflow}) -> Vector
-    duration(::KeyRates, valuation_fn::Function, zrc::ZeroRateCurve) -> Vector
+    duration(kr::KeyRates, valuation_fn, curve::AbstractYieldModel) -> Vector
+    duration(kr::KeyRates, curve::AbstractYieldModel, cfs, times) -> Vector
+    duration(kr::KeyRates, curve::AbstractYieldModel, cfs::AbstractVector{<:Cashflow}) -> Vector
 
-Compute key rate durations (modified) as a vector: `-∂V/∂rᵢ / V` for each tenor.
+Key-rate durations (modified) for any `AbstractYieldModel`, computed by
+layering a triangular-hat zero-rate bump at each tenor in `kr.tenors` over
+the user's curve via `Yield.TenorShift`, then taking the AD gradient w.r.t.
+the bump magnitudes. The user's curve is preserved at all non-knot points.
 
-`cfs` can be an `AbstractVector{<:Cashflow}`, in which case `times` is extracted automatically.
-When called with a function, it receives a curve and returns a scalar value (do-block syntax).
+# Tenor grid
 
-# Examples
+`kr.tenors` is the KRD knot grid — a separate modeling choice from any
+tenor structure baked into the curve itself. You can evaluate key-rate
+durations on any grid (e.g. Bloomberg `{0.25, 1, 2, 5, 10, 30}`, FRTB
+`{0.25, 0.5, 1, 2, 3, 5, 10, 15, 20, 30}`, etc.) without re-fitting the
+underlying curve.
 
+The grid must be sorted ascending, distinct, and strictly positive. These
+preconditions are not checked at runtime — a malformed grid produces wrong
+gradients silently.
+
+# Bump shape and endpoint extrapolation
+
+The bump at the i-th knot is a triangular hat centered at `tenors[i]` with
+support `[tenors[i-1], tenors[i+1]]`. Outside the knot range it is flat:
+bumping `tenors[1]` perturbs all cashflows at `t ≤ tenors[1]` equally, and
+bumping `tenors[end]` perturbs all cashflows at `t ≥ tenors[end]` equally.
+For long-duration insurance liabilities (LTC, deferred / payout annuities),
+the last-knot KRD absorbs all super-tenor sensitivity — extend the grid
+past your longest cashflow if you want that decomposed.
+
+For a linearly-interpolated zero-rate curve the result matches AD over
+the curve's own rates exactly. For other splines the bump kernel is
+hat-shaped rather than spline-shaped, so per-knot KRDs shift slightly;
+the sum of KRDs (= scalar modified duration) is invariant either way.
+
+# Example
 ```julia
-using FinanceModels, FinanceCore
-zrc = ZeroRateCurve([0.03, 0.03, 0.03], [1.0, 2.0, 3.0])
-cfs = [5.0, 5.0, 105.0]
+duration(KeyRates([0.25, 1, 5, 10, 30]), pv, curve)
 
-# Key rate durations (vector)
-krds = duration(KeyRates(), zrc, cfs, [1.0, 2.0, 3.0])
-
-# Using Cashflow objects directly
-cashflows = Cashflow.([5.0, 5.0, 105.0], [1.0, 2.0, 3.0])
-krds = duration(KeyRates(), zrc, cashflows)
-
-# Scalar modified duration
-duration(zrc, cfs, [1.0, 2.0, 3.0])   # ≡ sum(krds)
-
-# Do-block for custom valuation
-krds = duration(KeyRates(), zrc) do curve
-    sum(cf * curve(t) for (cf, t) in zip(cfs, [1.0, 2.0, 3.0]))
+duration(KeyRates([0.25, 1, 5, 10, 30]), curve) do c
+    pv(c)
 end
 ```
 """
-function duration(::KeyRates, valuation_fn::Function, zrc::ZRC)
-    ad = _keyrate_ad(zrc, valuation_fn)
+function duration(kr::KeyRates, valuation_fn::Function, curve::AYM)
+    ad = _keyrate_ad(curve, kr.tenors, valuation_fn)
     return -ad.gradient ./ ad.value
 end
-
-function duration(::KeyRates, zrc::ZRC, cfs, times)
-    return duration(KeyRates(), _standard_valuation(cfs, times), zrc)
+function duration(kr::KeyRates, curve::AYM, cfs, times)
+    return duration(kr, _standard_valuation(cfs, times), curve)
 end
-
-function duration(::KeyRates, zrc::ZRC, cfs::AbstractVector{<:FinanceCore.Cashflow})
+function duration(kr::KeyRates, curve::AYM, cfs::AbstractVector{<:FinanceCore.Cashflow})
     amounts, times = _extract_cfs_times(cfs)
-    return duration(KeyRates(), zrc, amounts, times)
-end
-
-# Do-block forwarding: duration(KeyRates(), zrc) do curve ... end
-function duration(valuation_fn::Function, ::KeyRates, zrc::ZRC)
-    return duration(KeyRates(), valuation_fn, zrc)
+    return duration(kr, curve, amounts, times)
 end
 
 """
-    duration(::DV01, zrc::ZeroRateCurve, cfs, times) -> scalar
-    duration(::DV01, valuation_fn::Function, zrc::ZeroRateCurve) -> scalar
+    duration(::DV01, valuation_fn, curve::AbstractYieldModel, tenors) -> scalar
+    duration(::DV01, curve::AbstractYieldModel, tenors, cfs, times) -> scalar
+    duration(::DV01, kr::KeyRates, valuation_fn, curve::AbstractYieldModel) -> Vector
+    duration(::DV01, kr::KeyRates, curve::AbstractYieldModel, cfs, times) -> Vector
 
-Compute the scalar DV01 for a `ZeroRateCurve`: the sum of all key rate DV01s.
-
-For the full key-rate decomposition (a vector), use [`KeyRates()`](@ref KeyRates):
-
-```julia
-duration(DV01(), KeyRates(), zrc, cfs, times)   # vector
-duration(DV01(), zrc, cfs, times)                # scalar (≡ sum of above)
-```
+DV01 (scalar or per-knot vector) for any `AbstractYieldModel`. Equivalent to
+the `KeyRates` variants of `duration` but in dollars per basis point.
 """
-function duration(::DV01, valuation_fn::Function, zrc::ZRC)
-    return sum(duration(DV01(), KeyRates(), valuation_fn, zrc))
+function duration(::DV01, valuation_fn::Function, curve::AYM, tenors)
+    return sum(duration(DV01(), KeyRates(tenors), valuation_fn, curve))
 end
-
-function duration(::DV01, zrc::ZRC, cfs, times)
-    return sum(duration(DV01(), KeyRates(), zrc, cfs, times))
+function duration(::DV01, curve::AYM, tenors, cfs, times)
+    return sum(duration(DV01(), KeyRates(tenors), curve, cfs, times))
 end
-
-function duration(::DV01, zrc::ZRC, cfs::AbstractVector{<:FinanceCore.Cashflow})
+function duration(::DV01, curve::AYM, tenors, cfs::AbstractVector{<:FinanceCore.Cashflow})
     amounts, times = _extract_cfs_times(cfs)
-    return duration(DV01(), zrc, amounts, times)
+    return duration(DV01(), curve, tenors, amounts, times)
 end
 
-"""
-    duration(::DV01, ::KeyRates, zrc::ZeroRateCurve, cfs, times) -> Vector
-    duration(::DV01, ::KeyRates, valuation_fn::Function, zrc::ZeroRateCurve) -> Vector
-
-Compute key rate DV01s as a vector: `-∂V/∂rᵢ / 10000` for each tenor.
-"""
-function duration(::DV01, ::KeyRates, valuation_fn::Function, zrc::ZRC)
-    ad = _keyrate_ad(zrc, valuation_fn)
+function duration(::DV01, kr::KeyRates, valuation_fn::Function, curve::AYM)
+    ad = _keyrate_ad(curve, kr.tenors, valuation_fn)
     return -ad.gradient ./ 10_000
 end
-
-function duration(::DV01, ::KeyRates, zrc::ZRC, cfs, times)
-    return duration(DV01(), KeyRates(), _standard_valuation(cfs, times), zrc)
+function duration(::DV01, kr::KeyRates, curve::AYM, cfs, times)
+    return duration(DV01(), kr, _standard_valuation(cfs, times), curve)
 end
-
-function duration(::DV01, ::KeyRates, zrc::ZRC, cfs::AbstractVector{<:FinanceCore.Cashflow})
+function duration(::DV01, kr::KeyRates, curve::AYM, cfs::AbstractVector{<:FinanceCore.Cashflow})
     amounts, times = _extract_cfs_times(cfs)
-    return duration(DV01(), KeyRates(), zrc, amounts, times)
-end
-
-# Do-block forwarding: duration(DV01(), zrc) do curve ... end
-function duration(valuation_fn::Function, ::DV01, zrc::ZRC)
-    return duration(DV01(), valuation_fn, zrc)
-end
-
-# Do-block forwarding: duration(DV01(), KeyRates(), zrc) do curve ... end
-function duration(valuation_fn::Function, ::DV01, ::KeyRates, zrc::ZRC)
-    return duration(DV01(), KeyRates(), valuation_fn, zrc)
+    return duration(DV01(), kr, curve, amounts, times)
 end
 
 """
-    duration(::IR01, base::ZeroRateCurve, credit::ZeroRateCurve, cfs, times) -> scalar
+    duration(::IR01, valuation_fn, base::AbstractYieldModel, credit::AbstractYieldModel, tenors) -> scalar
+    duration(::IR01, base::AbstractYieldModel, credit::AbstractYieldModel, tenors, cfs, times) -> scalar
+    duration(::IR01, kr::KeyRates, valuation_fn, base, credit) -> Vector
+    duration(::IR01, kr::KeyRates, base, credit, cfs, times) -> Vector
+    duration(::CS01, ...) -> ...
 
-Compute scalar IR01 for a two-curve valuation. For key-rate decomposition, use `KeyRates()`.
+Two-curve IR01/CS01 for any `AbstractYieldModel` pair sharing a tenor
+grid. IR01 bumps the base (risk-free) curve only; CS01 bumps the credit
+(spread) curve only.
 """
-function duration(::IR01, valuation_fn::Function, base::ZRC, credit::ZRC)
-    return sum(duration(IR01(), KeyRates(), valuation_fn, base, credit))
+function duration(::IR01, valuation_fn::Function, base::AYM, credit::AYM, tenors)
+    return sum(duration(IR01(), KeyRates(tenors), valuation_fn, base, credit))
 end
-
-function duration(::IR01, base::ZRC, credit::ZRC, cfs, times)
-    return sum(duration(IR01(), KeyRates(), base, credit, cfs, times))
+function duration(::IR01, base::AYM, credit::AYM, tenors, cfs, times)
+    return sum(duration(IR01(), KeyRates(tenors), base, credit, cfs, times))
 end
-
-function duration(::IR01, base::ZRC, credit::ZRC, cfs::AbstractVector{<:FinanceCore.Cashflow})
+function duration(::IR01, base::AYM, credit::AYM, tenors, cfs::AbstractVector{<:FinanceCore.Cashflow})
     amounts, times = _extract_cfs_times(cfs)
-    return duration(IR01(), base, credit, amounts, times)
+    return duration(IR01(), base, credit, tenors, amounts, times)
 end
 
-"""
-    duration(::IR01, ::KeyRates, base::ZeroRateCurve, credit::ZeroRateCurve, cfs, times) -> Vector
-
-Compute key rate DV01s for the base (risk-free) curve: `-∂V/∂base_rᵢ / 10000`.
-"""
-function duration(::IR01, ::KeyRates, valuation_fn::Function, base::ZRC, credit::ZRC)
-    ad = _keyrate_ad(base, credit, valuation_fn)
+function duration(::IR01, kr::KeyRates, valuation_fn::Function, base::AYM, credit::AYM)
+    ad = _keyrate_ad(base, credit, kr.tenors, valuation_fn)
     return -ad.base_gradient ./ 10_000
 end
-
-function duration(::IR01, ::KeyRates, base::ZRC, credit::ZRC, cfs, times)
-    return duration(IR01(), KeyRates(), _standard_valuation_2curve(cfs, times), base, credit)
+function duration(::IR01, kr::KeyRates, base::AYM, credit::AYM, cfs, times)
+    return duration(IR01(), kr, _standard_valuation_2curve(cfs, times), base, credit)
 end
-
-function duration(::IR01, ::KeyRates, base::ZRC, credit::ZRC, cfs::AbstractVector{<:FinanceCore.Cashflow})
+function duration(::IR01, kr::KeyRates, base::AYM, credit::AYM, cfs::AbstractVector{<:FinanceCore.Cashflow})
     amounts, times = _extract_cfs_times(cfs)
-    return duration(IR01(), KeyRates(), base, credit, amounts, times)
+    return duration(IR01(), kr, base, credit, amounts, times)
 end
 
-# Do-block forwarding: duration(IR01(), base, credit) do ... end
-function duration(valuation_fn::Function, ::IR01, base::ZRC, credit::ZRC)
-    return duration(IR01(), valuation_fn, base, credit)
+function duration(::CS01, valuation_fn::Function, base::AYM, credit::AYM, tenors)
+    return sum(duration(CS01(), KeyRates(tenors), valuation_fn, base, credit))
 end
-
-# Do-block forwarding: duration(IR01(), KeyRates(), base, credit) do ... end
-function duration(valuation_fn::Function, ::IR01, ::KeyRates, base::ZRC, credit::ZRC)
-    return duration(IR01(), KeyRates(), valuation_fn, base, credit)
+function duration(::CS01, base::AYM, credit::AYM, tenors, cfs, times)
+    return sum(duration(CS01(), KeyRates(tenors), base, credit, cfs, times))
 end
-
-"""
-    duration(::CS01, base::ZeroRateCurve, credit::ZeroRateCurve, cfs, times) -> scalar
-
-Compute scalar CS01 for a two-curve valuation. For key-rate decomposition, use `KeyRates()`.
-"""
-function duration(::CS01, valuation_fn::Function, base::ZRC, credit::ZRC)
-    return sum(duration(CS01(), KeyRates(), valuation_fn, base, credit))
-end
-
-function duration(::CS01, base::ZRC, credit::ZRC, cfs, times)
-    return sum(duration(CS01(), KeyRates(), base, credit, cfs, times))
-end
-
-function duration(::CS01, base::ZRC, credit::ZRC, cfs::AbstractVector{<:FinanceCore.Cashflow})
+function duration(::CS01, base::AYM, credit::AYM, tenors, cfs::AbstractVector{<:FinanceCore.Cashflow})
     amounts, times = _extract_cfs_times(cfs)
-    return duration(CS01(), base, credit, amounts, times)
+    return duration(CS01(), base, credit, tenors, amounts, times)
 end
 
-"""
-    duration(::CS01, ::KeyRates, base::ZeroRateCurve, credit::ZeroRateCurve, cfs, times) -> Vector
-
-Compute key rate DV01s for the credit spread curve: `-∂V/∂credit_rᵢ / 10000`.
-"""
-function duration(::CS01, ::KeyRates, valuation_fn::Function, base::ZRC, credit::ZRC)
-    ad = _keyrate_ad(base, credit, valuation_fn)
+function duration(::CS01, kr::KeyRates, valuation_fn::Function, base::AYM, credit::AYM)
+    ad = _keyrate_ad(base, credit, kr.tenors, valuation_fn)
     return -ad.credit_gradient ./ 10_000
 end
-
-function duration(::CS01, ::KeyRates, base::ZRC, credit::ZRC, cfs, times)
-    return duration(CS01(), KeyRates(), _standard_valuation_2curve(cfs, times), base, credit)
+function duration(::CS01, kr::KeyRates, base::AYM, credit::AYM, cfs, times)
+    return duration(CS01(), kr, _standard_valuation_2curve(cfs, times), base, credit)
 end
-
-function duration(::CS01, ::KeyRates, base::ZRC, credit::ZRC, cfs::AbstractVector{<:FinanceCore.Cashflow})
+function duration(::CS01, kr::KeyRates, base::AYM, credit::AYM, cfs::AbstractVector{<:FinanceCore.Cashflow})
     amounts, times = _extract_cfs_times(cfs)
-    return duration(CS01(), KeyRates(), base, credit, amounts, times)
+    return duration(CS01(), kr, base, credit, amounts, times)
 end
 
-# Do-block forwarding: duration(CS01(), base, credit) do ... end
-function duration(valuation_fn::Function, ::CS01, base::ZRC, credit::ZRC)
-    return duration(CS01(), valuation_fn, base, credit)
-end
-
-# Do-block forwarding: duration(CS01(), KeyRates(), base, credit) do ... end
-function duration(valuation_fn::Function, ::CS01, ::KeyRates, base::ZRC, credit::ZRC)
-    return duration(CS01(), KeyRates(), valuation_fn, base, credit)
-end
-
-## convexity methods for ZeroRateCurve
+# Do-block-first forwarders (support `f(args...) do x; ...; end` syntax)
+duration(vf::Function, kr::KeyRates, curve::AYM)                          = duration(kr,          vf, curve)
+duration(vf::Function, ::DV01,       curve::AYM, tenors)                  = duration(DV01(),      vf, curve, tenors)
+duration(vf::Function, ::DV01, kr::KeyRates, curve::AYM)                  = duration(DV01(),      kr, vf, curve)
+duration(vf::Function, ::IR01, base::AYM, credit::AYM, tenors)            = duration(IR01(),      vf, base, credit, tenors)
+duration(vf::Function, ::IR01, kr::KeyRates, base::AYM, credit::AYM)      = duration(IR01(),      kr, vf, base, credit)
+duration(vf::Function, ::CS01, base::AYM, credit::AYM, tenors)            = duration(CS01(),      vf, base, credit, tenors)
+duration(vf::Function, ::CS01, kr::KeyRates, base::AYM, credit::AYM)      = duration(CS01(),      kr, vf, base, credit)
 
 """
-    convexity(zrc::ZeroRateCurve, cfs, times) -> scalar
-    convexity(valuation_fn::Function, zrc::ZeroRateCurve) -> scalar
+    convexity(valuation_fn, curve::AbstractYieldModel, tenors) -> scalar
+    convexity(curve::AbstractYieldModel, tenors, cfs, times) -> scalar
+    convexity(kr::KeyRates, valuation_fn, curve::AbstractYieldModel) -> Matrix
+    convexity(kr::KeyRates, curve::AbstractYieldModel, cfs, times) -> Matrix
+    convexity(base::AbstractYieldModel, credit::AbstractYieldModel, tenors, cfs, times) -> NamedTuple
+    convexity(kr::KeyRates, base, credit, cfs, times) -> NamedTuple
 
-Compute the scalar convexity for a `ZeroRateCurve`: the sum of all elements of the
-key rate convexity matrix.
+Key-rate convexity (matrix) and scalar convexity for any `AbstractYieldModel`
+or pair. Mirrors `duration` but returns ∂²V/∂rᵢ∂rⱼ rather than ∂V/∂rᵢ.
 
-For the full key-rate decomposition (a matrix), use [`KeyRates()`](@ref KeyRates):
-
-```julia
-convexity(KeyRates(), zrc, cfs, times)   # matrix
-convexity(zrc, cfs, times)               # scalar (≡ sum of above)
-```
+If you also want the durations / DV01s, prefer [`sensitivities`](@ref) — it returns
+the value, gradient, and Hessian from one AD pass at the same cost.
 """
-function convexity(valuation_fn::Function, zrc::ZRC)
-    return sum(convexity(KeyRates(), valuation_fn, zrc))
+function convexity(valuation_fn::Function, curve::AYM, tenors)
+    return sum(convexity(KeyRates(tenors), valuation_fn, curve))
 end
-
-function convexity(zrc::ZRC, cfs, times)
-    return sum(convexity(KeyRates(), zrc, cfs, times))
+function convexity(curve::AYM, tenors, cfs, times)
+    return sum(convexity(KeyRates(tenors), curve, cfs, times))
 end
-
-function convexity(zrc::ZRC, cfs::AbstractVector{<:FinanceCore.Cashflow})
+function convexity(curve::AYM, tenors, cfs::AbstractVector{<:FinanceCore.Cashflow})
     amounts, times = _extract_cfs_times(cfs)
-    return convexity(zrc, amounts, times)
+    return convexity(curve, tenors, amounts, times)
 end
 
-"""
-    convexity(::KeyRates, zrc::ZeroRateCurve, cfs, times) -> Matrix
-    convexity(::KeyRates, valuation_fn::Function, zrc::ZeroRateCurve) -> Matrix
-
-Compute key rate convexity matrix: `∂²V/∂rᵢ∂rⱼ / V`.
-
-# Examples
-
-```julia
-using FinanceModels
-zrc = ZeroRateCurve([0.03, 0.03, 0.03], [1.0, 2.0, 3.0])
-
-# Key rate convexity matrix
-conv = convexity(KeyRates(), zrc, [5.0, 5.0, 105.0], [1.0, 2.0, 3.0])
-
-# Scalar convexity
-convexity(zrc, [5.0, 5.0, 105.0], [1.0, 2.0, 3.0])   # ≡ sum(conv)
-```
-"""
-function convexity(::KeyRates, valuation_fn::Function, zrc::ZRC)
-    ad = _keyrate_ad(zrc, valuation_fn; order = 2)
+function convexity(kr::KeyRates, valuation_fn::Function, curve::AYM)
+    ad = _keyrate_ad(curve, kr.tenors, valuation_fn; order = 2)
     return ad.hessian ./ ad.value
 end
-
-function convexity(::KeyRates, zrc::ZRC, cfs, times)
-    return convexity(KeyRates(), _standard_valuation(cfs, times), zrc)
+function convexity(kr::KeyRates, curve::AYM, cfs, times)
+    return convexity(kr, _standard_valuation(cfs, times), curve)
 end
-
-function convexity(::KeyRates, zrc::ZRC, cfs::AbstractVector{<:FinanceCore.Cashflow})
+function convexity(kr::KeyRates, curve::AYM, cfs::AbstractVector{<:FinanceCore.Cashflow})
     amounts, times = _extract_cfs_times(cfs)
-    return convexity(KeyRates(), zrc, amounts, times)
+    return convexity(kr, curve, amounts, times)
 end
 
-# Do-block forwarding: convexity(KeyRates(), zrc) do curve ... end
-function convexity(valuation_fn::Function, ::KeyRates, zrc::ZRC)
-    return convexity(KeyRates(), valuation_fn, zrc)
+function convexity(valuation_fn::Function, base::AYM, credit::AYM, tenors)
+    cv = convexity(KeyRates(tenors), valuation_fn, base, credit)
+    return (; base = sum(cv.base), credit = sum(cv.credit), cross = sum(cv.cross))
 end
-
-"""
-    convexity(base::ZeroRateCurve, credit::ZeroRateCurve, cfs, times) -> NamedTuple of scalars
-
-Compute scalar two-curve convexity. Returns a `NamedTuple` with scalar `base`, `credit`,
-and `cross` values (sums of the corresponding key rate matrices).
-
-For the full key-rate decomposition (matrices), use [`KeyRates()`](@ref KeyRates).
-"""
-function convexity(valuation_fn::Function, base::ZRC, credit::ZRC)
-    kr = convexity(KeyRates(), valuation_fn, base, credit)
-    return (; base = sum(kr.base), credit = sum(kr.credit), cross = sum(kr.cross))
+function convexity(base::AYM, credit::AYM, tenors, cfs, times)
+    return convexity(_standard_valuation_2curve(cfs, times), base, credit, tenors)
 end
-
-function convexity(base::ZRC, credit::ZRC, cfs, times)
-    return convexity(_standard_valuation_2curve(cfs, times), base, credit)
-end
-
-function convexity(base::ZRC, credit::ZRC, cfs::AbstractVector{<:FinanceCore.Cashflow})
+function convexity(base::AYM, credit::AYM, tenors, cfs::AbstractVector{<:FinanceCore.Cashflow})
     amounts, times = _extract_cfs_times(cfs)
-    return convexity(base, credit, amounts, times)
+    return convexity(base, credit, tenors, amounts, times)
 end
 
-"""
-    convexity(::KeyRates, base::ZeroRateCurve, credit::ZeroRateCurve, cfs, times) -> NamedTuple of matrices
-
-Compute two-curve convexity. Returns a `NamedTuple` with `base`, `credit`, and `cross` matrices.
-"""
-function convexity(::KeyRates, valuation_fn::Function, base::ZRC, credit::ZRC)
-    ad = _keyrate_ad(base, credit, valuation_fn; order = 2)
+function convexity(kr::KeyRates, valuation_fn::Function, base::AYM, credit::AYM)
+    ad = _keyrate_ad(base, credit, kr.tenors, valuation_fn; order = 2)
     return (;
         base = ad.base_hessian ./ ad.value,
         credit = ad.credit_hessian ./ ad.value,
         cross = ad.cross_hessian ./ ad.value,
     )
 end
-
-function convexity(::KeyRates, base::ZRC, credit::ZRC, cfs, times)
-    return convexity(KeyRates(), _standard_valuation_2curve(cfs, times), base, credit)
+function convexity(kr::KeyRates, base::AYM, credit::AYM, cfs, times)
+    return convexity(kr, _standard_valuation_2curve(cfs, times), base, credit)
 end
-
-function convexity(::KeyRates, base::ZRC, credit::ZRC, cfs::AbstractVector{<:FinanceCore.Cashflow})
+function convexity(kr::KeyRates, base::AYM, credit::AYM, cfs::AbstractVector{<:FinanceCore.Cashflow})
     amounts, times = _extract_cfs_times(cfs)
-    return convexity(KeyRates(), base, credit, amounts, times)
+    return convexity(kr, base, credit, amounts, times)
 end
 
-# Do-block forwarding: convexity(KeyRates(), base, credit) do ... end
-function convexity(valuation_fn::Function, ::KeyRates, base::ZRC, credit::ZRC)
-    return convexity(KeyRates(), valuation_fn, base, credit)
-end
-
-## sensitivities: bundled VGH output
+# Do-block-first forwarders (support `f(args...) do x; ...; end` syntax)
+convexity(vf::Function, kr::KeyRates, curve::AYM)                 = convexity(kr, vf, curve)
+convexity(vf::Function, kr::KeyRates, base::AYM, credit::AYM)     = convexity(kr, vf, base, credit)
 
 """
-    sensitivities(zrc::ZeroRateCurve, valuation_fn::Function)
-    sensitivities(zrc::ZeroRateCurve, cfs, times)
-    sensitivities(zrc::ZeroRateCurve, cfs::AbstractVector{<:Cashflow})
+    sensitivities(kr::KeyRates, valuation_fn, curve::AbstractYieldModel) -> NamedTuple
+    sensitivities(kr::KeyRates, curve::AbstractYieldModel, cfs, times) -> NamedTuple
+    sensitivities(::DV01, kr::KeyRates, valuation_fn, curve::AbstractYieldModel) -> NamedTuple
+    sensitivities(kr::KeyRates, base::AbstractYieldModel, credit::AbstractYieldModel, cfs, times) -> NamedTuple
+    sensitivities(::DV01, kr::KeyRates, base, credit, cfs, times) -> NamedTuple
 
-Compute value, key rate durations, and convexity matrix in a single efficient AD pass.
-
-`cfs` can be an `AbstractVector{<:Cashflow}`, in which case `times` is extracted automatically.
-
-Always returns the full key-rate decomposition (vectors and matrices), equivalent to the
-`KeyRates()` dispatch of `duration` and `convexity`. Use `duration(zrc, ...)` or
-`convexity(zrc, ...)` directly if you only need scalar summaries.
-
-Returns a `NamedTuple` with:
-- `value`: the scalar present value
-- `durations`: modified key rate durations (`-∂V/∂rᵢ / V`) — vector
-- `convexities`: cross-convexity matrix (`∂²V/∂rᵢ∂rⱼ / V`) — matrix
-
-For DV01s instead of durations, use `sensitivities(DV01(), zrc, cfs, times)`.
-
-Supports do-block syntax:
-
-```julia
-using FinanceModels
-zrc = ZeroRateCurve([0.03, 0.03, 0.03], [1.0, 2.0, 3.0])
-result = sensitivities(zrc) do curve
-    sum(cf * curve(t) for (cf, t) in zip([5.0, 5.0, 105.0], [1.0, 2.0, 3.0]))
-end
-```
-
-When using stochastic (Monte Carlo) valuations, you must fix the RNG seed so that
-the same random draws are used for every AD perturbation:
-
-```julia
-result = sensitivities(zrc) do curve
-    hw = HullWhite(0.1, 0.01, curve)
-    pv_mc(hw, contract; n_scenarios=1000, rng=MersenneTwister(42))
-end
-```
-
-Without a fixed seed, gradients will be noisy and incorrect.
-
-Pathwise AD is invalid for discontinuous payoffs (digital options, barriers).
-For those cases, use finite differences instead.
-
-To obtain traditional scalar sensitivities from the results, sum the vector/matrix fields:
-
-```julia
-result = sensitivities(zrc, cfs, [1.0, 2.0, 3.0])
-sum(result.durations)    # scalar modified duration
-sum(result.convexities)  # scalar convexity
-```
+Bundled value + key-rate durations (or DV01s) + convexity matrix for any
+`AbstractYieldModel` or pair, in a single AD pass. The knot grid is carried
+by [`KeyRates`](@ref).
 """
-function sensitivities(valuation_fn::Function, zrc::ZRC)
-    ad = _keyrate_ad(zrc, valuation_fn; order = 2)
+function sensitivities(kr::KeyRates, valuation_fn::Function, curve::AYM)
+    ad = _keyrate_ad(curve, kr.tenors, valuation_fn; order = 2)
     return (;
         value = ad.value,
         durations = -ad.gradient ./ ad.value,
         convexities = ad.hessian ./ ad.value,
     )
 end
-
-function sensitivities(zrc::ZRC, cfs, times)
-    return sensitivities(_standard_valuation(cfs, times), zrc)
+function sensitivities(kr::KeyRates, curve::AYM, cfs, times)
+    return sensitivities(kr, _standard_valuation(cfs, times), curve)
 end
-
-function sensitivities(zrc::ZRC, cfs::AbstractVector{<:FinanceCore.Cashflow})
+function sensitivities(kr::KeyRates, curve::AYM, cfs::AbstractVector{<:FinanceCore.Cashflow})
     amounts, times = _extract_cfs_times(cfs)
-    return sensitivities(zrc, amounts, times)
+    return sensitivities(kr, curve, amounts, times)
 end
 
-function sensitivities(::DV01, valuation_fn::Function, zrc::ZRC)
-    ad = _keyrate_ad(zrc, valuation_fn; order = 2)
+function sensitivities(::DV01, kr::KeyRates, valuation_fn::Function, curve::AYM)
+    ad = _keyrate_ad(curve, kr.tenors, valuation_fn; order = 2)
     return (;
         value = ad.value,
         dv01s = -ad.gradient ./ 10_000,
         convexities = ad.hessian ./ ad.value,
     )
 end
-
-function sensitivities(::DV01, zrc::ZRC, cfs, times)
-    return sensitivities(DV01(), _standard_valuation(cfs, times), zrc)
+function sensitivities(::DV01, kr::KeyRates, curve::AYM, cfs, times)
+    return sensitivities(DV01(), kr, _standard_valuation(cfs, times), curve)
 end
-
-function sensitivities(::DV01, zrc::ZRC, cfs::AbstractVector{<:FinanceCore.Cashflow})
+function sensitivities(::DV01, kr::KeyRates, curve::AYM, cfs::AbstractVector{<:FinanceCore.Cashflow})
     amounts, times = _extract_cfs_times(cfs)
-    return sensitivities(DV01(), zrc, amounts, times)
+    return sensitivities(DV01(), kr, curve, amounts, times)
 end
 
-# Do-block: sensitivities(DV01(), zrc) do curve ... end
-function sensitivities(valuation_fn::Function, ::DV01, zrc::ZRC)
-    return sensitivities(DV01(), valuation_fn, zrc)
-end
-
-"""
-    sensitivities(valuation_fn, base::ZeroRateCurve, credit::ZeroRateCurve)
-    sensitivities(base::ZeroRateCurve, credit::ZeroRateCurve, cfs, times)
-    sensitivities(base::ZeroRateCurve, credit::ZeroRateCurve, cfs::AbstractVector{<:Cashflow})
-
-Two-curve sensitivities. Returns base/credit durations and convexity matrices.
-
-`cfs` can be an `AbstractVector{<:Cashflow}`, in which case `times` is extracted automatically.
-
-For DV01s instead of durations, use `sensitivities(DV01(), base, credit, cfs, times)`.
-
-The `convexities.cross` matrix `[i,j] = ∂²V/(∂base_rᵢ ∂credit_rⱼ) / V` captures
-interaction effects between base and credit rate movements — relevant when the two
-curves move in correlated fashion (e.g., both driven by macro factors).
-"""
-function sensitivities(valuation_fn::Function, base::ZRC, credit::ZRC)
-    ad = _keyrate_ad(base, credit, valuation_fn; order = 2)
+function sensitivities(kr::KeyRates, valuation_fn::Function, base::AYM, credit::AYM)
+    ad = _keyrate_ad(base, credit, kr.tenors, valuation_fn; order = 2)
     return (;
         value = ad.value,
         base_durations = -ad.base_gradient ./ ad.value,
@@ -1181,18 +1060,16 @@ function sensitivities(valuation_fn::Function, base::ZRC, credit::ZRC)
         ),
     )
 end
-
-function sensitivities(base::ZRC, credit::ZRC, cfs, times)
-    return sensitivities(_standard_valuation_2curve(cfs, times), base, credit)
+function sensitivities(kr::KeyRates, base::AYM, credit::AYM, cfs, times)
+    return sensitivities(kr, _standard_valuation_2curve(cfs, times), base, credit)
 end
-
-function sensitivities(base::ZRC, credit::ZRC, cfs::AbstractVector{<:FinanceCore.Cashflow})
+function sensitivities(kr::KeyRates, base::AYM, credit::AYM, cfs::AbstractVector{<:FinanceCore.Cashflow})
     amounts, times = _extract_cfs_times(cfs)
-    return sensitivities(base, credit, amounts, times)
+    return sensitivities(kr, base, credit, amounts, times)
 end
 
-function sensitivities(::DV01, valuation_fn::Function, base::ZRC, credit::ZRC)
-    ad = _keyrate_ad(base, credit, valuation_fn; order = 2)
+function sensitivities(::DV01, kr::KeyRates, valuation_fn::Function, base::AYM, credit::AYM)
+    ad = _keyrate_ad(base, credit, kr.tenors, valuation_fn; order = 2)
     return (;
         value = ad.value,
         base_dv01s = -ad.base_gradient ./ 10_000,
@@ -1204,79 +1081,79 @@ function sensitivities(::DV01, valuation_fn::Function, base::ZRC, credit::ZRC)
         ),
     )
 end
-
-function sensitivities(::DV01, base::ZRC, credit::ZRC, cfs, times)
-    return sensitivities(DV01(), _standard_valuation_2curve(cfs, times), base, credit)
+function sensitivities(::DV01, kr::KeyRates, base::AYM, credit::AYM, cfs, times)
+    return sensitivities(DV01(), kr, _standard_valuation_2curve(cfs, times), base, credit)
 end
-
-function sensitivities(::DV01, base::ZRC, credit::ZRC, cfs::AbstractVector{<:FinanceCore.Cashflow})
+function sensitivities(::DV01, kr::KeyRates, base::AYM, credit::AYM, cfs::AbstractVector{<:FinanceCore.Cashflow})
     amounts, times = _extract_cfs_times(cfs)
-    return sensitivities(DV01(), base, credit, amounts, times)
+    return sensitivities(DV01(), kr, base, credit, amounts, times)
 end
 
-# Do-block: sensitivities(DV01(), base, credit) do ... end
-function sensitivities(valuation_fn::Function, ::DV01, base::ZRC, credit::ZRC)
-    return sensitivities(DV01(), valuation_fn, base, credit)
-end
+# Do-block-first forwarders (support `f(args...) do x; ...; end` syntax)
+sensitivities(vf::Function, kr::KeyRates, curve::AYM)                    = sensitivities(kr, vf, curve)
+sensitivities(vf::Function, ::DV01, kr::KeyRates, curve::AYM)            = sensitivities(DV01(), kr, vf, curve)
+sensitivities(vf::Function, kr::KeyRates, base::AYM, credit::AYM)        = sensitivities(kr, vf, base, credit)
+sensitivities(vf::Function, ::DV01, kr::KeyRates, base::AYM, credit::AYM) = sensitivities(DV01(), kr, vf, base, credit)
 
 ## Hull-White convenience methods
+#
+# `hw.curve` can be any `AbstractYieldModel` — the AD path uses TenorShift
+# bumps over the curve via the AYM-based `sensitivities` impls above.
 
 const HW = FinanceModels.ShortRate.HullWhite
 
-# Fixed cashflows: sensitivities(hw, cfs, times; ...)
-function sensitivities(hw::HW, cfs, times;
+# Rebuild HW under a perturbed curve and produce its scenario set under the same dynamics.
+function _hw_paths(hw::HW, curve; n_scenarios, timestep, horizon, rng)
+    hw_new = FinanceModels.ShortRate.HullWhite(hw.a, hw.σ, curve)
+    return FinanceModels.simulate(hw_new; n_scenarios, timestep, horizon, rng)
+end
+
+# Do-block primary forms
+#
+# Pathwise seeding: every AD evaluation of the inner closure must see the same
+# MC sample, otherwise `KRD = -∇V/V` divides a gradient computed over one
+# sample by a value computed over another (ForwardDiff calls the closure many
+# times for value, gradient chunks, and Hessian chunks). Snapshot a UInt64 from
+# the user's rng once per call and rebuild a fresh `Xoshiro(seed)` inside the
+# closure so every AD step draws the same scenarios.
+function sensitivities(kr::KeyRates, valuation_fn::Function, hw::HW;
+                       n_scenarios=1000, timestep=1/12, horizon=30.0,
+                       rng=Random.default_rng())
+    seed = rand(rng, UInt64)
+    sensitivities(kr, hw.curve) do curve
+        valuation_fn(_hw_paths(hw, curve; n_scenarios, timestep, horizon, rng=Random.Xoshiro(seed)))
+    end
+end
+
+function sensitivities(::DV01, kr::KeyRates, valuation_fn::Function, hw::HW;
+                       n_scenarios=1000, timestep=1/12, horizon=30.0,
+                       rng=Random.default_rng())
+    seed = rand(rng, UInt64)
+    sensitivities(DV01(), kr, hw.curve) do curve
+        valuation_fn(_hw_paths(hw, curve; n_scenarios, timestep, horizon, rng=Random.Xoshiro(seed)))
+    end
+end
+
+# Do-block-first forwarders (support `f(args...) do x; ...; end` syntax)
+sensitivities(vf::Function, kr::KeyRates, hw::HW; kw...)         = sensitivities(kr, vf, hw; kw...)
+sensitivities(vf::Function, ::DV01, kr::KeyRates, hw::HW; kw...) = sensitivities(DV01(), kr, vf, hw; kw...)
+
+# Cashflow-form wrappers that delegate to the do-block forms above
+function sensitivities(kr::KeyRates, hw::HW, cfs, times;
                        n_scenarios=1000, timestep=1/12, horizon=nothing,
                        rng=Random.default_rng())
-    zrc = hw.curve
-    zrc isa ZRC || throw(ArgumentError(
-        "Hull-White curve must be a ZeroRateCurve for AD sensitivities"))
     h = horizon === nothing ? maximum(times) + 1.0 : Float64(horizon)
-    sensitivities(zrc) do curve
-        hw_new = FinanceModels.ShortRate.HullWhite(hw.a, hw.σ, curve)
-        scenarios = FinanceModels.simulate(hw_new; n_scenarios, timestep, horizon=h, rng)
+    sensitivities(kr, hw; n_scenarios, timestep, horizon=h, rng) do scenarios
         sum(FinanceCore.pv(sc, cfs, times) for sc in scenarios) / n_scenarios
     end
 end
 
-# Do-block: sensitivities(hw; ...) do scenarios ... end
-function sensitivities(valuation_fn::Function, hw::HW;
-                       n_scenarios=1000, timestep=1/12, horizon=30.0,
-                       rng=Random.default_rng())
-    zrc = hw.curve
-    zrc isa ZRC || throw(ArgumentError(
-        "Hull-White curve must be a ZeroRateCurve for AD sensitivities"))
-    sensitivities(zrc) do curve
-        hw_new = FinanceModels.ShortRate.HullWhite(hw.a, hw.σ, curve)
-        scenarios = FinanceModels.simulate(hw_new; n_scenarios, timestep, horizon, rng)
-        valuation_fn(scenarios)
-    end
-end
-
-# DV01 variants
-function sensitivities(::DV01, hw::HW, cfs, times;
+function sensitivities(::DV01, kr::KeyRates, hw::HW, cfs, times;
                        n_scenarios=1000, timestep=1/12, horizon=nothing,
                        rng=Random.default_rng())
-    zrc = hw.curve
-    zrc isa ZRC || throw(ArgumentError(
-        "Hull-White curve must be a ZeroRateCurve for AD sensitivities"))
     h = horizon === nothing ? maximum(times) + 1.0 : Float64(horizon)
-    sensitivities(DV01(), zrc) do curve
-        hw_new = FinanceModels.ShortRate.HullWhite(hw.a, hw.σ, curve)
-        scenarios = FinanceModels.simulate(hw_new; n_scenarios, timestep, horizon=h, rng)
+    sensitivities(DV01(), kr, hw; n_scenarios, timestep, horizon=h, rng) do scenarios
         sum(FinanceCore.pv(sc, cfs, times) for sc in scenarios) / n_scenarios
-    end
-end
-
-function sensitivities(valuation_fn::Function, ::DV01, hw::HW;
-                       n_scenarios=1000, timestep=1/12, horizon=30.0,
-                       rng=Random.default_rng())
-    zrc = hw.curve
-    zrc isa ZRC || throw(ArgumentError(
-        "Hull-White curve must be a ZeroRateCurve for AD sensitivities"))
-    sensitivities(DV01(), zrc) do curve
-        hw_new = FinanceModels.ShortRate.HullWhite(hw.a, hw.σ, curve)
-        scenarios = FinanceModels.simulate(hw_new; n_scenarios, timestep, horizon, rng)
-        valuation_fn(scenarios)
     end
 end
 

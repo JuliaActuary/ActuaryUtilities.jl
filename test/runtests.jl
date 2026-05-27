@@ -424,8 +424,8 @@ end
         zrc = FM.ZeroRateCurve(rates, tenors, FM.Spline.Linear())
         face = 100.0
 
-        # key rate durations via duration(KeyRates(), zrc, cfs, times)
-        krds = duration(KeyRates(), zrc, [0.0, 0.0, face], tenors)
+        # key rate durations via duration(KeyRates(knots), zrc, cfs, times)
+        krds = duration(KeyRates(tenors), zrc, [0.0, 0.0, face], tenors)
 
         # duration at the maturity tenor (index 3) should be ≈ t = 5.0
         @test krds[3] ≈ 5.0 atol = 1e-6
@@ -448,13 +448,13 @@ end
 
         for spline in [FM.Spline.Linear(), FM.Spline.MonotoneConvex(), FM.Spline.PCHIP()]
             zrc = FM.ZeroRateCurve(rates, tenors, spline)
-            krds = duration(KeyRates(), zrc, cfs, tenors)
+            krds = duration(KeyRates(tenors), zrc, cfs, tenors)
             @test sum(krds) ≈ mac_dur atol = 1e-4
         end
 
         # all KRDs positive only guaranteed for Linear (perfectly local)
         zrc_lin = FM.ZeroRateCurve(rates, tenors, FM.Spline.Linear())
-        @test all(duration(KeyRates(), zrc_lin, cfs, tenors) .> 0)
+        @test all(duration(KeyRates(tenors), zrc_lin, cfs, tenors) .> 0)
     end
 
     @testset "DV01 positive for standard bond" begin
@@ -464,7 +464,7 @@ end
         zrc = FM.ZeroRateCurve(rates, tenors, FM.Spline.Linear())
         cfs = [5.0, 5.0, 105.0]
 
-        dv01s = duration(DV01(), KeyRates(), zrc, cfs, tenors)
+        dv01s = duration(DV01(), KeyRates(tenors), zrc, cfs, tenors)
         @test all(dv01s .> 0)
     end
 
@@ -477,7 +477,7 @@ end
         call_price = 102.0
         cfs_noncallable = [coupon, coupon, coupon, coupon, coupon + face]
 
-        callable_dur = duration(KeyRates(), zrc) do curve
+        callable_dur = duration(KeyRates(tenors), zrc) do curve
             ncv = sum(cf * curve(t) for (cf, t) in zip(cfs_noncallable, tenors))
             called_value = sum(cf * curve(t) for (cf, t) in zip(cfs_noncallable[1:3], tenors[1:3])) -
                            cfs_noncallable[3] * curve(3.0) + call_price * curve(3.0)
@@ -494,7 +494,7 @@ end
         zrc = FM.ZeroRateCurve(rates, tenors, FM.Spline.Linear())
         face = 100.0
 
-        conv = convexity(KeyRates(), zrc, [0.0, 0.0, face], tenors)
+        conv = convexity(KeyRates(tenors), zrc, [0.0, 0.0, face], tenors)
 
         # diagonal at the maturity tenor should be t^2 = 25.0
         @test conv[3, 3] ≈ 25.0 atol = 1e-6
@@ -513,8 +513,8 @@ end
         credit = FM.ZeroRateCurve(credit_rates, tenors, FM.Spline.Linear())
         cfs = [5.0, 5.0, 5.0, 5.0, 105.0]
 
-        ir01s = duration(IR01(), KeyRates(), base, credit, cfs, tenors)
-        cs01s = duration(CS01(), KeyRates(), base, credit, cfs, tenors)
+        ir01s = duration(IR01(), KeyRates(tenors), base, credit, cfs, tenors)
+        cs01s = duration(CS01(), KeyRates(tenors), base, credit, cfs, tenors)
 
         # For additive combination, IR01 ≈ CS01
         @test ir01s ≈ cs01s atol = 1e-10
@@ -530,7 +530,7 @@ end
         credit = FM.ZeroRateCurve(credit_rates, tenors, FM.Spline.Linear())
         cfs = [5.0, 5.0, 105.0]
 
-        conv = convexity(KeyRates(), base, credit, cfs, tenors)
+        conv = convexity(KeyRates(tenors), base, credit, cfs, tenors)
 
         @test !all(isapprox.(conv.cross, 0.0, atol = 1e-10))
         @test !all(isapprox.(conv.base, 0.0, atol = 1e-10))
@@ -546,21 +546,21 @@ end
         cfs = [5.0, 5.0, 5.0, 5.0, 105.0]
 
         # duration scalar = sum of KeyRates vector
-        scalar_dur = duration(zrc, cfs, tenors)
-        krds = duration(KeyRates(), zrc, cfs, tenors)
+        scalar_dur = duration(zrc, tenors, cfs, tenors)
+        krds = duration(KeyRates(tenors), zrc, cfs, tenors)
         @test scalar_dur isa Real
         @test !(scalar_dur isa AbstractArray)
         @test scalar_dur ≈ sum(krds) atol = 1e-12
 
         # DV01 scalar = sum of KeyRates DV01 vector
-        scalar_dv01 = duration(DV01(), zrc, cfs, tenors)
-        dv01_vec = duration(DV01(), KeyRates(), zrc, cfs, tenors)
+        scalar_dv01 = duration(DV01(), zrc, tenors, cfs, tenors)
+        dv01_vec = duration(DV01(), KeyRates(tenors), zrc, cfs, tenors)
         @test scalar_dv01 isa Real
         @test scalar_dv01 ≈ sum(dv01_vec) atol = 1e-12
 
         # convexity scalar = sum of KeyRates convexity matrix
-        scalar_conv = convexity(zrc, cfs, tenors)
-        conv_mat = convexity(KeyRates(), zrc, cfs, tenors)
+        scalar_conv = convexity(zrc, tenors, cfs, tenors)
+        conv_mat = convexity(KeyRates(tenors), zrc, cfs, tenors)
         @test scalar_conv isa Real
         @test scalar_conv ≈ sum(conv_mat) atol = 1e-12
 
@@ -578,20 +578,20 @@ end
         cfs = [5.0, 5.0, 5.0, 5.0, 105.0]
 
         # IR01 scalar = sum of KeyRates IR01 vector
-        scalar_ir01 = duration(IR01(), base, credit, cfs, tenors)
-        ir01_vec = duration(IR01(), KeyRates(), base, credit, cfs, tenors)
+        scalar_ir01 = duration(IR01(), base, credit, tenors, cfs, tenors)
+        ir01_vec = duration(IR01(), KeyRates(tenors), base, credit, cfs, tenors)
         @test scalar_ir01 isa Real
         @test scalar_ir01 ≈ sum(ir01_vec) atol = 1e-12
 
         # CS01 scalar = sum of KeyRates CS01 vector
-        scalar_cs01 = duration(CS01(), base, credit, cfs, tenors)
-        cs01_vec = duration(CS01(), KeyRates(), base, credit, cfs, tenors)
+        scalar_cs01 = duration(CS01(), base, credit, tenors, cfs, tenors)
+        cs01_vec = duration(CS01(), KeyRates(tenors), base, credit, cfs, tenors)
         @test scalar_cs01 isa Real
         @test scalar_cs01 ≈ sum(cs01_vec) atol = 1e-12
 
         # Two-curve convexity: scalars = sums of matrices
-        scalar_conv = convexity(base, credit, cfs, tenors)
-        mat_conv = convexity(KeyRates(), base, credit, cfs, tenors)
+        scalar_conv = convexity(base, credit, tenors, cfs, tenors)
+        mat_conv = convexity(KeyRates(tenors), base, credit, cfs, tenors)
         @test scalar_conv.base isa Real
         @test scalar_conv.base ≈ sum(mat_conv.base) atol = 1e-12
         @test scalar_conv.credit ≈ sum(mat_conv.credit) atol = 1e-12
@@ -606,8 +606,8 @@ end
         zrc_lin = FM.ZeroRateCurve(rates, tenors, FM.Spline.Linear())
         zrc_cub = FM.ZeroRateCurve(rates, tenors, FM.Spline.Cubic())
 
-        dur_lin = duration(KeyRates(), zrc_lin, cfs, tenors)
-        dur_cub = duration(KeyRates(), zrc_cub, cfs, tenors)
+        dur_lin = duration(KeyRates(tenors), zrc_lin, cfs, tenors)
+        dur_cub = duration(KeyRates(tenors), zrc_cub, cfs, tenors)
 
         @test dur_lin ≈ dur_cub atol = 1e-4
     end
@@ -621,7 +621,7 @@ end
         zrc = FM.ZeroRateCurve(rates, tenors, FM.Spline.Linear())
         face = 100.0
 
-        result = sensitivities(zrc, [0.0, 0.0, face], tenors)
+        result = sensitivities(KeyRates(tenors), zrc, [0.0, 0.0, face], tenors)
 
         @test result.value ≈ face * exp(-0.03 * 5.0) atol = 1e-6
         @test result.durations[3] ≈ 5.0 atol = 1e-6
@@ -636,18 +636,18 @@ end
         zrc = FM.ZeroRateCurve(rates, tenors, FM.Spline.Linear())
         cfs = [5.0, 5.0, 5.0, 5.0, 105.0]
 
-        result = sensitivities(zrc, cfs, tenors)
+        result = sensitivities(KeyRates(tenors), zrc, cfs, tenors)
 
         @test result.value > 0
         @test all(result.durations .> 0)
 
-        # sensitivities returns same durations as calling duration(KeyRates(), ...) separately
-        @test result.durations ≈ duration(KeyRates(), zrc, cfs, tenors) atol = 1e-12
+        # sensitivities returns same durations as calling duration(KeyRates(tenors), ...) separately
+        @test result.durations ≈ duration(KeyRates(tenors), zrc, cfs, tenors) atol = 1e-12
 
         # DV01 dispatch
-        dv01_result = sensitivities(DV01(), zrc, cfs, tenors)
+        dv01_result = sensitivities(DV01(), KeyRates(tenors), zrc, cfs, tenors)
         @test all(dv01_result.dv01s .> 0)
-        @test dv01_result.dv01s ≈ duration(DV01(), KeyRates(), zrc, cfs, tenors) atol = 1e-12
+        @test dv01_result.dv01s ≈ duration(DV01(), KeyRates(tenors), zrc, cfs, tenors) atol = 1e-12
         @test dv01_result.value ≈ result.value atol = 1e-12
     end
 
@@ -658,7 +658,7 @@ end
         zrc = FM.ZeroRateCurve(rates, tenors, FM.Spline.Linear())
         cfs = [5.0, 5.0, 105.0]
 
-        result = sensitivities(zrc) do curve
+        result = sensitivities(KeyRates(tenors), zrc) do curve
             sum(cf * curve(t) for (cf, t) in zip(cfs, tenors))
         end
 
@@ -674,12 +674,12 @@ end
         credit = FM.ZeroRateCurve(credit_rates, tenors)
         cfs = [5.0, 5.0, 5.0, 5.0, 105.0]
 
-        result = sensitivities(base, credit, cfs, tenors)
+        result = sensitivities(KeyRates(tenors), base, credit, cfs, tenors)
 
         @test result.base_durations ≈ result.credit_durations atol = 1e-10
 
         # DV01 dispatch
-        dv01_result = sensitivities(DV01(), base, credit, cfs, tenors)
+        dv01_result = sensitivities(DV01(), KeyRates(tenors), base, credit, cfs, tenors)
         @test dv01_result.base_dv01s ≈ dv01_result.credit_dv01s atol = 1e-12
         @test dv01_result.value ≈ result.value atol = 1e-12
 
@@ -698,20 +698,24 @@ end
         credit = FM.ZeroRateCurve(credit_rates, tenors)
         face = 100.0
 
-        result = sensitivities(base, credit) do base_curve, credit_curve
+        result = sensitivities(KeyRates(tenors), base, credit) do base_curve, credit_curve
             face * (2.0 * base_curve(5.0) + 0.5 * credit_curve(5.0))
         end
 
         @test !isapprox(result.base_durations, result.credit_durations, atol = 1e-6)
     end
 
-    @testset "two-curve tenor mismatch" begin
+    @testset "two-curve with mismatched ZRC storage tenors" begin
+        # Under the unified API the KRD knot grid is supplied explicitly, so
+        # base and credit no longer need matching `tenors` fields — they can
+        # be evaluated against any common knot grid.
         base = FM.ZeroRateCurve([0.03, 0.03, 0.03], [1.0, 2.0, 5.0])
         credit = FM.ZeroRateCurve([0.02, 0.02], [1.0, 2.0])
-        @test_throws ArgumentError sensitivities(base, credit, [5.0, 5.0, 105.0], [1.0, 2.0, 5.0])
-
-        credit2 = FM.ZeroRateCurve([0.02, 0.02, 0.02], [1.0, 3.0, 5.0])
-        @test_throws ArgumentError sensitivities(base, credit2, [5.0, 5.0, 105.0], [1.0, 2.0, 5.0])
+        knots = [1.0, 2.0, 5.0]
+        result = sensitivities(KeyRates(knots), base, credit, [5.0, 5.0, 105.0], [1.0, 2.0, 5.0])
+        @test result.value > 0
+        @test length(result.base_durations) == length(knots)
+        @test length(result.credit_durations) == length(knots)
     end
 
     @testset "chapter VGH test case" begin
@@ -724,7 +728,7 @@ end
         cfs_times = collect(0.5:0.5:10.0)
         cfs = [coupon / 2 + (t == 10.0 ? 1.0 : 0.0) for t in cfs_times]
 
-        result = sensitivities(zrc, cfs, cfs_times)
+        result = sensitivities(KeyRates(times), zrc, cfs, cfs_times)
 
         @test result.value > 0
         # durations at tenors within the bond's maturity are positive
@@ -750,11 +754,11 @@ end
             sum(cf * curve(t) for (cf, t) in zip(bond1_cfs, bond1_times)) +
             sum(cf * curve(t) for (cf, t) in zip(bond2_cfs, bond2_times))
         end
-        portfolio_dv01 = duration(DV01(), KeyRates(), portfolio_valuation, zrc)
+        portfolio_dv01 = duration(DV01(), KeyRates(tenors), portfolio_valuation, zrc)
 
         # Individual DV01s
-        dv01_1 = duration(DV01(), KeyRates(), zrc, bond1_cfs, bond1_times)
-        dv01_2 = duration(DV01(), KeyRates(), zrc, bond2_cfs, bond2_times)
+        dv01_1 = duration(DV01(), KeyRates(tenors), zrc, bond1_cfs, bond1_times)
+        dv01_2 = duration(DV01(), KeyRates(tenors), zrc, bond2_cfs, bond2_times)
 
         # DV01 is additive (not value-weighted like modified duration)
         @test portfolio_dv01 ≈ dv01_1 .+ dv01_2 atol = 1e-10
@@ -772,7 +776,7 @@ end
         cfs = [3.0, 3.0, 3.0, 103.0]
         ε = 1e-5
 
-        ad_dv01 = duration(DV01(), KeyRates(), zrc, cfs, tenors)
+        ad_dv01 = duration(DV01(), KeyRates(tenors), zrc, cfs, tenors)
 
         for i in 1:4
             rates_up = copy(rates); rates_up[i] += ε
@@ -802,7 +806,7 @@ end
         # 4% annual coupon, 5yr, face=100
         cfs = [4.0, 4.0, 4.0, 4.0, 104.0]
 
-        krds = duration(KeyRates(), zrc, cfs, tenors)
+        krds = duration(KeyRates(tenors), zrc, cfs, tenors)
 
         # On a flat curve with linear interp, each KRD_i = t_i * cf_i * df_i / V
         dfs = [exp(-r * t) for t in tenors]
@@ -834,7 +838,7 @@ end
         zrc = FM.ZeroRateCurve(rates, tenors, FM.Spline.Linear())
         cfs = [5.0, 5.0, 5.0, 5.0, 105.0]
 
-        krds = duration(KeyRates(), zrc, cfs, tenors)
+        krds = duration(KeyRates(tenors), zrc, cfs, tenors)
 
         dfs = [exp(-r * t) for t in tenors]
         V = sum(cf * df for (cf, df) in zip(cfs, dfs))
@@ -856,7 +860,7 @@ end
         zrc = FM.ZeroRateCurve(rates, tenors, FM.Spline.Linear())
         cfs = [3.0, 3.0, 3.0, 103.0]
 
-        krds = duration(KeyRates(), zrc, cfs, tenors)
+        krds = duration(KeyRates(tenors), zrc, cfs, tenors)
 
         dfs = [exp(-rates[i] * tenors[i]) for i in 1:4]
         V = sum(cf * df for (cf, df) in zip(cfs, dfs))
@@ -873,9 +877,9 @@ end
         zrc = FM.ZeroRateCurve(rates, tenors)
         cfs = [5.0, 5.0, 5.0, 5.0, 105.0]
 
-        single_dv01 = duration(DV01(), KeyRates(), zrc, cfs, tenors)
+        single_dv01 = duration(DV01(), KeyRates(tenors), zrc, cfs, tenors)
 
-        double_dv01 = duration(DV01(), KeyRates(), zrc) do curve
+        double_dv01 = duration(DV01(), KeyRates(tenors), zrc) do curve
             2 * sum(cf * curve(t) for (cf, t) in zip(cfs, tenors))
         end
 
@@ -894,7 +898,7 @@ end
         zrc = FM.ZeroRateCurve(rates, tenors, FM.Spline.Linear())
         cfs = [5.0, 5.0, 5.0, 5.0, 105.0]
 
-        conv = convexity(KeyRates(), zrc, cfs, tenors)
+        conv = convexity(KeyRates(tenors), zrc, cfs, tenors)
 
         dfs = [exp(-r * t) for t in tenors]
         V = sum(cf * df for (cf, df) in zip(cfs, dfs))
@@ -924,10 +928,10 @@ end
 
     # Deterministic KRDs
     zrc = FM.ZeroRateCurve(rates, tenors)
-    det = sensitivities(zrc, cfs, tenors)
+    det = sensitivities(KeyRates(tenors), zrc, cfs, tenors)
 
     # Hull-White MC KRDs (AD through Monte Carlo via pathwise differentiation)
-    hw_result = sensitivities(zrc) do curve
+    hw_result = sensitivities(KeyRates(tenors), zrc) do curve
         hw = FM.ShortRate.HullWhite(0.1, 0.01, curve)
         scenarios = FM.simulate(hw; n_scenarios=500, timestep=1 / 12, horizon=6.0, rng=Xoshiro(42))
         sum(sum(cf * FC.discount(sc, t) for (cf, t) in zip(cfs, tenors)) for sc in scenarios) / 500
@@ -973,24 +977,24 @@ end
     cfs = FC.Cashflow.(amounts, tenors)
 
     # single-curve duration
-    @test duration(zrc, cfs) ≈ duration(zrc, amounts, tenors)
-    @test duration(KeyRates(), zrc, cfs) ≈ duration(KeyRates(), zrc, amounts, tenors)
-    @test duration(DV01(), zrc, cfs) ≈ duration(DV01(), zrc, amounts, tenors)
-    @test duration(DV01(), KeyRates(), zrc, cfs) ≈ duration(DV01(), KeyRates(), zrc, amounts, tenors)
+    @test duration(zrc, tenors, cfs) ≈ duration(zrc, tenors, amounts, tenors)
+    @test duration(KeyRates(tenors), zrc, cfs) ≈ duration(KeyRates(tenors), zrc, amounts, tenors)
+    @test duration(DV01(), zrc, tenors, cfs) ≈ duration(DV01(), zrc, tenors, amounts, tenors)
+    @test duration(DV01(), KeyRates(tenors), zrc, cfs) ≈ duration(DV01(), KeyRates(tenors), zrc, amounts, tenors)
 
     # single-curve convexity
-    @test convexity(zrc, cfs) ≈ convexity(zrc, amounts, tenors)
-    @test convexity(KeyRates(), zrc, cfs) ≈ convexity(KeyRates(), zrc, amounts, tenors)
+    @test convexity(zrc, tenors, cfs) ≈ convexity(zrc, tenors, amounts, tenors)
+    @test convexity(KeyRates(tenors), zrc, cfs) ≈ convexity(KeyRates(tenors), zrc, amounts, tenors)
 
     # single-curve sensitivities
-    s_cf = sensitivities(zrc, cfs)
-    s_raw = sensitivities(zrc, amounts, tenors)
+    s_cf = sensitivities(KeyRates(tenors), zrc, cfs)
+    s_raw = sensitivities(KeyRates(tenors), zrc, amounts, tenors)
     @test s_cf.value ≈ s_raw.value
     @test s_cf.durations ≈ s_raw.durations
     @test s_cf.convexities ≈ s_raw.convexities
 
-    s_dv01_cf = sensitivities(DV01(), zrc, cfs)
-    s_dv01_raw = sensitivities(DV01(), zrc, amounts, tenors)
+    s_dv01_cf = sensitivities(DV01(), KeyRates(tenors), zrc, cfs)
+    s_dv01_raw = sensitivities(DV01(), KeyRates(tenors), zrc, amounts, tenors)
     @test s_dv01_cf.dv01s ≈ s_dv01_raw.dv01s
     @test s_dv01_cf.convexities ≈ s_dv01_raw.convexities
 
@@ -1000,32 +1004,32 @@ end
     base = FM.ZeroRateCurve(base_rates, tenors, FM.Spline.Linear())
     credit = FM.ZeroRateCurve(credit_rates, tenors, FM.Spline.Linear())
 
-    @test duration(IR01(), base, credit, cfs) ≈ duration(IR01(), base, credit, amounts, tenors)
-    @test duration(IR01(), KeyRates(), base, credit, cfs) ≈ duration(IR01(), KeyRates(), base, credit, amounts, tenors)
-    @test duration(CS01(), base, credit, cfs) ≈ duration(CS01(), base, credit, amounts, tenors)
-    @test duration(CS01(), KeyRates(), base, credit, cfs) ≈ duration(CS01(), KeyRates(), base, credit, amounts, tenors)
+    @test duration(IR01(), base, credit, tenors, cfs) ≈ duration(IR01(), base, credit, tenors, amounts, tenors)
+    @test duration(IR01(), KeyRates(tenors), base, credit, cfs) ≈ duration(IR01(), KeyRates(tenors), base, credit, amounts, tenors)
+    @test duration(CS01(), base, credit, tenors, cfs) ≈ duration(CS01(), base, credit, tenors, amounts, tenors)
+    @test duration(CS01(), KeyRates(tenors), base, credit, cfs) ≈ duration(CS01(), KeyRates(tenors), base, credit, amounts, tenors)
 
     # two-curve convexity
-    conv_cf = convexity(base, credit, cfs)
-    conv_raw = convexity(base, credit, amounts, tenors)
+    conv_cf = convexity(base, credit, tenors, cfs)
+    conv_raw = convexity(base, credit, tenors, amounts, tenors)
     @test conv_cf.base ≈ conv_raw.base
     @test conv_cf.credit ≈ conv_raw.credit
     @test conv_cf.cross ≈ conv_raw.cross
 
-    conv_kr_cf = convexity(KeyRates(), base, credit, cfs)
-    conv_kr_raw = convexity(KeyRates(), base, credit, amounts, tenors)
+    conv_kr_cf = convexity(KeyRates(tenors), base, credit, cfs)
+    conv_kr_raw = convexity(KeyRates(tenors), base, credit, amounts, tenors)
     @test conv_kr_cf.base ≈ conv_kr_raw.base
     @test conv_kr_cf.credit ≈ conv_kr_raw.credit
     @test conv_kr_cf.cross ≈ conv_kr_raw.cross
 
     # two-curve sensitivities
-    s2_cf = sensitivities(base, credit, cfs)
-    s2_raw = sensitivities(base, credit, amounts, tenors)
+    s2_cf = sensitivities(KeyRates(tenors), base, credit, cfs)
+    s2_raw = sensitivities(KeyRates(tenors), base, credit, amounts, tenors)
     @test s2_cf.base_durations ≈ s2_raw.base_durations
     @test s2_cf.credit_durations ≈ s2_raw.credit_durations
 
-    s2_dv01_cf = sensitivities(DV01(), base, credit, cfs)
-    s2_dv01_raw = sensitivities(DV01(), base, credit, amounts, tenors)
+    s2_dv01_cf = sensitivities(DV01(), KeyRates(tenors), base, credit, cfs)
+    s2_dv01_raw = sensitivities(DV01(), KeyRates(tenors), base, credit, amounts, tenors)
     @test s2_dv01_cf.base_dv01s ≈ s2_dv01_raw.base_dv01s
     @test s2_dv01_cf.credit_dv01s ≈ s2_dv01_raw.credit_dv01s
 
@@ -1038,8 +1042,8 @@ end
         semi_amounts = [2.5, 2.5, 2.5, 2.5, 2.5, 102.5]
         semi_cfs = FC.Cashflow.(semi_amounts, semi_times)
 
-        @test duration(zrc, semi_cfs) ≈ duration(zrc, semi_amounts, semi_times)
-        @test duration(KeyRates(), zrc, semi_cfs) ≈ duration(KeyRates(), zrc, semi_amounts, semi_times)
+        @test duration(zrc, tenors, semi_cfs) ≈ duration(zrc, tenors, semi_amounts, semi_times)
+        @test duration(KeyRates(tenors), zrc, semi_cfs) ≈ duration(KeyRates(tenors), zrc, semi_amounts, semi_times)
     end
 end
 
@@ -1061,25 +1065,181 @@ end
     @test cv ≈ convexity(c, cfs, times)
 end
 
-@testset "ZRC dispatch priority over AbstractYieldModel forwarding" begin
+@testset "Scalar do-block on ZRC falls through to generic FD path" begin
+    # Previously a ZRC-specific dispatch routed `duration(fn, zrc)` /
+    # `convexity(fn, zrc)` through the AD KRD path. With the unified API,
+    # those 2-arg calls fall through to the generic `duration(yield, vf)`
+    # FD-based scalar path — which adds a parallel shift via Periodic
+    # compounding, not Continuous, so the numerical values are not bitwise
+    # comparable to `sum(KRDs)` (which differentiates w.r.t. continuous zero
+    # rates). We just verify the calls execute and return a Real scalar.
     rates = [0.04, 0.04, 0.04, 0.04, 0.04]
     tenors = [1.0, 2.0, 3.0, 4.0, 5.0]
     zrc = FM.ZeroRateCurve(rates, tenors, FM.Spline.Linear())
     cfs = [5.0, 5.0, 5.0, 5.0, 105.0]
     times = [1.0, 2.0, 3.0, 4.0, 5.0]
 
-    # duration(fn, zrc) should use ZRC AD path (= sum of key rate durations)
-    # The AD path passes a callable model (not a full ZRC), so use curve(t) not discount(curve, t)
     vf_dur = duration(zrc) do curve
         sum(cf * curve(t) for (cf, t) in zip(cfs, times))
     end
-    kr_dur = sum(duration(KeyRates(), zrc, cfs, times))
-    @test vf_dur ≈ kr_dur atol = 1e-10
+    @test vf_dur isa Real
 
-    # convexity(fn, zrc) should use ZRC AD path
     vf_conv = convexity(zrc) do curve
         sum(cf * curve(t) for (cf, t) in zip(cfs, times))
     end
-    kr_conv = sum(convexity(KeyRates(), zrc, cfs, times))
-    @test vf_conv ≈ kr_conv atol = 1e-10
+    @test vf_conv isa Real
+end
+
+# Custom AbstractYieldModel: a composite of two flat curves, multiplicative in
+# discount space. Has no `.rates`/`.tenors`/`.spline` field, so the only way
+# AU can compute KRDs is via TenorShift bumps over the curve's own `discount`.
+struct CompositeTwoFlatYield{A, B} <: FM.Yield.AbstractYieldModel
+    base::A
+    spread::B
+end
+FC.discount(c::CompositeTwoFlatYield, t) = FC.discount(c.base, t) * FC.discount(c.spread, t)
+
+@testset "Custom AbstractYieldModel: KRD/IR01/CS01 on a non-ZRC curve" begin
+    base = FM.Yield.Constant(FC.Continuous(0.04))
+    spread = FM.Yield.Constant(FC.Continuous(0.012))
+    curve = CompositeTwoFlatYield(base, spread)
+
+    tenors = [0.25, 0.5, 1.0, 2.0, 3.0, 5.0, 7.0, 10.0, 15.0, 20.0, 30.0]
+    cfs = vcat(fill(5.0, 29), [105.0])
+    times = collect(1.0:30.0)
+    pv(c) = sum(cf * FC.discount(c, t) for (cf, t) in zip(cfs, times))
+
+    @testset "scalar duration matches sum of KRDs" begin
+        sd = duration(pv, curve, tenors)
+        krds = duration(KeyRates(tenors), pv, curve)
+        @test sd ≈ sum(krds) atol = 1e-10
+    end
+
+    @testset "do-block and cashflow forms agree" begin
+        krds_db = duration(KeyRates(tenors), curve) do c
+            pv(c)
+        end
+        krds_cf = duration(KeyRates(tenors), curve, cfs, times)
+        @test krds_db ≈ krds_cf atol = 1e-10
+    end
+
+    @testset "scalar matches parallel-shift modified duration" begin
+        # Total rate is 5.2% continuous; on annual coupon CFs, modified ≈ Macaulay.
+        rate = 0.04 + 0.012
+        dfs = [exp(-rate * t) for t in times]
+        V = sum(cf * df for (cf, df) in zip(cfs, dfs))
+        mac = sum(t * cf * df for (t, cf, df) in zip(times, cfs, dfs)) / V
+        @test duration(pv, curve, tenors) ≈ mac atol = 1e-6
+    end
+
+    @testset "DV01" begin
+        dv01 = duration(DV01(), pv, curve, tenors)
+        krd_dv01 = duration(DV01(), KeyRates(tenors), pv, curve)
+        @test dv01 ≈ sum(krd_dv01) atol = 1e-10
+        @test all(krd_dv01 .≥ 0)
+    end
+
+    @testset "IR01 ≈ CS01 ≈ DV01 (flat additive case)" begin
+        # Per the docstring: in a flat additive decomposition, bumping base
+        # alone, credit alone, or the composite all shift the total zero rate
+        # by 1bp — so IR01 ≈ CS01 ≈ DV01 individually.
+        pv2c(b, c) = sum(cf * FC.discount(b, t) * FC.discount(c, t) for (cf, t) in zip(cfs, times))
+        ir01 = duration(IR01(), pv2c, base, spread, tenors)
+        cs01 = duration(CS01(), pv2c, base, spread, tenors)
+        dv01 = duration(DV01(), pv, curve, tenors)
+        @test ir01 ≈ cs01 atol = 1e-10
+        @test ir01 ≈ dv01 atol = 1e-10
+    end
+
+    @testset "convexity matrix symmetric, scalar = sum" begin
+        cmat = convexity(KeyRates(tenors), pv, curve)
+        @test cmat ≈ cmat' atol = 1e-10
+        @test convexity(pv, curve, tenors) ≈ sum(cmat) atol = 1e-10
+    end
+
+    @testset "sensitivities bundle" begin
+        r = sensitivities(KeyRates(tenors), curve, cfs, times)
+        @test r.value ≈ pv(curve) atol = 1e-10        # exact baseline; no resampling
+        @test r.durations ≈ duration(KeyRates(tenors), pv, curve) atol = 1e-10
+        @test sum(r.durations) ≈ duration(pv, curve, tenors) atol = 1e-10
+        @test r.convexities ≈ r.convexities' atol = 1e-10
+
+        r_dv01 = sensitivities(DV01(), KeyRates(tenors), curve, cfs, times)
+        @test r_dv01.dv01s ≈ duration(DV01(), KeyRates(tenors), pv, curve) atol = 1e-10
+    end
+
+    @testset "two-curve sensitivities" begin
+        pv2c(b, c) = sum(cf * FC.discount(b, t) * FC.discount(c, t) for (cf, t) in zip(cfs, times))
+        r = sensitivities(KeyRates(tenors), pv2c, base, spread)
+        @test r.value ≈ pv2c(base, spread) atol = 1e-10
+        @test r.base_durations ≈ r.credit_durations atol = 1e-10   # additive ⇒ symmetric
+    end
+
+    @testset "ZRC promotion equivalence (Linear spline)" begin
+        # With Spline.Linear, ZRC's KRDs match TenorShift+hat exactly because
+        # linear interpolation in zero-rate space ≡ triangular-hat bumps.
+        zrc = FM.Yield.ZeroRateCurve(curve, tenors, spline = FM.Spline.Linear())
+        krds_zrc = duration(KeyRates(tenors), pv, zrc)
+        krds_custom = duration(KeyRates(tenors), pv, curve)
+        @test krds_custom ≈ krds_zrc atol = 1e-10
+    end
+
+    @testset "AD through non-flat base (NelsonSiegel + Constant)" begin
+        # Stresses the AD chain on a curve whose `Base.zero(base, t)` is
+        # non-linear in `t`, unlike the `Constant + Constant` flat composite
+        # used in the other testsets here.
+        ns_base = FM.Yield.NelsonSiegel(1.0, 0.04, -0.02, 0.01)
+        flat_spr = FM.Yield.Constant(FC.Continuous(0.012))
+        curve_nf = CompositeTwoFlatYield(ns_base, flat_spr)
+        krds_nf = duration(KeyRates(tenors), pv, curve_nf)
+        @test sum(krds_nf) ≈ duration(pv, curve_nf, tenors) atol = 1e-10
+        @test argmax(krds_nf) == lastindex(tenors)   # sensitivity peaks at the long end
+    end
+end
+
+@testset "KeyRates input validation" begin
+    @test_throws ArgumentError KeyRates(Float64[])
+    @test_throws ArgumentError KeyRates([5.0, 1.0, 10.0])    # unsorted
+    @test_throws ArgumentError KeyRates([1.0, 1.0, 5.0])     # duplicate
+    @test_throws ArgumentError KeyRates([0.0, 1.0, 5.0])     # non-positive
+    @test_throws ArgumentError KeyRates([-1.0, 1.0, 5.0])    # negative
+
+    # Valid grids construct cleanly
+    @test KeyRates([0.25, 1.0, 5.0, 10.0, 30.0]) isa KeyRates
+    @test KeyRates(1:5) isa KeyRates
+end
+
+@testset "Hull-White convenience method: pathwise consistency" begin
+    # The four `sensitivities(KeyRates, hw, ...)` convenience methods snapshot
+    # one UInt64 from the user's rng and rebuild Xoshiro(seed) inside each AD
+    # evaluation. Two calls seeded the same way must produce bit-identical
+    # results — otherwise ForwardDiff's many evaluations of the closure each
+    # draw different MC samples and KRD = -∇V/V is biased by MC noise.
+    rates = [0.03, 0.03, 0.03, 0.03, 0.03]
+    tenors = [1.0, 2.0, 3.0, 4.0, 5.0]
+    cfs = [5.0, 5.0, 5.0, 5.0, 105.0]
+    zrc = FM.ZeroRateCurve(rates, tenors)
+    hw = FM.ShortRate.HullWhite(0.1, 0.01, zrc)
+
+    r1 = sensitivities(KeyRates(tenors), hw, cfs, tenors;
+                       n_scenarios=500, rng=Xoshiro(42))
+    r2 = sensitivities(KeyRates(tenors), hw, cfs, tenors;
+                       n_scenarios=500, rng=Xoshiro(42))
+    @test r1.value ≈ r2.value
+    @test r1.durations ≈ r2.durations
+    @test r1.convexities ≈ r2.convexities
+
+    # DV01 form
+    d1 = sensitivities(DV01(), KeyRates(tenors), hw, cfs, tenors;
+                       n_scenarios=500, rng=Xoshiro(42))
+    d2 = sensitivities(DV01(), KeyRates(tenors), hw, cfs, tenors;
+                       n_scenarios=500, rng=Xoshiro(42))
+    @test d1.value ≈ d2.value
+    @test d1.dv01s ≈ d2.dv01s
+    @test d1.convexities ≈ d2.convexities
+
+    # Different seeds give different MC samples (sanity check the seed is actually used)
+    r3 = sensitivities(KeyRates(tenors), hw, cfs, tenors;
+                       n_scenarios=500, rng=Xoshiro(43))
+    @test !(r1.value ≈ r3.value && r1.durations ≈ r3.durations)
 end
