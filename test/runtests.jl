@@ -1196,3 +1196,50 @@ FC.discount(c::CompositeTwoFlatYield, t) = FC.discount(c.base, t) * FC.discount(
         @test argmax(krds_nf) == lastindex(tenors)   # sensitivity peaks at the long end
     end
 end
+
+@testset "KeyRates input validation" begin
+    @test_throws ArgumentError KeyRates(Float64[])
+    @test_throws ArgumentError KeyRates([5.0, 1.0, 10.0])    # unsorted
+    @test_throws ArgumentError KeyRates([1.0, 1.0, 5.0])     # duplicate
+    @test_throws ArgumentError KeyRates([0.0, 1.0, 5.0])     # non-positive
+    @test_throws ArgumentError KeyRates([-1.0, 1.0, 5.0])    # negative
+
+    # Valid grids construct cleanly
+    @test KeyRates([0.25, 1.0, 5.0, 10.0, 30.0]) isa KeyRates
+    @test KeyRates(1:5) isa KeyRates
+end
+
+@testset "Hull-White convenience method: pathwise consistency" begin
+    # The four `sensitivities(KeyRates, hw, ...)` convenience methods snapshot
+    # one UInt64 from the user's rng and rebuild Xoshiro(seed) inside each AD
+    # evaluation. Two calls seeded the same way must produce bit-identical
+    # results — otherwise ForwardDiff's many evaluations of the closure each
+    # draw different MC samples and KRD = -∇V/V is biased by MC noise.
+    rates = [0.03, 0.03, 0.03, 0.03, 0.03]
+    tenors = [1.0, 2.0, 3.0, 4.0, 5.0]
+    cfs = [5.0, 5.0, 5.0, 5.0, 105.0]
+    zrc = FM.ZeroRateCurve(rates, tenors)
+    hw = FM.ShortRate.HullWhite(0.1, 0.01, zrc)
+
+    r1 = sensitivities(KeyRates(tenors), hw, cfs, tenors;
+                       n_scenarios=500, rng=Xoshiro(42))
+    r2 = sensitivities(KeyRates(tenors), hw, cfs, tenors;
+                       n_scenarios=500, rng=Xoshiro(42))
+    @test r1.value ≈ r2.value
+    @test r1.durations ≈ r2.durations
+    @test r1.convexities ≈ r2.convexities
+
+    # DV01 form
+    d1 = sensitivities(DV01(), KeyRates(tenors), hw, cfs, tenors;
+                       n_scenarios=500, rng=Xoshiro(42))
+    d2 = sensitivities(DV01(), KeyRates(tenors), hw, cfs, tenors;
+                       n_scenarios=500, rng=Xoshiro(42))
+    @test d1.value ≈ d2.value
+    @test d1.dv01s ≈ d2.dv01s
+    @test d1.convexities ≈ d2.convexities
+
+    # Different seeds give different MC samples (sanity check the seed is actually used)
+    r3 = sensitivities(KeyRates(tenors), hw, cfs, tenors;
+                       n_scenarios=500, rng=Xoshiro(43))
+    @test !(r1.value ≈ r3.value && r1.durations ≈ r3.durations)
+end
