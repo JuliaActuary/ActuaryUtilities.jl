@@ -16,6 +16,9 @@ duration(discount_rate, cfs, times)                #   2.78
 convexity(discount_rate, cfs, times)               #  10.62
 ```
 
+!!! tip "Floating-rate & curve-dependent instruments"
+    `Macaulay`/`Modified` duration are for **fixed** cashflows. For a floating-rate bond — or anything whose coupons depend on the curve — use `duration(Effective(), contract, curve, tenors)` and `sensitivities(contract, curve, tenors)`, which re-project the coupons under bumped curves and return both the rate (effective) and spread durations, in years and as DV01s. See [Key Rate Sensitivities](@ref). Applying the plain cashflow-vector methods to a floater's *collected* coupons gives the **spread** duration, not the rate duration.
+
 
 ## Curve Transformations
 

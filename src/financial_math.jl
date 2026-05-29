@@ -11,8 +11,8 @@ import Random
 export irr, internal_rate_of_return, spread,
     pv, present_value, price, present_values,
     breakeven, moic,
-    Macaulay, Modified, DV01, IR01, CS01, KeyRates, KeyRatePar, KeyRateZero, KeyRate, duration, convexity,
-    sensitivities
+    Macaulay, Modified, DV01, IR01, CS01, Effective, Spread, KeyRates, KeyRatePar, KeyRateZero, KeyRate, duration, convexity,
+    sensitivities, zspread, locked_floater
 
 """
     present_values(interest, cashflows, timepoints)
@@ -154,6 +154,32 @@ Requires both a base curve and credit spread to be specified. For a flat additiv
 See also: [`IR01`](@ref), [`DV01`](@ref)
 """
 struct CS01 <: Duration end
+
+"""
+    Effective <: Duration
+
+Effective (rate) duration / convexity for a curve-dependent contract (e.g. a
+floating-rate bond). Reprices under a shifted curve with the projected cashflows
+RE-COMPUTED — a floating coupon re-fixes off the bumped curve. This is the correct
+interest-rate duration for floating-rate instruments; `Modified`/`Macaulay` are valid
+only for curve-independent (fixed) cashflows. Use with a `FinanceModels` contract:
+`duration(Effective(), contract, curve, tenors)`.
+
+See also: [`Spread`](@ref), [`sensitivities`](@ref), [`locked_floater`](@ref).
+"""
+struct Effective <: Duration end
+
+"""
+    Spread <: Duration
+
+Spread (credit) duration: bumps the discount curve only, holding the projected
+(index) cashflows fixed. For a floating-rate bond this is ≈ time to maturity — the
+discount-margin / credit sensitivity (and what the fixed-cashflow `duration` methods
+return if you freeze a floater's collected coupons).
+
+See also: [`Effective`](@ref), [`sensitivities`](@ref).
+"""
+struct Spread <: Duration end
 
 """
     KeyRates(tenors) <: Duration
@@ -1094,6 +1120,180 @@ sensitivities(vf::Function, kr::KeyRates, curve::AYM)                    = sensi
 sensitivities(vf::Function, ::DV01, kr::KeyRates, curve::AYM)            = sensitivities(DV01(), kr, vf, curve)
 sensitivities(vf::Function, kr::KeyRates, base::AYM, credit::AYM)        = sensitivities(kr, vf, base, credit)
 sensitivities(vf::Function, ::DV01, kr::KeyRates, base::AYM, credit::AYM) = sensitivities(DV01(), kr, vf, base, credit)
+
+## ── Contract-aware duration: floating-rate & other curve-dependent instruments ──
+#
+# For a contract whose projected cashflows depend on the curve — e.g.
+# `Bond.Floating`, whose coupon re-fixes off the forward curve each period —
+# duration must be computed by RE-PROJECTING: shift the curve, recompute the
+# cashflows, reprice. The cashflow-vector methods above freeze a collected
+# `Projection(...)` and bump only the discount, which yields the SPREAD duration
+# (≈ maturity), not the effective/rate duration.
+#
+# Multi-curve convention (OpenGamma, Henrard 2011, §5.2): coupons are ESTIMATED on a
+# forward/index curve and DISCOUNTED on a credit curve.
+#   • effective (rate) duration — bump both, coupons re-fix → ≈ next reset (≈ 0 for an idealized par floater)
+#   • spread (credit) duration  — bump the discount only, coupons held → ≈ maturity
+
+# Walk a contract tree, collecting the index/forward model keys it reads.
+_contract_keys(c::FinanceModels.Bond.Floating) = (c.key,)
+_contract_keys(c::FinanceCore.Composite)        = (_contract_keys(c.a)..., _contract_keys(c.b)...)
+_contract_keys(c::FinanceModels.Forward)        = _contract_keys(c.instrument)
+_contract_keys(::FinanceCore.AbstractContract)  = ()
+
+# Re-projecting valuations. The model `Dict` is rebuilt INSIDE the closure so that
+# ForwardDiff.Dual numbers flow into its value type when the curve is bumped — the
+# central type-stability rule for this feature.
+function _reproject(contract)
+    ks = _contract_keys(contract)
+    return curve -> isempty(ks) ? FinanceCore.present_value(curve, contract) :
+        FinanceCore.present_value(curve,
+            FinanceModels.Projection(contract, Dict(k => curve for k in ks), FinanceModels.CashflowProjection()))
+end
+# Two-curve: estimate coupons on `forward`, discount on `credit`.
+function _reproject2(contract)
+    ks = _contract_keys(contract)
+    return (forward, credit) -> isempty(ks) ? FinanceCore.present_value(credit, contract) :
+        FinanceCore.present_value(credit,
+            FinanceModels.Projection(contract, Dict(k => forward for k in ks), FinanceModels.CashflowProjection()))
+end
+
+"""
+    sensitivities(contract, curve, tenors) -> NamedTuple
+    sensitivities(contract, forward, credit, tenors) -> NamedTuple
+
+Effective (rate) and spread (credit) duration **and** DV01 for a (possibly
+curve-dependent) `contract` — e.g. a `FinanceModels.Bond.Floating` — computed by
+re-projecting the cashflows under bumped curves so that floating coupons re-fix.
+
+Following the multi-curve convention, coupons are estimated on the `forward` curve
+and discounted on the `credit` curve (pass a single `curve` for both). One AD pass
+over the `tenors` key-rate grid returns:
+
+  - `value` — present value
+  - `effective_duration` / `effective_dv01` — bump both curves together (coupons
+    re-fix); the interest-rate duration. ≈ time to next reset for a floater (≈ 0 for an
+    idealized par floater that re-fixes its current coupon — see [`locked_floater`](@ref)).
+  - `spread_duration` / `spread_dv01` — bump the discount/credit curve only, coupons
+    held fixed; the discount-margin / credit duration. ≈ maturity for a floater.
+  - `forward_duration` / `forward_dv01` — bump the forward/index curve only (coupons
+    re-fix, discount held). `effective = forward + spread` to first order.
+
+Durations are in years; DV01s are dollars per 1bp per unit of present value. For a
+fixed bond `effective == spread ==` the modified duration and `forward == 0`.
+
+# Example
+```julia
+using ActuaryUtilities, FinanceModels, FinanceCore
+curve   = Yield.Constant(Continuous(0.04))
+floater = Bond.Floating(0.01, Periodic(1), 5.0, "SOFR")
+s = sensitivities(floater, curve, [1.0, 2.0, 3.0, 5.0])
+s.effective_duration   # small — coupons reset with rates
+s.spread_duration      # ≈ 5 — discount-margin / credit risk
+```
+
+See also: [`duration`](@ref) with [`Effective`](@ref)/[`Spread`](@ref), [`zspread`](@ref), [`locked_floater`](@ref).
+"""
+function sensitivities(contract::FinanceCore.AbstractContract, forward::AYM, credit::AYM, tenors)
+    s = sensitivities(KeyRates(tenors), _reproject2(contract), forward, credit)
+    v = s.value
+    fwd = sum(s.base_durations)
+    crd = sum(s.credit_durations)
+    eff = fwd + crd
+    return (;
+        value = v,
+        effective_duration = eff, effective_dv01 = eff * v / 10_000,
+        spread_duration    = crd, spread_dv01    = crd * v / 10_000,
+        forward_duration   = fwd, forward_dv01   = fwd * v / 10_000,
+    )
+end
+sensitivities(contract::FinanceCore.AbstractContract, curve::AYM, tenors) =
+    sensitivities(contract, curve, curve, tenors)
+
+"""
+    duration(Effective(), contract, curve, tenors)
+    duration(Effective(), contract, forward, credit, tenors)
+    duration(Spread(),    contract, curve, tenors)
+    duration(Spread(),    contract, forward, credit, tenors)
+
+Effective (rate) or spread (credit) duration **in years** for a curve-dependent
+`contract`, computed by re-projecting cashflows under bumped curves. See
+[`sensitivities`](@ref) for the full breakdown (durations + DV01s in one pass) and
+the multi-curve (`forward`/`credit`) convention.
+"""
+function duration(::Effective, contract::FinanceCore.AbstractContract, forward::AYM, credit::AYM, tenors)
+    return sensitivities(contract, forward, credit, tenors).effective_duration
+end
+duration(::Effective, contract::FinanceCore.AbstractContract, curve::AYM, tenors) =
+    duration(Effective(), contract, curve, curve, tenors)
+function duration(::Spread, contract::FinanceCore.AbstractContract, forward::AYM, credit::AYM, tenors)
+    return sensitivities(contract, forward, credit, tenors).spread_duration
+end
+duration(::Spread, contract::FinanceCore.AbstractContract, curve::AYM, tenors) =
+    duration(Spread(), contract, curve, curve, tenors)
+
+"""
+    convexity(Effective(), contract, curve, tenors) -> scalar
+
+Effective convexity for a curve-dependent `contract`: the scalar second-order
+sensitivity to a parallel shift of `curve`, with the cashflows re-projected.
+"""
+function convexity(::Effective, contract::FinanceCore.AbstractContract, curve::AYM, tenors)
+    return convexity(_reproject(contract), curve, tenors)
+end
+
+"""
+    zspread(contract, credit, market_price; forward=credit, s0=0.0) -> (; zspread, zspread_dv01)
+
+The z-spread: the constant continuously-compounded spread `s` added to the `credit`
+(discount) curve such that the model price equals `market_price`, with coupons
+estimated on the `forward` curve (held fixed). Returns the spread and its sensitivity
+`zspread_dv01` (dollars per 1bp parallel move of `credit + s`). Solved by Newton's
+method with AD derivatives.
+
+# Example
+```julia
+z = zspread(floater, credit_curve, observed_price)
+z.zspread        # discount margin (continuous)
+z.zspread_dv01   # spread DV01 at that level
+```
+"""
+function zspread(contract::FinanceCore.AbstractContract, credit::AYM, market_price; forward::AYM = credit, s0 = 0.0, tol = 1e-12, maxiter = 100)
+    ks = _contract_keys(contract)
+    pvs(s) = let disc = credit + ((z, t) -> z + FinanceCore.Continuous(s))
+        isempty(ks) ? FinanceCore.present_value(disc, contract) :
+            FinanceCore.present_value(disc,
+                FinanceModels.Projection(contract, Dict(k => forward for k in ks), FinanceModels.CashflowProjection()))
+    end
+    f(s) = pvs(s) - market_price
+    s = float(s0)
+    for _ in 1:maxiter
+        fs = f(s)
+        abs(fs) < tol && break
+        s -= fs / ForwardDiff.derivative(f, s)
+    end
+    return (; zspread = s, zspread_dv01 = -ForwardDiff.derivative(pvs, s) / 10_000)
+end
+
+"""
+    locked_floater(fl::FinanceModels.Bond.Floating, current_coupon, next_reset)
+
+Model an **in-force** floating-rate note whose current coupon is LOCKED at
+`current_coupon` (the per-period amount fixed at the last reset) until `next_reset`,
+after which it floats. Returns a `Composite` of a coupon-only stub at `next_reset`
+plus a forward-starting floater for the remainder (the principal redemption rides the
+forward leg).
+
+Use this for the conventional FRN rate duration ≈ time to next reset. Without it (a
+floater that re-fixes every coupon off the live curve) the idealized effective
+duration is ≈ 0 at a reset date.
+"""
+function locked_floater(fl::FinanceModels.Bond.Floating, current_coupon, next_reset)
+    stub = FinanceCore.Cashflow(current_coupon, next_reset)
+    rest = FinanceModels.Forward(next_reset,
+        FinanceModels.Bond.Floating(fl.coupon_rate, fl.frequency, fl.maturity - next_reset, fl.key))
+    return FinanceCore.Composite(stub, rest)
+end
 
 ## Hull-White convenience methods
 #

@@ -1243,3 +1243,84 @@ end
                        n_scenarios=500, rng=Xoshiro(43))
     @test !(r1.value ≈ r3.value && r1.durations ≈ r3.durations)
 end
+
+@testset "Effective vs spread duration (floating-rate / curve-dependent)" begin
+    # Floating-rate bonds re-fix their coupons off the curve, so the only correct
+    # interest-rate duration is computed by RE-PROJECTING (Effective). Freezing the
+    # collected coupons and bumping the discount gives the SPREAD duration (≈ maturity).
+    mats = [1.0, 2.0, 3.0, 5.0, 7.0]
+    zr = [0.02, 0.025, 0.03, 0.035, 0.04]
+    curve = FM.Yield.Spline(FM.Spline.Linear(), mats, zr)
+    tenors = mats
+    fl0 = FM.Bond.Floating(0.0, FC.Periodic(1), 5.0, "IDX")    # pure index floater
+    flm = FM.Bond.Floating(0.02, FC.Periodic(1), 5.0, "IDX")   # 200bp margin
+    fb = FM.Bond.Fixed(0.04, FC.Periodic(1), 5.0)
+
+    reproj(c, crv) = FC.present_value(crv, FM.Projection(c, Dict("IDX" => crv), FM.CashflowProjection()))
+
+    @testset "par floater: effective ≈ 0, spread ≈ maturity" begin
+        s = sensitivities(fl0, curve, tenors)
+        @test s.value ≈ 1.0 atol = 1e-6                       # par floater prices to par on any curve
+        @test duration(Effective(), fl0, curve, tenors) ≈ 0.0 atol = 1e-8
+        @test s.effective_duration ≈ 0.0 atol = 1e-8
+        @test s.spread_duration > 4.0                          # ≈ maturity, not ≈ 0
+        @test convexity(Effective(), fl0, curve, tenors) ≈ 0.0 atol = 1e-6
+    end
+
+    @testset "effective = forward + spread (first-order additivity)" begin
+        s = sensitivities(flm, curve, tenors)
+        @test s.effective_duration ≈ s.forward_duration + s.spread_duration atol = 1e-10
+    end
+
+    @testset "fixed bond: effective == spread == modified, forward == 0" begin
+        s = sensitivities(fb, curve, tenors)
+        modified = duration(curve, tenors, collect(FM.Projection(fb, curve, FM.CashflowProjection())))
+        @test s.effective_duration ≈ modified atol = 1e-8
+        @test s.spread_duration ≈ modified atol = 1e-8
+        @test s.forward_duration ≈ 0.0 atol = 1e-8
+    end
+
+    @testset "effective: AD matches central finite difference (re-projecting)" begin
+        Δ = 1e-4
+        up = curve + ((z, t) -> z + FC.Continuous(+Δ))
+        down = curve + ((z, t) -> z + FC.Continuous(-Δ))
+        P0, Pu, Pd = reproj(flm, curve), reproj(flm, up), reproj(flm, down)
+        eff_fd = (Pd - Pu) / (2Δ * P0)
+        @test duration(Effective(), flm, curve, tenors) ≈ eff_fd atol = 1e-4
+    end
+
+    @testset "spread duration == frozen fixed-cashflow duration" begin
+        frozen = collect(FM.Projection(flm, Dict("IDX" => curve), FM.CashflowProjection()))
+        @test duration(Spread(), flm, curve, tenors) ≈ duration(curve, tenors, frozen) atol = 1e-6
+    end
+
+    @testset "dollar <-> year consistency" begin
+        s = sensitivities(flm, curve, tenors)
+        @test s.effective_dv01 ≈ s.effective_duration * s.value / 10_000 atol = 1e-12
+        @test s.spread_dv01 ≈ s.spread_duration * s.value / 10_000 atol = 1e-12
+    end
+
+    @testset "multi-curve: distinct forward vs credit curves" begin
+        fwd = FM.Yield.Constant(FC.Continuous(0.03))
+        s = sensitivities(flm, fwd, curve, tenors)             # estimate on fwd, discount on curve
+        @test s.spread_duration > 4.0                          # credit/discount ≈ maturity
+        @test s.forward_duration < 0.0                         # bumping the index raises coupons → raises value
+    end
+
+    @testset "z-spread is zero at the model price and round-trips" begin
+        pvm = reproj(flm, curve)
+        @test zspread(flm, curve, pvm).zspread ≈ 0.0 atol = 1e-8
+        mkt = pvm - 0.03
+        z = zspread(flm, curve, mkt)
+        @test z.zspread > 0.0
+        reprice = FC.present_value(curve + ((zz, t) -> zz + FC.Continuous(z.zspread)),
+            FM.Projection(flm, Dict("IDX" => curve), FM.CashflowProjection()))
+        @test reprice ≈ mkt atol = 1e-10
+    end
+
+    @testset "locked current coupon -> rate duration ≈ time to next reset" begin
+        lk = locked_floater(fl0, 0.05, 1.0)                    # current coupon 5%, resets at t=1
+        @test duration(Effective(), lk, curve, tenors) ≈ 1.0 atol = 0.1
+        @test duration(Spread(), lk, curve, tenors) > 4.0
+    end
+end

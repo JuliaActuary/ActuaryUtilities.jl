@@ -247,6 +247,42 @@ end
 
 Bumping base rates changes both the floating coupon amounts and the discount factors (partially canceling), while bumping credit rates only affects discounting. This asymmetry is why the IR01/CS01 decomposition matters for instruments with rate-dependent cashflows.
 
+## Floating-Rate Instruments: Effective vs Spread Duration
+
+The example above re-projects the floating coupons by hand inside a do-block. For a `FinanceModels` contract you can skip that boilerplate: `sensitivities`, `duration(Effective(), …)`, and `duration(Spread(), …)` accept a contract directly, re-project the cashflows for you, and return both the **year durations** (for asset/liability matching) and the **dollar DV01s** (for hedging) in one AD pass.
+
+A floating-rate bond has two distinct durations, and both matter:
+
+- **Effective (rate) duration** — bump the curve and let the coupons re-fix. Small for a floater (≈ time to next reset), because it re-prices to par at each reset.
+- **Spread (credit) duration** — bump the discount only, holding the coupons fixed. ≈ the bond's maturity (the discount-margin / credit risk).
+
+This is the standard fixed-income decomposition (e.g. OpenGamma, *Bond Pricing*, Henrard 2011, §5.2: coupons are *estimated* on a forward/index curve and *discounted* on a credit curve). `Modified`/`Macaulay` duration applies only to fixed, curve-independent cashflows — a floater has no single yield, so its interest-rate duration must be computed by re-pricing under shifted curves with the coupons recomputed. Handing a floater's *collected* cashflows to the plain `duration` methods freezes the coupons and yields the **spread** duration, not the rate duration.
+
+```@example sensitivities
+floater = Bond.Floating(0.02, Periodic(1), 5.0, "SOFR")   # SOFR + 200bp, 5y annual
+s = sensitivities(floater, zrc, tenors)
+(effective_duration = s.effective_duration,   # small — coupons reset with rates
+ spread_duration    = s.spread_duration,      # ≈ 5 — credit / discount-margin risk
+ effective_dv01     = s.effective_dv01,
+ spread_dv01        = s.spread_dv01)
+```
+
+Pass distinct `forward` and `credit` curves for the full multi-curve view — `sensitivities(floater, forward, credit, tenors)` — and use [`zspread`](@ref) to solve the discount margin against a market price:
+
+```@example sensitivities
+z = zspread(floater, zrc, 1.05)   # constant spread on the discount curve s.t. PV == 1.05
+(z.zspread, z.zspread_dv01)
+```
+
+### The locked current coupon
+
+A floater you already hold has its current coupon fixed at the last reset — it does **not** move when rates move today, so the conventional rate duration is ≈ time to the next reset, not zero. Model the in-force note with [`locked_floater`](@ref):
+
+```@example sensitivities
+inforce = locked_floater(floater, 0.045, 1.0)   # 4.5% coupon locked, next reset in 1y
+duration(Effective(), inforce, zrc, tenors)      # ≈ 1y (the next reset), not ≈ 5
+```
+
 ## Portfolio Sensitivity
 
 DV01s are additive across positions, so a portfolio's DV01 vector equals the sum of individual DV01s:
