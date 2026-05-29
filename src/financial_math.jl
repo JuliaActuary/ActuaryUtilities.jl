@@ -760,10 +760,10 @@ function _keyrate_ad(base::AYM, credit::AYM, tenors::AbstractVector, valuation_f
 end
 
 # Standard valuation for fixed cashflows
-_standard_valuation(cfs, times) = curve -> sum(cf * curve(t) for (cf, t) in zip(cfs, times))
+_valuation(cfs, times) = curve -> sum(cf * curve(t) for (cf, t) in zip(cfs, times))
 
 # Two-curve standard valuation (additive on rates → multiplicative on discount factors)
-_standard_valuation_2curve(cfs, times) = (base, credit) -> sum(cf * base(t) * credit(t) for (cf, t) in zip(cfs, times))
+_valuation2(cfs, times) = (base, credit) -> sum(cf * base(t) * credit(t) for (cf, t) in zip(cfs, times))
 
 ## AbstractYieldModel + KeyRates(tenors): KRD / IR01 / CS01 / convexity / sensitivities
 #
@@ -798,10 +798,7 @@ end
 function duration(curve::AYM, tenors, cfs, times)
     return sum(duration(KeyRates(tenors), curve, cfs, times))
 end
-function duration(curve::AYM, tenors, cfs::AbstractVector{<:FinanceCore.Cashflow})
-    amounts, times = _extract_cfs_times(cfs)
-    return duration(curve, tenors, amounts, times)
-end
+duration(curve::AYM, tenors, cfs::AbstractVector{<:FinanceCore.Cashflow}) = duration(curve, tenors, _extract_cfs_times(cfs)...)
 
 """
     duration(kr::KeyRates, valuation_fn, curve::AbstractYieldModel) -> Vector
@@ -854,12 +851,9 @@ function duration(kr::KeyRates, valuation_fn::Function, curve::AYM)
     return -ad.gradient ./ ad.value
 end
 function duration(kr::KeyRates, curve::AYM, cfs, times)
-    return duration(kr, _standard_valuation(cfs, times), curve)
+    return duration(kr, _valuation(cfs, times), curve)
 end
-function duration(kr::KeyRates, curve::AYM, cfs::AbstractVector{<:FinanceCore.Cashflow})
-    amounts, times = _extract_cfs_times(cfs)
-    return duration(kr, curve, amounts, times)
-end
+duration(kr::KeyRates, curve::AYM, cfs::AbstractVector{<:FinanceCore.Cashflow}) = duration(kr, curve, _extract_cfs_times(cfs)...)
 
 """
     duration(::DV01, valuation_fn, curve::AbstractYieldModel, tenors) -> scalar
@@ -876,22 +870,16 @@ end
 function duration(::DV01, curve::AYM, tenors, cfs, times)
     return sum(duration(DV01(), KeyRates(tenors), curve, cfs, times))
 end
-function duration(::DV01, curve::AYM, tenors, cfs::AbstractVector{<:FinanceCore.Cashflow})
-    amounts, times = _extract_cfs_times(cfs)
-    return duration(DV01(), curve, tenors, amounts, times)
-end
+duration(::DV01, curve::AYM, tenors, cfs::AbstractVector{<:FinanceCore.Cashflow}) = duration(DV01(), curve, tenors, _extract_cfs_times(cfs)...)
 
 function duration(::DV01, kr::KeyRates, valuation_fn::Function, curve::AYM)
     ad = _keyrate_ad(curve, kr.tenors, valuation_fn)
     return -ad.gradient ./ 10_000
 end
 function duration(::DV01, kr::KeyRates, curve::AYM, cfs, times)
-    return duration(DV01(), kr, _standard_valuation(cfs, times), curve)
+    return duration(DV01(), kr, _valuation(cfs, times), curve)
 end
-function duration(::DV01, kr::KeyRates, curve::AYM, cfs::AbstractVector{<:FinanceCore.Cashflow})
-    amounts, times = _extract_cfs_times(cfs)
-    return duration(DV01(), kr, curve, amounts, times)
-end
+duration(::DV01, kr::KeyRates, curve::AYM, cfs::AbstractVector{<:FinanceCore.Cashflow}) = duration(DV01(), kr, curve, _extract_cfs_times(cfs)...)
 
 """
     duration(::IR01, valuation_fn, base::AbstractYieldModel, credit::AbstractYieldModel, tenors) -> scalar
@@ -910,22 +898,16 @@ end
 function duration(::IR01, base::AYM, credit::AYM, tenors, cfs, times)
     return sum(duration(IR01(), KeyRates(tenors), base, credit, cfs, times))
 end
-function duration(::IR01, base::AYM, credit::AYM, tenors, cfs::AbstractVector{<:FinanceCore.Cashflow})
-    amounts, times = _extract_cfs_times(cfs)
-    return duration(IR01(), base, credit, tenors, amounts, times)
-end
+duration(::IR01, base::AYM, credit::AYM, tenors, cfs::AbstractVector{<:FinanceCore.Cashflow}) = duration(IR01(), base, credit, tenors, _extract_cfs_times(cfs)...)
 
 function duration(::IR01, kr::KeyRates, valuation_fn::Function, base::AYM, credit::AYM)
     ad = _keyrate_ad(base, credit, kr.tenors, valuation_fn)
     return -ad.base_gradient ./ 10_000
 end
 function duration(::IR01, kr::KeyRates, base::AYM, credit::AYM, cfs, times)
-    return duration(IR01(), kr, _standard_valuation_2curve(cfs, times), base, credit)
+    return duration(IR01(), kr, _valuation2(cfs, times), base, credit)
 end
-function duration(::IR01, kr::KeyRates, base::AYM, credit::AYM, cfs::AbstractVector{<:FinanceCore.Cashflow})
-    amounts, times = _extract_cfs_times(cfs)
-    return duration(IR01(), kr, base, credit, amounts, times)
-end
+duration(::IR01, kr::KeyRates, base::AYM, credit::AYM, cfs::AbstractVector{<:FinanceCore.Cashflow}) = duration(IR01(), kr, base, credit, _extract_cfs_times(cfs)...)
 
 function duration(::CS01, valuation_fn::Function, base::AYM, credit::AYM, tenors)
     return sum(duration(CS01(), KeyRates(tenors), valuation_fn, base, credit))
@@ -933,22 +915,16 @@ end
 function duration(::CS01, base::AYM, credit::AYM, tenors, cfs, times)
     return sum(duration(CS01(), KeyRates(tenors), base, credit, cfs, times))
 end
-function duration(::CS01, base::AYM, credit::AYM, tenors, cfs::AbstractVector{<:FinanceCore.Cashflow})
-    amounts, times = _extract_cfs_times(cfs)
-    return duration(CS01(), base, credit, tenors, amounts, times)
-end
+duration(::CS01, base::AYM, credit::AYM, tenors, cfs::AbstractVector{<:FinanceCore.Cashflow}) = duration(CS01(), base, credit, tenors, _extract_cfs_times(cfs)...)
 
 function duration(::CS01, kr::KeyRates, valuation_fn::Function, base::AYM, credit::AYM)
     ad = _keyrate_ad(base, credit, kr.tenors, valuation_fn)
     return -ad.credit_gradient ./ 10_000
 end
 function duration(::CS01, kr::KeyRates, base::AYM, credit::AYM, cfs, times)
-    return duration(CS01(), kr, _standard_valuation_2curve(cfs, times), base, credit)
+    return duration(CS01(), kr, _valuation2(cfs, times), base, credit)
 end
-function duration(::CS01, kr::KeyRates, base::AYM, credit::AYM, cfs::AbstractVector{<:FinanceCore.Cashflow})
-    amounts, times = _extract_cfs_times(cfs)
-    return duration(CS01(), kr, base, credit, amounts, times)
-end
+duration(::CS01, kr::KeyRates, base::AYM, credit::AYM, cfs::AbstractVector{<:FinanceCore.Cashflow}) = duration(CS01(), kr, base, credit, _extract_cfs_times(cfs)...)
 
 # Do-block-first forwarders (support `f(args...) do x; ...; end` syntax)
 duration(vf::Function, kr::KeyRates, curve::AYM)                          = duration(kr,          vf, curve)
@@ -979,34 +955,25 @@ end
 function convexity(curve::AYM, tenors, cfs, times)
     return sum(convexity(KeyRates(tenors), curve, cfs, times))
 end
-function convexity(curve::AYM, tenors, cfs::AbstractVector{<:FinanceCore.Cashflow})
-    amounts, times = _extract_cfs_times(cfs)
-    return convexity(curve, tenors, amounts, times)
-end
+convexity(curve::AYM, tenors, cfs::AbstractVector{<:FinanceCore.Cashflow}) = convexity(curve, tenors, _extract_cfs_times(cfs)...)
 
 function convexity(kr::KeyRates, valuation_fn::Function, curve::AYM)
     ad = _keyrate_ad(curve, kr.tenors, valuation_fn; order = 2)
     return ad.hessian ./ ad.value
 end
 function convexity(kr::KeyRates, curve::AYM, cfs, times)
-    return convexity(kr, _standard_valuation(cfs, times), curve)
+    return convexity(kr, _valuation(cfs, times), curve)
 end
-function convexity(kr::KeyRates, curve::AYM, cfs::AbstractVector{<:FinanceCore.Cashflow})
-    amounts, times = _extract_cfs_times(cfs)
-    return convexity(kr, curve, amounts, times)
-end
+convexity(kr::KeyRates, curve::AYM, cfs::AbstractVector{<:FinanceCore.Cashflow}) = convexity(kr, curve, _extract_cfs_times(cfs)...)
 
 function convexity(valuation_fn::Function, base::AYM, credit::AYM, tenors)
     cv = convexity(KeyRates(tenors), valuation_fn, base, credit)
     return (; base = sum(cv.base), credit = sum(cv.credit), cross = sum(cv.cross))
 end
 function convexity(base::AYM, credit::AYM, tenors, cfs, times)
-    return convexity(_standard_valuation_2curve(cfs, times), base, credit, tenors)
+    return convexity(_valuation2(cfs, times), base, credit, tenors)
 end
-function convexity(base::AYM, credit::AYM, tenors, cfs::AbstractVector{<:FinanceCore.Cashflow})
-    amounts, times = _extract_cfs_times(cfs)
-    return convexity(base, credit, tenors, amounts, times)
-end
+convexity(base::AYM, credit::AYM, tenors, cfs::AbstractVector{<:FinanceCore.Cashflow}) = convexity(base, credit, tenors, _extract_cfs_times(cfs)...)
 
 function convexity(kr::KeyRates, valuation_fn::Function, base::AYM, credit::AYM)
     ad = _keyrate_ad(base, credit, kr.tenors, valuation_fn; order = 2)
@@ -1017,12 +984,9 @@ function convexity(kr::KeyRates, valuation_fn::Function, base::AYM, credit::AYM)
     )
 end
 function convexity(kr::KeyRates, base::AYM, credit::AYM, cfs, times)
-    return convexity(kr, _standard_valuation_2curve(cfs, times), base, credit)
+    return convexity(kr, _valuation2(cfs, times), base, credit)
 end
-function convexity(kr::KeyRates, base::AYM, credit::AYM, cfs::AbstractVector{<:FinanceCore.Cashflow})
-    amounts, times = _extract_cfs_times(cfs)
-    return convexity(kr, base, credit, amounts, times)
-end
+convexity(kr::KeyRates, base::AYM, credit::AYM, cfs::AbstractVector{<:FinanceCore.Cashflow}) = convexity(kr, base, credit, _extract_cfs_times(cfs)...)
 
 # Do-block-first forwarders (support `f(args...) do x; ...; end` syntax)
 convexity(vf::Function, kr::KeyRates, curve::AYM)                 = convexity(kr, vf, curve)
@@ -1048,12 +1012,9 @@ function sensitivities(kr::KeyRates, valuation_fn::Function, curve::AYM)
     )
 end
 function sensitivities(kr::KeyRates, curve::AYM, cfs, times)
-    return sensitivities(kr, _standard_valuation(cfs, times), curve)
+    return sensitivities(kr, _valuation(cfs, times), curve)
 end
-function sensitivities(kr::KeyRates, curve::AYM, cfs::AbstractVector{<:FinanceCore.Cashflow})
-    amounts, times = _extract_cfs_times(cfs)
-    return sensitivities(kr, curve, amounts, times)
-end
+sensitivities(kr::KeyRates, curve::AYM, cfs::AbstractVector{<:FinanceCore.Cashflow}) = sensitivities(kr, curve, _extract_cfs_times(cfs)...)
 
 function sensitivities(::DV01, kr::KeyRates, valuation_fn::Function, curve::AYM)
     ad = _keyrate_ad(curve, kr.tenors, valuation_fn; order = 2)
@@ -1064,12 +1025,9 @@ function sensitivities(::DV01, kr::KeyRates, valuation_fn::Function, curve::AYM)
     )
 end
 function sensitivities(::DV01, kr::KeyRates, curve::AYM, cfs, times)
-    return sensitivities(DV01(), kr, _standard_valuation(cfs, times), curve)
+    return sensitivities(DV01(), kr, _valuation(cfs, times), curve)
 end
-function sensitivities(::DV01, kr::KeyRates, curve::AYM, cfs::AbstractVector{<:FinanceCore.Cashflow})
-    amounts, times = _extract_cfs_times(cfs)
-    return sensitivities(DV01(), kr, curve, amounts, times)
-end
+sensitivities(::DV01, kr::KeyRates, curve::AYM, cfs::AbstractVector{<:FinanceCore.Cashflow}) = sensitivities(DV01(), kr, curve, _extract_cfs_times(cfs)...)
 
 function sensitivities(kr::KeyRates, valuation_fn::Function, base::AYM, credit::AYM)
     ad = _keyrate_ad(base, credit, kr.tenors, valuation_fn; order = 2)
@@ -1085,12 +1043,9 @@ function sensitivities(kr::KeyRates, valuation_fn::Function, base::AYM, credit::
     )
 end
 function sensitivities(kr::KeyRates, base::AYM, credit::AYM, cfs, times)
-    return sensitivities(kr, _standard_valuation_2curve(cfs, times), base, credit)
+    return sensitivities(kr, _valuation2(cfs, times), base, credit)
 end
-function sensitivities(kr::KeyRates, base::AYM, credit::AYM, cfs::AbstractVector{<:FinanceCore.Cashflow})
-    amounts, times = _extract_cfs_times(cfs)
-    return sensitivities(kr, base, credit, amounts, times)
-end
+sensitivities(kr::KeyRates, base::AYM, credit::AYM, cfs::AbstractVector{<:FinanceCore.Cashflow}) = sensitivities(kr, base, credit, _extract_cfs_times(cfs)...)
 
 function sensitivities(::DV01, kr::KeyRates, valuation_fn::Function, base::AYM, credit::AYM)
     ad = _keyrate_ad(base, credit, kr.tenors, valuation_fn; order = 2)
@@ -1106,12 +1061,9 @@ function sensitivities(::DV01, kr::KeyRates, valuation_fn::Function, base::AYM, 
     )
 end
 function sensitivities(::DV01, kr::KeyRates, base::AYM, credit::AYM, cfs, times)
-    return sensitivities(DV01(), kr, _standard_valuation_2curve(cfs, times), base, credit)
+    return sensitivities(DV01(), kr, _valuation2(cfs, times), base, credit)
 end
-function sensitivities(::DV01, kr::KeyRates, base::AYM, credit::AYM, cfs::AbstractVector{<:FinanceCore.Cashflow})
-    amounts, times = _extract_cfs_times(cfs)
-    return sensitivities(DV01(), kr, base, credit, amounts, times)
-end
+sensitivities(::DV01, kr::KeyRates, base::AYM, credit::AYM, cfs::AbstractVector{<:FinanceCore.Cashflow}) = sensitivities(DV01(), kr, base, credit, _extract_cfs_times(cfs)...)
 
 # Do-block-first forwarders (support `f(args...) do x; ...; end` syntax)
 sensitivities(vf::Function, kr::KeyRates, curve::AYM)                    = sensitivities(kr, vf, curve)
