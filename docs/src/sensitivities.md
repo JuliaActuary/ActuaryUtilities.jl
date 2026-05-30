@@ -247,6 +247,70 @@ end
 
 Bumping base rates changes both the floating coupon amounts and the discount factors (partially canceling), while bumping credit rates only affects discounting. This asymmetry is why the IR01/CS01 decomposition matters for instruments with rate-dependent cashflows.
 
+## Floating-Rate Instruments: Effective vs Spread Duration
+
+The do-block above re-projects the floating coupons by hand. You can instead pass a `FinanceModels` contract — or a vector of contracts (a portfolio) — directly: the familiar markers select the risk and the verb selects the units. A floater has two durations and both matter:
+
+- **Effective (rate) duration** — bump the curve, coupons re-fix → small (≈ time to next reset).
+- **Spread (credit) duration** — bump the discount only, coupons fixed → ≈ maturity.
+
+```@example sensitivities
+using FinanceModels: Bond
+floater = Bond.Floating(0.015, Periodic(1), 5.0, "SOFR")   # SOFR + 150bp, 5y annual
+
+duration(Effective(), floater, zrc, tenors)   # rate duration, yrs — small
+duration(Spread(),    floater, zrc, tenors)   # spread duration, yrs — ≈ maturity
+dv01(Effective(),     floater, zrc, tenors)   # effective DV01, $/bp
+```
+
+`sensitivities` returns the whole picture (years, DV01s, and key-rate vectors) in one AD pass:
+
+```@example sensitivities
+s = sensitivities(floater, zrc, tenors)
+(effective = s.effective_duration, spread = s.spread_duration, eff_dv01 = s.effective_dv01)
+```
+
+For a fixed bond `effective == spread ==` the modified duration. For an **in-force** floater whose current coupon is already fixed, [`locked_floater`](@ref) gives the conventional rate duration ≈ time to next reset:
+
+```@example sensitivities
+duration(Effective(), locked_floater(floater, 0.04, 1.0), zrc, tenors)   # ≈ 1y, not ≈ 5
+```
+
+### Portfolios
+
+A vector of contracts is a target too — valued by summation in one AD pass (value-weighted):
+
+```@example sensitivities
+portfolio = [floater, Bond.Fixed(0.03, Periodic(1), 7.0)]
+duration(portfolio, zrc, tenors)
+```
+
+### Multi-curve: risk-free + credit + ILP + index
+
+Pass the discount as a stack of named layers plus the coupon-projection `index`; sensitivities come back per role, no `Dict` to assemble:
+
+```@example sensitivities
+rf     = zrc
+credit = Yield.Constant(Continuous(0.01))
+ilp    = Yield.Constant(Continuous(0.004))
+r = sensitivities(floater, tenors; discount = (; rf, credit, ilp), index = zrc)
+r.duration    # (; rf ≈ IR01, credit ≈ CS01, ilp = "ILP01", index = reset sensitivity)
+```
+
+ILP / matching-adjustment / basis are just additional named layers. For arbitrary valuations, the do-block form with [`reproject`](@ref) hides the model `Dict`:
+
+```@example sensitivities
+sensitivities((; rf, credit, ilp, index = zrc); tenors) do c
+    present_value(c.rf + c.credit + c.ilp, reproject(floater, c.index))
+end
+```
+
+And [`zspread`](@ref) solves the discount margin to a market price:
+
+```@example sensitivities
+zspread(floater, zrc, 0.99)
+```
+
 ## Portfolio Sensitivity
 
 DV01s are additive across positions, so a portfolio's DV01 vector equals the sum of individual DV01s:

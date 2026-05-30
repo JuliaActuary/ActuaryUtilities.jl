@@ -1243,3 +1243,80 @@ end
                        n_scenarios=500, rng=Xoshiro(43))
     @test !(r1.value ≈ r3.value && r1.durations ≈ r3.durations)
 end
+
+@testset "Contract/portfolio duration & sensitivities (unified)" begin
+    mats = [1.0, 2.0, 3.0, 5.0, 7.0]
+    curve = FM.Yield.Spline(FM.Spline.Linear(), mats, [0.02, 0.025, 0.03, 0.035, 0.04])
+    tenors = mats
+    fl0 = FM.Bond.Floating(0.0, FC.Periodic(1), 5.0, "IDX")
+    flm = FM.Bond.Floating(0.02, FC.Periodic(1), 5.0, "IDX")
+    fb = FM.Bond.Fixed(0.04, FC.Periodic(1), 5.0)
+
+    @testset "par floater: effective ≈ 0, spread ≈ maturity" begin
+        @test duration(Effective(), fl0, curve, tenors) ≈ 0.0 atol = 1e-8
+        @test duration(Spread(), fl0, curve, tenors) > 4.0
+        @test convexity(Effective(), fl0, curve, tenors) ≈ 0.0 atol = 1e-6
+    end
+
+    @testset "bundle: effective = forward + spread; sums; dollar <-> year" begin
+        s = sensitivities(flm, curve, tenors)
+        @test s.effective_duration ≈ s.forward_duration + s.spread_duration atol = 1e-10
+        @test s.effective_dv01 ≈ s.effective_duration * s.value / 10_000 atol = 1e-12
+        @test sum(s.effective_key_rate) ≈ s.effective_duration atol = 1e-10
+        @test sum(s.spread_key_rate) ≈ s.spread_duration atol = 1e-10
+    end
+
+    @testset "fixed bond: effective == spread == modified, forward == 0" begin
+        s = sensitivities(fb, curve, tenors)
+        modified = duration(curve, tenors, collect(FM.Projection(fb, curve, FM.CashflowProjection())))
+        @test s.effective_duration ≈ modified atol = 1e-8
+        @test s.spread_duration ≈ modified atol = 1e-8
+        @test s.forward_duration ≈ 0.0 atol = 1e-8
+    end
+
+    @testset "default duration & dv01 verb" begin
+        @test duration(flm, curve, tenors) ≈ duration(Effective(), flm, curve, tenors)
+        @test dv01(Effective(), flm, curve, tenors) ≈ sensitivities(flm, curve, tenors).effective_dv01
+        @test dv01(0.05, [5.0, 5.0, 105.0]) ≈ duration(DV01(), 0.05, [5.0, 5.0, 105.0])   # cashflow fallback
+    end
+
+    @testset "portfolio: one-pass == value-weighted" begin
+        port = [flm, fb]
+        dport = duration(port, curve, tenors)
+        vfl = FC.present_value(curve, reproject(flm, curve)); vfb = FC.present_value(curve, fb)
+        dfl = duration(flm, curve, tenors); dfb = duration(fb, curve, tenors)
+        @test dport ≈ (vfl * dfl + vfb * dfb) / (vfl + vfb) atol = 1e-8
+    end
+
+    @testset "multi-curve: structured == do-block; additive layers" begin
+        credit = FM.Yield.Constant(FC.Continuous(0.01))
+        ilp = FM.Yield.Constant(FC.Continuous(0.004))
+        rs = sensitivities(flm, tenors; discount = (; rf = curve, credit = credit, ilp = ilp), index = curve)
+        rd = sensitivities((; rf = curve, credit = credit, ilp = ilp, index = curve); tenors) do c
+            FC.present_value(c.rf + c.credit + c.ilp, reproject(flm, c.index))
+        end
+        @test rs.duration.rf ≈ rd.duration.rf atol = 1e-10
+        @test rs.duration.index ≈ rd.duration.index atol = 1e-10
+        @test rs.duration.rf ≈ rs.duration.credit atol = 1e-8       # additive layers ⇒ equal discount sensitivity
+        @test rs.duration.credit ≈ rs.duration.ilp atol = 1e-8
+        @test rs.duration.index < 0.0                                # bumping the index raises coupons → raises value
+    end
+
+    @testset "z-spread round-trips; locked ≈ next reset" begin
+        pvm = FC.present_value(curve, reproject(flm, curve))
+        @test zspread(flm, curve, pvm).zspread ≈ 0.0 atol = 1e-8
+        z = zspread(flm, curve, pvm - 0.03)
+        @test z.zspread > 0.0
+        reprice = FC.present_value(curve + ((zz, t) -> zz + FC.Continuous(z.zspread)), reproject(flm, curve))
+        @test reprice ≈ pvm - 0.03 atol = 1e-10
+        @test duration(Effective(), locked_floater(fl0, 0.05, 1.0), curve, tenors) ≈ 1.0 atol = 0.1
+    end
+
+    @testset "effective: AD == central finite difference (re-projecting)" begin
+        Δ = 1e-4
+        up = curve + ((z, t) -> z + FC.Continuous(+Δ)); dn = curve + ((z, t) -> z + FC.Continuous(-Δ))
+        rj(crv) = FC.present_value(crv, reproject(flm, crv))
+        eff_fd = (rj(dn) - rj(up)) / (2Δ * rj(curve))
+        @test duration(Effective(), flm, curve, tenors) ≈ eff_fd atol = 1e-4
+    end
+end
