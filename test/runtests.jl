@@ -504,6 +504,32 @@ end
         @test conv[2, 3] ≈ 0.0 atol = 1e-6
     end
 
+    @testset "scalar convexity(curve, tenors, ...) ≡ sum(KRD Hessian) (POU regression guard)" begin
+        # Under partition of unity of the KRD hat functions, the continuous-
+        # shock parallel-shift scalar convexity equals the sum of the N×N
+        # key-rate Hessian by the chain rule. The scalar entry points now
+        # route through `_parallel_continuous_convexity` (TenorShift + two
+        # nested ForwardDiff.derivatives), avoiding the Hessian build entirely.
+        # Locks the equivalence in.
+        rates  = [0.02, 0.025, 0.03, 0.035, 0.04]
+        tenors = [1.0, 2.0, 3.0, 5.0, 7.0]
+        zrc    = FM.ZeroRateCurve(rates, tenors, FM.Spline.Linear())
+        cfs    = [5.0, 5.0, 5.0, 5.0, 105.0]
+        times  = [1.0, 2.0, 3.0, 4.0, 5.0]
+
+        scalar_form = convexity(zrc, tenors, cfs, times)
+        matrix_sum  = sum(convexity(KeyRates(tenors), zrc, cfs, times))
+        @test scalar_form ≈ matrix_sum atol = 1e-8
+
+        vf_scalar = convexity(c -> sum(cf * FC.discount(c, t) for (cf, t) in zip(cfs, times)), zrc, tenors)
+        vf_matrix = sum(convexity(KeyRates(tenors), c -> sum(cf * FC.discount(c, t) for (cf, t) in zip(cfs, times)), zrc))
+        @test vf_scalar ≈ vf_matrix atol = 1e-8
+
+        # Cashflow-vector form
+        cashflows = [FC.Cashflow(cfs[k], times[k]) for k in eachindex(cfs)]
+        @test convexity(zrc, tenors, cashflows) ≈ matrix_sum atol = 1e-8
+    end
+
     @testset "two-curve IR01/CS01" begin
         base_rates = [0.03, 0.03, 0.03, 0.03, 0.03]
         credit_rates = [0.02, 0.02, 0.02, 0.02, 0.02]
@@ -1272,6 +1298,20 @@ end
         @test s.effective_duration ≈ modified atol = 1e-8
         @test s.spread_duration ≈ modified atol = 1e-8
         @test s.forward_duration ≈ 0.0 atol = 1e-8
+    end
+
+    @testset "fixed bond: effective convexity matches matrix-sum (POU equivalence regression guard)" begin
+        # Under partition of unity of the KRD hat functions, sum(N×N key-rate
+        # Hessian) = continuous-shock parallel-shift second derivative by the
+        # chain rule. The optimized `convexity(::Effective, …)` computes that
+        # scalar directly via TenorShift, in O(1) rather than O(N²) AD work.
+        # Locks the numerical equivalence in for future refactors of either
+        # path. Note: `convexity(curve, cfs)` uses a *periodic* shock and is
+        # NOT equivalent here — see `_parallel_continuous_convexity` for why.
+        cfs = collect(FM.Projection(fb, curve, FM.CashflowProjection()))
+        amts = FC.amount.(cfs); times = FC.timepoint.(cfs)
+        @test convexity(Effective(), fb, curve, tenors) ≈
+              sum(convexity(KeyRates(tenors), curve, amts, times)) atol = 1e-8
     end
 
     @testset "default duration & dv01 verb" begin

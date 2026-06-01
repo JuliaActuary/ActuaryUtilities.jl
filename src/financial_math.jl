@@ -1121,16 +1121,35 @@ duration(vf::Function, ::CS01, kr::KeyRates, base::AYM, credit::AYM)      = dura
 Key-rate convexity (matrix) and scalar convexity for any `AbstractYieldModel`
 or pair. Mirrors `duration` but returns ∂²V/∂rᵢ∂rⱼ rather than ∂V/∂rᵢ.
 
+The scalar forms (first two signatures) return the parallel-shift second
+derivative ∂²V/∂s² under a *continuous-rate* shock — matching the matrix
+forms exactly under partition of unity of the KRD hats. `tenors` is accepted
+for API symmetry but is not used by the scalar derivative computation.
+
 If you also want the durations / DV01s, prefer [`sensitivities`](@ref) — it returns
 the value, gradient, and Hessian from one AD pass at the same cost.
 """
-function convexity(valuation_fn::Function, curve::AYM, tenors)
-    return sum(convexity(KeyRates(tenors), valuation_fn, curve))
+# Continuous-shock parallel-shift convexity via a single scalar second
+# derivative. Under partition of unity of the KRD hat functions (`_hat_bump`
+# above), `sum(convexity(KeyRates(tenors), …))` equals ∂²V/∂s² for parallel
+# shift `s` by the chain rule — the matrix path returns the right number but
+# pays O(N² AD work + dense Hessian allocation) for what is an O(1) scalar
+# second derivative. This helper performs the scalar derivative directly on a
+# `TenorShift`-bumped curve, matching the matrix-sum form exactly while
+# avoiding the per-pillar Hessian.
+function _parallel_continuous_convexity(curve::AYM, valuation_fn)
+    bumped(s) = FinanceModels.Yield.TenorShift(curve, (z, t) -> z + FinanceCore.Continuous(s))
+    v(s) = abs(valuation_fn(bumped(s)))
+    ∂²V = ForwardDiff.derivative(s2 -> ForwardDiff.derivative(v, s2), 0.0)
+    return ∂²V / v(0.0)
 end
-function convexity(curve::AYM, tenors, cfs, times)
-    return sum(convexity(KeyRates(tenors), curve, cfs, times))
-end
-convexity(curve::AYM, tenors, cfs::AbstractVector{<:FinanceCore.Cashflow}) = convexity(curve, tenors, _extract_cfs_times(cfs)...)
+
+convexity(valuation_fn::Function, curve::AYM, _tenors) =
+    _parallel_continuous_convexity(curve, valuation_fn)
+convexity(curve::AYM, _tenors, cfs, times) =
+    _parallel_continuous_convexity(curve, c -> sum(_cf_value(cfs[k]) * FinanceCore.discount(c, times[k]) for k in eachindex(cfs)))
+convexity(curve::AYM, _tenors, cfs::AbstractVector{<:FinanceCore.Cashflow}) =
+    convexity(curve, _tenors, _extract_cfs_times(cfs)...)
 
 function convexity(kr::KeyRates, valuation_fn::Function, curve::AYM)
     ad = _keyrate_ad(curve, kr.tenors, valuation_fn; order = 2)
@@ -1370,7 +1389,13 @@ duration(::Spread,    kr::KeyRates, target::_Contractish, curve::AYM) = sensitiv
 duration(target::_Contractish, curve::AYM, tenors) = duration(Effective(), target, curve, tenors)
 duration(kr::KeyRates, target::_Contractish, curve::AYM) = duration(Effective(), kr, target, curve)
 
-convexity(::Effective, target::_Contractish, curve::AYM, tenors) = convexity(c -> _cvalue(target, c), curve, tenors)
+# Effective convexity: parallel-shift second derivative of the contract's
+# present value under a continuous-rate shock. Routes through the O(1) scalar
+# helper above (`_parallel_continuous_convexity`), which is numerically
+# equivalent to the prior `sum(convexity(KeyRates(tenors), …))` matrix-sum form
+# under partition of unity but avoids the O(N²) Hessian.
+convexity(::Effective, target::_Contractish, curve::AYM, _tenors) =
+    _parallel_continuous_convexity(curve, c -> _cvalue(target, c))
 
 """
     dv01(args...)
