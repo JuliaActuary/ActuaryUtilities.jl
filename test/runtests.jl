@@ -1268,6 +1268,74 @@ end
     @test KeyRates(1:5) isa KeyRates
 end
 
+@testset "AD vs analytic KRD: byte-equivalence across curve types and arities" begin
+    # The analytic helpers `_keyrate_analytic` (single/two-curve) and
+    # `_keyrate_analytic_n` (NamedTuple) must produce the same value, gradient,
+    # and Hessian as the AD path (`_keyrate_ad`, `_ncurve_ad`) for the vanilla
+    # cashflow case. Regression guard against future drift between the two
+    # implementations of the same math.
+    KRA   = ActuaryUtilities.FinancialMath._keyrate_analytic
+    KRA_N = ActuaryUtilities.FinancialMath._keyrate_analytic_n
+    KRAD  = ActuaryUtilities.FinancialMath._keyrate_ad
+    NCAD  = ActuaryUtilities.FinancialMath._ncurve_ad
+
+    tenors  = collect(1.0:30.0)
+    rates   = fill(0.03, 30)
+    rates2  = rates .+ 0.005
+    curves  = [
+        FM.ZeroRateCurve(rates,  tenors, FM.Spline.Linear()),
+        FM.ZeroRateCurve(rates,  tenors, FM.Spline.MonotoneConvex()),
+        FM.Yield.Constant(FC.Continuous(0.03)),
+    ]
+
+    cfs_full = collect(FM.Projection(FM.Bond.Fixed(0.04, FC.Periodic(2), 5), curves[1], FM.CashflowProjection()))
+    amts  = FC.amount.(cfs_full)
+    times = FC.timepoint.(cfs_full)
+
+    @testset "single-curve [$(typeof(c).name.name)]" for c in curves
+        ad = KRAD(c, tenors,
+                  i -> sum(amts[k] * FC.discount(i, times[k]) for k in eachindex(amts));
+                  order = 2)
+        an = KRA(c, tenors, amts, times; order = 2)
+        @test ad.value ≈ an.value rtol = 1e-12
+        @test maximum(abs.(ad.gradient .- an.gradient)) < 1e-12
+        @test maximum(abs.(ad.hessian  .- an.hessian))  < 1e-12
+    end
+
+    @testset "two-curve" begin
+        base   = curves[1]
+        credit = FM.ZeroRateCurve(rates2, tenors, FM.Spline.Linear())
+        ad = KRAD(base, credit, tenors,
+                  (b, c) -> sum(amts[k] * FC.discount(b, times[k]) * FC.discount(c, times[k])
+                                 for k in eachindex(amts));
+                  order = 2)
+        an = KRA(base, credit, tenors, amts, times; order = 2)
+        @test ad.value ≈ an.value rtol = 1e-12
+        @test maximum(abs.(ad.base_gradient   .- an.base_gradient))   < 1e-12
+        @test maximum(abs.(ad.credit_gradient .- an.credit_gradient)) < 1e-12
+        @test maximum(abs.(ad.base_hessian    .- an.base_hessian))    < 1e-12
+        @test maximum(abs.(ad.credit_hessian  .- an.credit_hessian))  < 1e-12
+        @test maximum(abs.(ad.cross_hessian   .- an.cross_hessian))   < 1e-12
+    end
+
+    @testset "NamedTuple (3 curves)" begin
+        c1 = curves[1]
+        c2 = FM.ZeroRateCurve(rates2,       tenors, FM.Spline.Linear())
+        c3 = FM.ZeroRateCurve(rates .+ 0.002, tenors, FM.Spline.Linear())
+        nt = (; rf = c1, credit = c2, ilp = c3)
+        ad_v, ad_g = NCAD(c -> sum(amts[k] * FC.discount(c.rf, times[k]) *
+                                              FC.discount(c.credit, times[k]) *
+                                              FC.discount(c.ilp, times[k])
+                                    for k in eachindex(amts)),
+                          nt, tenors)
+        an = KRA_N(nt, tenors, amts, times; order = 2)
+        @test ad_v ≈ an.value rtol = 1e-12
+        for r in (:rf, :credit, :ilp)
+            @test maximum(abs.(ad_g[r] .- an.gradient[r])) < 1e-12
+        end
+    end
+end
+
 @testset "Hull-White convenience method: pathwise consistency" begin
     # The four `sensitivities(KeyRates, hw, ...)` convenience methods snapshot
     # one UInt64 from the user's rng and rebuild Xoshiro(seed) inside each AD
