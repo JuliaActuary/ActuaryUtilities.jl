@@ -637,6 +637,39 @@ end
 
         @test dur_lin ≈ dur_cub atol = 1e-4
     end
+
+    @testset "multi-curve NamedTuple: analytic ≈ _ncurve_ad (gradient/Hessian)" begin
+        # _keyrate_analytic_n must agree with _ncurve_ad on the vanilla cashflow
+        # case (static cfs, multiplicative discount product). Regression guard
+        # for the closed-form derivation of multi-curve KRD.
+        rates  = fill(0.03, 5)
+        tenors = [1.0, 2.0, 3.0, 4.0, 5.0]
+        zrc1   = FM.ZeroRateCurve(rates,         tenors, FM.Spline.Linear())
+        zrc2   = FM.ZeroRateCurve(rates .+ 0.005, tenors, FM.Spline.Linear())
+        zrc3   = FM.ZeroRateCurve(rates .+ 0.002, tenors, FM.Spline.Linear())
+        amts   = [5.0, 5.0, 5.0, 5.0, 105.0]
+        times  = [1.0, 2.0, 3.0, 4.0, 5.0]
+        nt3    = (; rf = zrc1, credit = zrc2, ilp = zrc3)
+
+        vf(c) = sum(amts[k] * FC.discount(c.rf, times[k]) *
+                              FC.discount(c.credit, times[k]) *
+                              FC.discount(c.ilp, times[k]) for k in eachindex(amts))
+        v_ad, g_ad = ActuaryUtilities.FinancialMath._ncurve_ad(vf, nt3, tenors)
+        an = ActuaryUtilities.FinancialMath._keyrate_analytic_n(nt3, tenors, amts, times; order = 2)
+
+        @test v_ad ≈ an.value rtol = 1e-12
+        for r in (:rf, :credit, :ilp)
+            @test maximum(abs.(g_ad[r] .- an.gradient[r])) < 1e-12
+        end
+
+        # Public API surfaces accept the NamedTuple form.
+        sens = sensitivities(KeyRates(tenors), nt3, amts, times)
+        @test sens.value ≈ v_ad rtol = 1e-12
+        @test maximum(abs.(sens.durations.rf .- (-g_ad.rf ./ v_ad))) < 1e-12
+        conv = convexity(KeyRates(tenors), nt3, amts, times)
+        @test conv.rf.rf isa AbstractMatrix
+        @test conv.rf.credit ≈ conv.credit.rf  # symmetric under multiplicative discount
+    end
 end
 
 @testset "ZeroRateCurve sensitivities" begin

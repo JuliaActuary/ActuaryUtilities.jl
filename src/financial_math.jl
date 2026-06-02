@@ -936,6 +936,59 @@ function _keyrate_analytic(base::AYM, credit::AYM, tenors::AbstractVector,
     end
 end
 
+# N-curve analytic. `curves::NamedTuple{roles}` of L curves with a shared tenor
+# grid; the discount is the product ∏_layers disc_layer(t). For static cashflows
+# the closed-form gradient w.r.t. each role's bump vector is identical (one
+# `-t · cfd · hat` update per active hat pair, with cfd = cf · ∏ disc). All L²
+# Hessian blocks (diagonal + cross) are likewise identical because the chain
+# rule yields the same `t² · cfd · hat_i · hat_j` for every (role, role) pair.
+# To minimize allocation, the role-and-pair NamedTuples returned here alias a
+# single shared gradient vector and a single shared Hessian matrix — safe for
+# the public API consumers (which broadcast-divide by V to normalize, creating
+# fresh arrays). If a caller wants per-role mutable buffers, they should
+# `copy` the relevant fields.
+function _keyrate_analytic_n(curves::NamedTuple, tenors::AbstractVector,
+                              cfs::AbstractVector, times; order = 1)
+    roles = keys(curves)
+    L = length(roles)
+    n = length(tenors)
+    T = float(promote_type(eltype(cfs), eltype(times)))
+    grad_shared = zeros(T, n)
+    hess_shared = order >= 2 ? zeros(T, n, n) : nothing
+    V = zero(T)
+    @inbounds for k in eachindex(cfs)
+        t = times[k]
+        d = one(T)
+        for r in roles
+            d *= FinanceCore.discount(curves[r], t)
+        end
+        cfd = cfs[k] * d
+        V += cfd
+        i, wi, j, wj = _active_hats(tenors, t)
+        grad_shared[i] -= t * cfd * wi
+        if i != j
+            grad_shared[j] -= t * cfd * wj
+        end
+        if order >= 2
+            tt = t * t * cfd
+            hess_shared[i, i] += tt * wi * wi
+            if i != j
+                ij = tt * wi * wj
+                hess_shared[i, j] += ij
+                hess_shared[j, i] += ij
+                hess_shared[j, j] += tt * wj * wj
+            end
+        end
+    end
+    gradient = NamedTuple{roles}(ntuple(_ -> grad_shared, L))
+    if order >= 2
+        hessian = NamedTuple{roles}(ntuple(_ -> NamedTuple{roles}(ntuple(_ -> hess_shared, L)), L))
+        return (; value = V, gradient, hessian)
+    else
+        return (; value = V, gradient)
+    end
+end
+
 ## AbstractYieldModel + KeyRates(tenors): KRD / IR01 / CS01 / convexity / sensitivities
 #
 # These dispatches accept any `FinanceModels.Yield.AbstractYieldModel`. The
@@ -1188,6 +1241,18 @@ function convexity(kr::KeyRates, base::AYM, credit::AYM, cfs, times)
 end
 convexity(kr::KeyRates, base::AYM, credit::AYM, cfs::AbstractVector{<:FinanceCore.Cashflow}) = convexity(kr, base, credit, _extract_cfs_times(cfs)...)
 
+# Multi-curve NamedTuple cashflow form. Per-role and per-role-pair convexities
+# for static cashflows. Returns a NamedTuple{roles} of NamedTuple{roles} of
+# N×N matrices. Storage is aliased — see `_keyrate_analytic_n` note.
+function convexity(kr::KeyRates, curves::NamedTuple, cfs, times)
+    an = _keyrate_analytic_n(curves, kr.tenors, cfs, times; order = 2)
+    roles = keys(curves)
+    normalized = an.hessian[first(roles)][first(roles)] ./ an.value
+    return NamedTuple{roles}(ntuple(_ -> NamedTuple{roles}(ntuple(_ -> normalized, length(roles))), length(roles)))
+end
+convexity(kr::KeyRates, curves::NamedTuple, cfs::AbstractVector{<:FinanceCore.Cashflow}) =
+    convexity(kr, curves, _extract_cfs_times(cfs)...)
+
 # Do-block-first forwarders (support `f(args...) do x; ...; end` syntax)
 convexity(vf::Function, kr::KeyRates, curve::AYM)                 = convexity(kr, vf, curve)
 convexity(vf::Function, kr::KeyRates, base::AYM, credit::AYM)     = convexity(kr, vf, base, credit)
@@ -1266,6 +1331,21 @@ function sensitivities(kr::KeyRates, base::AYM, credit::AYM, cfs, times)
     )
 end
 sensitivities(kr::KeyRates, base::AYM, credit::AYM, cfs::AbstractVector{<:FinanceCore.Cashflow}) = sensitivities(kr, base, credit, _extract_cfs_times(cfs)...)
+
+# Multi-curve NamedTuple cashflow form. One AD-free pass returns per-role
+# durations + a NamedTuple{roles}-of-NamedTuple{roles} of N×N convexity blocks.
+function sensitivities(kr::KeyRates, curves::NamedTuple, cfs, times)
+    an = _keyrate_analytic_n(curves, kr.tenors, cfs, times; order = 2)
+    roles = keys(curves)
+    L = length(roles)
+    dur_normalized = -an.gradient[first(roles)] ./ an.value
+    conv_normalized = an.hessian[first(roles)][first(roles)] ./ an.value
+    durations   = NamedTuple{roles}(ntuple(_ -> dur_normalized, L))
+    convexities = NamedTuple{roles}(ntuple(_ -> NamedTuple{roles}(ntuple(_ -> conv_normalized, L)), L))
+    return (; value = an.value, durations, convexities)
+end
+sensitivities(kr::KeyRates, curves::NamedTuple, cfs::AbstractVector{<:FinanceCore.Cashflow}) =
+    sensitivities(kr, curves, _extract_cfs_times(cfs)...)
 
 function sensitivities(::DV01, kr::KeyRates, valuation_fn::Function, base::AYM, credit::AYM)
     ad = _keyrate_ad(base, credit, kr.tenors, valuation_fn; order = 2)
