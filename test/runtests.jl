@@ -639,7 +639,7 @@ end
     end
 
     @testset "multi-curve NamedTuple: analytic ≈ _ncurve_ad (gradient/Hessian)" begin
-        # _keyrate_analytic_n must agree with _ncurve_ad on the vanilla cashflow
+        # _ncurve_analytic must agree with _ncurve_ad on the vanilla cashflow
         # case (static cfs, multiplicative discount product). Regression guard
         # for the closed-form derivation of multi-curve KRD.
         rates  = fill(0.03, 5)
@@ -655,11 +655,13 @@ end
                               FC.discount(c.credit, times[k]) *
                               FC.discount(c.ilp, times[k]) for k in eachindex(amts))
         v_ad, g_ad = ActuaryUtilities.FinancialMath._ncurve_ad(vf, nt3, tenors)
-        an = ActuaryUtilities.FinancialMath._keyrate_analytic_n(nt3, tenors, amts, times; order = 2)
+        an = ActuaryUtilities.FinancialMath._ncurve_analytic(nt3, tenors, amts, times; order = 2)
 
         @test v_ad ≈ an.value rtol = 1e-12
+        # The analytic helper returns a single shared gradient vector — under
+        # multiplicative discount composition the per-role gradients coincide.
         for r in (:rf, :credit, :ilp)
-            @test maximum(abs.(g_ad[r] .- an.gradient[r])) < 1e-12
+            @test maximum(abs.(g_ad[r] .- an.gradient)) < 1e-12
         end
 
         # Public API surfaces accept the NamedTuple form.
@@ -1270,12 +1272,12 @@ end
 
 @testset "AD vs analytic KRD: byte-equivalence across curve types and arities" begin
     # The analytic helpers `_keyrate_analytic` (single/two-curve) and
-    # `_keyrate_analytic_n` (NamedTuple) must produce the same value, gradient,
+    # `_ncurve_analytic` (NamedTuple) must produce the same value, gradient,
     # and Hessian as the AD path (`_keyrate_ad`, `_ncurve_ad`) for the vanilla
     # cashflow case. Regression guard against future drift between the two
     # implementations of the same math.
     KRA   = ActuaryUtilities.FinancialMath._keyrate_analytic
-    KRA_N = ActuaryUtilities.FinancialMath._keyrate_analytic_n
+    KRA_N = ActuaryUtilities.FinancialMath._ncurve_analytic
     KRAD  = ActuaryUtilities.FinancialMath._keyrate_ad
     NCAD  = ActuaryUtilities.FinancialMath._ncurve_ad
 
@@ -1330,9 +1332,22 @@ end
                           nt, tenors)
         an = KRA_N(nt, tenors, amts, times; order = 2)
         @test ad_v ≈ an.value rtol = 1e-12
+        # Per-role gradients from the AD path all agree with the single shared
+        # gradient returned by the analytic helper.
         for r in (:rf, :credit, :ilp)
-            @test maximum(abs.(ad_g[r] .- an.gradient[r])) < 1e-12
+            @test maximum(abs.(ad_g[r] .- an.gradient)) < 1e-12
         end
+    end
+
+    @testset "NamedTuple with :index role is rejected" begin
+        # The analytic helper requires all roles to be discount-role layers
+        # (multiplicatively composed). Passing `:index` (the cashflow-
+        # reprojection curve) would silently produce wrong sensitivities, so
+        # the API throws instead.
+        nt_with_index = (; rf = curves[1], index = curves[1])
+        @test_throws ArgumentError KRA_N(nt_with_index, tenors, amts, times; order = 2)
+        @test_throws ArgumentError sensitivities(KeyRates(tenors), nt_with_index, amts, times)
+        @test_throws ArgumentError convexity(KeyRates(tenors), nt_with_index, amts, times)
     end
 end
 
@@ -1399,6 +1414,17 @@ end
         @test s.effective_duration ≈ modified atol = 1e-8
         @test s.spread_duration ≈ modified atol = 1e-8
         @test s.forward_duration ≈ 0.0 atol = 1e-8
+    end
+
+    @testset "floater: effective convexity (dynamic cashflows under reproject)" begin
+        # The new `convexity(::Effective)` routes through TenorShift +
+        # ForwardDiff on a closure that calls `reproject(target, c)` — i.e.
+        # cashflows are themselves curve-dependent (the coupon resets follow
+        # the bumped curve). The result must still equal the matrix-sum form
+        # (same AD chain, just unrolled). Locks the dynamic-cashflow path.
+        _cvalue_flm(c) = FC.present_value(c, ActuaryUtilities.reproject(flm, c))
+        @test convexity(Effective(), flm, curve, tenors) ≈
+              sum(convexity(KeyRates(tenors), _cvalue_flm, curve)) atol = 1e-8
     end
 
     @testset "fixed bond: effective convexity matches matrix-sum (POU equivalence regression guard)" begin
