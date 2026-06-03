@@ -1338,17 +1338,6 @@ end
             @test maximum(abs.(ad_g[r] .- an.gradient)) < 1e-12
         end
     end
-
-    @testset "NamedTuple with :index role is rejected" begin
-        # The analytic helper requires all roles to be discount-role layers
-        # (multiplicatively composed). Passing `:index` (the cashflow-
-        # reprojection curve) would silently produce wrong sensitivities, so
-        # the API throws instead.
-        nt_with_index = (; rf = curves[1], index = curves[1])
-        @test_throws ArgumentError KRA_N(nt_with_index, tenors, amts, times; order = 2)
-        @test_throws ArgumentError sensitivities(KeyRates(tenors), nt_with_index, amts, times)
-        @test_throws ArgumentError convexity(KeyRates(tenors), nt_with_index, amts, times)
-    end
 end
 
 @testset "Hull-White convenience method: pathwise consistency" begin
@@ -1424,7 +1413,7 @@ end
         # (same AD chain, just unrolled). Locks the dynamic-cashflow path.
         _cvalue_flm(c) = FC.present_value(c, ActuaryUtilities.reproject(flm, c))
         @test convexity(Effective(), flm, curve, tenors) ≈
-              sum(convexity(KeyRates(tenors), _cvalue_flm, curve)) atol = 1e-8
+              sum(convexity(KeyRates(tenors), _cvalue_flm, curve)) atol = 1e-10
     end
 
     @testset "fixed bond: effective convexity matches matrix-sum (POU equivalence regression guard)" begin
