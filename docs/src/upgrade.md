@@ -1,5 +1,36 @@
 # Version Upgrade Guide
 
+## v5.8 to v5.9
+
+Non-breaking unless you relied on the specific edge-case behaviors noted below.
+
+### Risk measures
+
+- **Array inputs to `VaR`, `CTE`, and `Expectation` are now computed as exact order statistics** (the discrete Choquet integral evaluated as a finite weighted sum) instead of adaptive quadrature over the empirical CDF's step function. The exact value of the risk measure is now returned: results may differ from v5.8 in the last few ulps, or visibly at plateaus/quantile boundaries where the quadrature approximation was least accurate. Distribution inputs are unchanged (numerical integration of the distorted CDF).
+- **`Expectation` is now exported** — `using ActuaryUtilities` brings it into scope (previously `ActuaryUtilities.RiskMeasures.Expectation`).
+
+### Financial math
+
+- **`spread` solves via Newton + AD** on the pricing residual, converging to machine precision (previously a derivative-free minimization with ~√tolerance precision). It now **throws an `ErrorException` on non-convergence** instead of returning the best-so-far point.
+- **`moic` throws an explicit `ArgumentError`** when the input has no positive or no negative cashflows ("moic requires at least one positive (distribution) and one negative (contribution) cashflow"); previously such degenerate input surfaced as an obscure reduce-over-empty-collection error.
+- **Analytic fast paths** for `Modified` duration and `convexity` with flat yields (`Real`, `Rate{Periodic}`, `Rate{Continuous}`, `Yield.Constant`): same values as the AD path (equality-tested), substantially faster.
+- **`present_values` is now O(n)** (previously O(n²) and recursive — very long cashflow vectors could overflow the stack) and propagates AD dual numbers through its accumulator.
+
+### Dependencies & ecosystem
+
+- **Optimization.jl and OptimizationOptimJL.jl are no longer dependencies** (`spread` was their only use).
+- **FinanceCore v3 is now supported.** Under FinanceCore v3, a failed `irr`/`internal_rate_of_return` returns `Periodic(NaN, 1)` instead of `nothing` — replace `isnothing(irr(x))` checks with `isnan(rate(irr(x)))`.
+
+## v5.7 to v5.8
+
+Additive release — no existing method changed. A contract / portfolio-aware layer was added on top of the key-rate AD engine, so curve-dependent instruments (e.g. floating-rate bonds) can be passed directly and have their cashflows re-projected under bumped curves:
+
+- **`Effective` and `Spread` duration markers**: `duration(Effective(), contract, curve, tenors)` reprices with coupons re-fixed (the correct interest-rate duration for floaters); `duration(Spread(), contract, curve, tenors)` bumps the discount curve only (discount-margin / credit duration). A contract or a `Vector` of contracts (a portfolio) is accepted.
+- **`dv01` verb**: `dv01(Effective()/Spread(), target, [forward, credit,] tenors)` for the dollar versions; `dv01(args...)` is equivalent to `duration(DV01(), args...)` for the existing cashflow/curve forms.
+- **`sensitivities(target, [forward, credit,] tenors)`**: one-AD-pass bundle for a contract/portfolio returning `value`, `effective_*`, `spread_*`, and `forward_*` durations / DV01s / key-rate vectors.
+- **NamedTuple multi-curve `sensitivities`**: `sensitivities(target, tenors; discount = (; rf, credit, ilp), index = ...)` decomposes sensitivities per named discount role (`rf` ≈ IR01, `credit` ≈ CS01, etc.) plus the `index` (reset) sensitivity, returning `(; value, duration, dv01, key_rate)` per role. A do-block form `sensitivities(valuation, curves::NamedTuple; tenors)` is also available.
+- **Helpers**: `zspread` (Newton-solved constant spread to match a market price, with its DV01), `locked_floater` (in-force floater with the current coupon locked until the next reset), and `reproject` (wrap a contract so its coupons are estimated off a given index curve).
+
 ## v5.6 to v5.7
 
 ### Overview
@@ -77,7 +108,7 @@ pv([0.05,0.1], cfs)
 
 # new
 using FinanceModels
-y = fit(Spline.Linear(),ForwardYields([0.05,0.1]),Bootstrap())
+y = fit(Spline.Linear(), ForwardYield([0.05,0.1]), Fit.Bootstrap())
 pv(y,cfs)
 
 ``` 

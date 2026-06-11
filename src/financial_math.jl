@@ -21,12 +21,16 @@ Efficiently calculate a vector representing the present value of the given cashf
 # Examples
 ```julia-repl
 julia> present_values(0.00, [1,1,1])
-[3,2,1]
+3-element Vector{Float64}:
+ 3.0
+ 2.0
+ 1.0
 
-julia> present_values(ForwardYield([0.1,0.2]), [10,20],[0,1]) # after `using FinanceModels`
-2-element Vector{Float64}:
- 28.18181818181818
- 18.18181818181818
+julia> present_values(0.05, [10,10,110], [1,2,3])
+3-element Vector{Float64}:
+ 113.61624014685238
+ 109.297052154195
+ 104.76190476190476
 ```
 
 """
@@ -73,7 +77,7 @@ Assumptions:
 
 Returns `nothing` if cashflow stream never breaks even.
 
-```julia
+```julia-repl
 julia> breakeven(0.10, [-10,1,2,3,4,8])
 5
 
@@ -123,7 +127,7 @@ struct Modified <: Duration end
 
 Dollar Value of 01. The dollar change in value for a 1 basis point (0.01%) parallel shift in rates.
 
-`DV01 = -∂V/∂r / 10000`, so a DV01 of 0.045 means the position loses \$0.045 per \$100 notional for a 1bp rate increase.
+`DV01 = -∂V/∂r / 10000`, so a DV01 of 0.045 means the position loses \\\$0.045 per \\\$100 notional for a 1bp rate increase.
 
 See also: [`IR01`](@ref), [`CS01`](@ref)
 """
@@ -218,7 +222,7 @@ Shift the par curve by the given amount at the given timepoint. Use in conjuncti
 
 Unlike other duration statistics which are computed using analytic derivatives, `KeyRateDuration`s are computed via a shift-and-compute the yield curve approach.
 
-`KeyRatePar` is more commonly reported (than [`KeyRateZero`](@ref)) in the fixed income markets, even though the latter has more analytically attractive properties. See the discussion of KeyRateDuration in the FinanceModels.jl docs.
+`KeyRatePar` is more commonly reported (than [`KeyRateZero`](@ref)) in the fixed income markets, even though [`KeyRateZero`](@ref) has more analytically attractive properties. See the discussion of KeyRateDuration in the FinanceModels.jl docs.
 
 """
 struct KeyRatePar{T, R} <: KeyRateDuration
@@ -251,7 +255,7 @@ A convenience constructor for [`KeyRateZero`](@ref).
 [`KeyRateZero`](@ref) is chosen as the default constructor because it has more attractive properties than [`KeyRatePar`](@ref):
 
 - rates after the key `timepoint` remain unaffected by the `shift`
-  - e.g. this causes a 6-year zero coupon bond would have a negative duration if the 5-year par rate was used
+  - e.g. shifting the 5-year par rate would (incorrectly) give a 6-year zero coupon bond a negative key rate duration, while a 5-year zero-rate shift leaves it unaffected
 
 
 """
@@ -270,8 +274,6 @@ Calculates the Macaulay, Modified, DV01, IR01, or CS01 duration. `times` may be 
 
 `cfs` can be an `AbstractVector{<:Cashflow}` (from FinanceCore), in which case `times` is extracted automatically and should be omitted.
 
-Note that the calculated duration will depend on the periodicity convention of the `interest_rate`: a `Periodic` yield (or yield model with that convention) will be a slightly different computed duration than a `Continous` which follows from the present value differing according to the periodicity.
-
 When not given `Modified()` or `Macaulay()` as an argument, will default to `Modified()`.
 
 - Modified duration: the relative change per point of yield change.
@@ -279,6 +281,25 @@ When not given `Modified()` or `Macaulay()` as an argument, will default to `Mod
 - DV01: the absolute change per basis point (hundredth of a percentage point).
 - IR01: the absolute change per basis point shift in the risk-free (base) curve, holding credit spread constant.
 - CS01: the absolute change per basis point shift in the credit spread, holding the risk-free (base) curve constant.
+
+# Periodicity convention
+
+The Modified duration returned depends on the space in which the parallel rate shock is applied, and this differs between plain rates and yield *models*:
+
+- A scalar (e.g. `0.04`) or a `Rate` is shocked in its own compounding space. A scalar is treated as `Periodic(0.04, 1)`, so Modified = Macaulay / (1 + 0.04); in general a `Periodic(y, m)` rate gives Modified = Macaulay / (1 + y/m), and a `Continuous(y)` rate gives Modified = Macaulay.
+- A yield model (e.g. `Yield.Constant(0.04)` from FinanceModels) composes the shock in continuous-zero space, so Modified = Macaulay under the curve's own discounting, regardless of the compounding convention stored in the model.
+
+The same inputs therefore produce two different numbers by design:
+
+```julia-repl
+julia> times = 1:5; cfs = [0,0,0,0,100];
+
+julia> duration(0.04, cfs, times)                  # Periodic(1) shock: Macaulay / 1.04
+4.8076923076923075
+
+julia> duration(Yield.Constant(0.04), cfs, times)  # continuous-zero shock: Macaulay
+5.0
+```
 
 # Examples
 
@@ -697,7 +718,7 @@ _ensure_yield_model(curve::Real) = FinanceModels.Yield.Constant(curve)
 function _krd_new_curve(keyrate::KeyRateZero, curve, krd_points)
     bump = _tent_bump(keyrate.shift, keyrate.timepoint, krd_points)
     base = _ensure_yield_model(curve)
-    return FinanceModels.Yield.TransformedYield(base, bump)
+    return FinanceModels.Yield.TenorShift(base, bump)
 end
 
 function _krd_new_curve(keyrate::KeyRatePar, curve, krd_points)
@@ -741,11 +762,13 @@ end
 
 Return the solved-for constant spread to add to `curve1` in order to equate the discounted `cashflows` with `curve2`
 
+The spread is found via a Newton iteration on the pricing residual and is solved to machine precision; an `ErrorException` is thrown if the solve does not converge within `maxiter` iterations.
+
 # Examples
 
 ```julia-repl
-spread(0.04, 0.05, cfs)
-Rate{Float64, Periodic}(0.010000000000000009, Periodic(1))
+julia> spread(0.04, 0.05, fill(10.0, 10))
+Periodic(0.010000000000000009, 1)
 ```
 """
 function spread(curve1, curve2, cashflows, times = eachindex(cashflows); tol = 1.0e-12, maxiter = 100)
@@ -1612,7 +1635,7 @@ end
 
 Constant continuously-compounded spread `s` on the `credit` (discount) curve such that
 the model price equals `market_price`, with coupons estimated on `forward` (held fixed).
-Returns the spread and its sensitivity (\$/1bp parallel move of `credit + s`). Newton + AD.
+Returns the spread and its sensitivity (\\\$/1bp parallel move of `credit + s`). Newton + AD.
 """
 function zspread(contract::FinanceCore.AbstractContract, credit::AYM, market_price; forward::AYM = credit, s0 = 0.0, tol = 1e-12, maxiter = 100)
     ks = _contract_keys(contract)
