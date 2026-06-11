@@ -146,6 +146,13 @@ end
     s = spread(0.04, 0.05, cfs)
     # repricing to near machine precision (NelderMead only achieved ~sqrt(tol))
     @test FC.pv(0.04 + s, cfs) ≈ FC.pv(0.05, cfs) rtol = 1.0e-12
+
+    # duration-neutral mixed-sign portfolio: f′(0) ≈ 0 — an undamped Newton
+    # step launched the iterate out of the valid domain (DomainError); the
+    # damped step must still land on an exact root
+    dn = [100.0, -52.0]
+    sdn = spread(0.04, 0.05, dn)
+    @test FC.pv(0.04 + sdn, dn) ≈ FC.pv(0.05, dn) atol = 1.0e-10
     rates = [0.01, 0.01, 0.03, 0.05, 0.07, 0.16, 0.35, 0.92, 1.40, 1.74, 2.31, 2.41] ./ 100
     mats = [1 / 12, 2 / 12, 3 / 12, 6 / 12, 1, 2, 3, 5, 7, 10, 20, 30]
     y = FM.fit(FM.Spline.Linear(), FM.CMTYield.(rates, mats), FM.Fit.Bootstrap())
@@ -173,6 +180,26 @@ end
     @test duration(KeyRate(2), rf_curve, cfs_cf) ≈ duration(KeyRate(2), rf_curve, cfs_real, 1:5)
     # all-sub-1-year cashflows have an empty default grid: loud error, not a crash
     @test_throws ArgumentError duration(KeyRate(0.5), rf_curve, [10.0], [0.5])
+    # a shifted timepoint outside the krd grid is a loud error, not a MethodError
+    @test_throws ArgumentError duration(KeyRate(7), rf_curve, cfs_cf)
+end
+
+@testset "mismatched cfs/times lengths error loudly" begin
+    # the analytic fast paths index times by eachindex(cfs) under @inbounds;
+    # a silent mismatch must not read out of bounds (or zip-truncate)
+    @test_throws DimensionMismatch duration(0.03, [1.0, 2.0, 3.0], [1.0, 2.0])
+    @test_throws DimensionMismatch convexity(0.03, [1.0, 2.0, 3.0], 1:2)
+end
+
+@testset "locked_floater requires whole coupon periods on the forward leg" begin
+    fl = FM.Bond.Floating(0.0, FC.Periodic(2), 3.0, "OIS")
+    # aligned: remaining term 2.5y = 5 semiannual periods — constructs fine
+    @test locked_floater(fl, 0.02, 0.5) isa FC.Composite
+    # non-commensurate remaining term (2.75y = 5.5 periods) would put a stub
+    # first coupon on the forward leg whose reference forward starts before
+    # time zero — quietly mispriced on extrapolating curves, DomainError on
+    # ZeroRateCurve — so it must refuse loudly
+    @test_throws ArgumentError locked_floater(fl, 0.02, 0.25)
 end
 
 @testset "two-curve scalar convexity matches the AD path" begin

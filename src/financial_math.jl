@@ -325,7 +325,7 @@ julia> duration(Modified(),0.03,cfs,times)
 4.854368932038835
 
 julia> convexity(0.03,cfs,times)
-28.277877274012614
+28.277877274012635
 
 ```
 
@@ -337,7 +337,7 @@ julia> my_lump_sum_value(i) = lump_sum_value(100,5,i)
 julia> duration(0.03,my_lump_sum_value)
 4.854368932038835
 julia> convexity(0.03,my_lump_sum_value)
-28.277877274012617
+28.277877274012642
 
 ```
 """
@@ -370,6 +370,9 @@ end
 # matches the generic path's d/di log|V| for any sign of V.
 
 function _macaulay_ratio(yield, cfs, times)
+    # @inbounds below indexes `times` by `eachindex(cfs)` — a silent mismatch
+    # would read out of bounds rather than zip-truncate
+    length(cfs) == length(times) || throw(DimensionMismatch("cfs and times must have equal length"))
     t1 = FinanceCore.timepoint(first(cfs), first(times))
     z = _cf_value(first(cfs)) * FinanceCore.discount(yield, t1)
     V = zero(z)
@@ -450,7 +453,7 @@ julia> cfs = [5, 5, 5, 105];
 julia> times = 1:4;
 
 julia> duration(IR01(), 0.03, 0.02, cfs, times)
-0.03465054893498076
+0.035459505041623596
 
 julia> duration(IR01(), 0.03, 0.02, cfs, times) ≈ duration(DV01(), 0.05, cfs, times)
 true
@@ -481,7 +484,7 @@ julia> cfs = [5, 5, 5, 105];
 julia> times = 1:4;
 
 julia> duration(CS01(), 0.03, 0.02, cfs, times)
-0.03465054893498076
+0.035459505041623596
 
 julia> duration(CS01(), 0.03, 0.02, cfs, times) ≈ duration(DV01(), 0.05, cfs, times)
 true
@@ -517,7 +520,7 @@ julia> duration(Macaulay(),0.03,cfs,times)
 julia> duration(Modified(),0.03,cfs,times)
 4.854368932038835
 julia> convexity(0.03,cfs,times)
-28.277877274012614
+28.277877274012635
 
 ```
 
@@ -529,7 +532,7 @@ julia> my_lump_sum_value(i) = lump_sum_value(100,5,i)
 julia> duration(0.03,my_lump_sum_value)
 4.854368932038835
 julia> convexity(0.03,my_lump_sum_value)
-28.277877274012617
+28.277877274012642
 
 ```
 
@@ -560,6 +563,9 @@ end
 # second derivative for any sign of V (signs cancel).
 
 function _convexity_ratio(yield, weight, cfs, times)
+    # @inbounds below indexes `times` by `eachindex(cfs)` — a silent mismatch
+    # would read out of bounds rather than zip-truncate
+    length(cfs) == length(times) || throw(DimensionMismatch("cfs and times must have equal length"))
     t1 = FinanceCore.timepoint(first(cfs), first(times))
     z = _cf_value(first(cfs)) * FinanceCore.discount(yield, t1)
     V = zero(z)
@@ -670,6 +676,11 @@ tent function for key-rate duration bump-and-reprice:
 """
 function _tent_bump(shift, τ, krd_points)
     idx = findfirst(==(τ), krd_points)
+    idx === nothing && throw(
+        ArgumentError(
+            "KeyRateDuration timepoint $τ is not a point of the krd_points grid $krd_points; pass krd_points containing the shifted timepoint"
+        )
+    )
     n = length(krd_points)
 
     τ_left = idx > 1 ? krd_points[idx-1] : nothing
@@ -762,7 +773,10 @@ end
 
 Return the solved-for constant spread to add to `curve1` in order to equate the discounted `cashflows` with `curve2`
 
-The spread is found via a Newton iteration on the pricing residual and is solved to machine precision; an `ErrorException` is thrown if the solve does not converge within `maxiter` iterations.
+The spread is found via a damped Newton iteration on the pricing residual and is solved to machine precision; an `ErrorException` is thrown if the solve does not converge within `maxiter` iterations.
+
+!!! note
+    For mixed-sign cashflows the pricing residual can have more than one exact root (e.g. a duration-neutral asset/liability pair); the root reached from a starting spread of zero is returned.
 
 # Examples
 
@@ -776,22 +790,32 @@ function spread(curve1, curve2, cashflows, times = eachindex(cashflows); tol = 1
     cashflows = FinanceCore.amount.(cashflows)
     pv2 = FinanceCore.pv(curve2, cashflows, times)
 
-    # Newton + AD on the (smooth, monotone in s) pricing residual — converges to
-    # machine precision in a handful of iterations, vs. the previous
-    # derivative-free simplex minimization of the squared residual, whose
-    # attainable precision was only ~sqrt of the function tolerance.
+    # Newton + AD on the smooth pricing residual — converges to machine
+    # precision in a handful of iterations, vs. the previous derivative-free
+    # simplex minimization of the squared residual, whose attainable precision
+    # was only ~sqrt of the function tolerance. The step is damped because the
+    # residual is not monotone for mixed-sign cashflows: a duration-neutral
+    # portfolio has f′(0) ≈ 0, and an undamped step would launch the iterate
+    # out of the valid spread domain (s > -1).
     f(s) = FinanceCore.pv(curve1 + FinanceCore.Periodic(s, 1), cashflows, times) - pv2
     ftol = tol * max(one(pv2), abs(pv2))
+    max_step = 0.25
     s = 0.0
-    converged = false
-    for _ in 1:maxiter
-        fs = f(s)
-        (abs(fs) < ftol) && (converged = true; break)
+    fs = f(s)
+    converged = abs(fs) < ftol
+    iters = 0
+    while !converged && iters < maxiter
         d = ForwardDiff.derivative(f, s)
-        iszero(d) && break
-        s -= fs / d
+        step = fs / d
+        if !isfinite(step) || abs(step) > max_step
+            step = isnan(step) ? max_step : copysign(max_step, step)
+        end
+        s = max(s - step, -0.999)
+        fs = f(s)
+        converged = abs(fs) < ftol
+        iters += 1
     end
-    converged || throw(ErrorException("spread did not converge (last residual = $(f(s)))"))
+    converged || throw(ErrorException("spread did not converge in $maxiter iterations (last residual = $fs)"))
     return FinanceCore.Periodic(s, 1)
 end
 
@@ -1665,8 +1689,21 @@ per-period amount fixed at the last reset) until `next_reset`, after which it fl
 A `Composite` of a coupon-only stub at `next_reset` plus a forward-starting floater for
 the remainder (principal rides the forward leg). Gives the conventional rate duration
 ≈ time to next reset; without it the idealized effective duration is ≈ 0 at a reset.
+
+The remaining term `fl.maturity - next_reset` must be an integer number of coupon
+periods. Otherwise the forward-starting leg would carry a stub first coupon whose
+fix-in-advance reference rate looks back before time zero — a quietly mispriced
+quantity on curves that extrapolate below ``t = 0`` and a `DomainError` on
+`ZeroRateCurve` — so non-commensurate inputs throw an `ArgumentError`.
 """
 function locked_floater(fl::FinanceModels.Bond.Floating, current_coupon, next_reset)
+    freq = fl.frequency.frequency
+    n_periods = (fl.maturity - next_reset) * freq
+    isapprox(n_periods, round(n_periods); atol = 1.0e-8) || throw(
+        ArgumentError(
+            "locked_floater requires fl.maturity - next_reset ($(fl.maturity - next_reset)) to be an integer number of coupon periods (frequency $freq); a stub first coupon on the forward leg would reference a forward rate starting before time zero"
+        )
+    )
     stub = FinanceCore.Cashflow(current_coupon, next_reset)
     rest = FinanceModels.Forward(next_reset,
         FinanceModels.Bond.Floating(fl.coupon_rate, fl.frequency, fl.maturity - next_reset, fl.key))
