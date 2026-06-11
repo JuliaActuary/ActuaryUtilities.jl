@@ -3,7 +3,7 @@ import ..Distributions
 import ..StatsBase
 import ..QuadGK
 
-export VaR, ValueAtRisk, CTE, ConditionalTailExpectation, WangTransform, DualPower, ProportionalHazard
+export Expectation, VaR, ValueAtRisk, CTE, ConditionalTailExpectation, WangTransform, DualPower, ProportionalHazard
 
 abstract type RiskMeasure end
 
@@ -27,10 +27,10 @@ The expected value of the risk.
 ## Examples
 
 ```julia-repl
-julia> RiskMeasures.Expectation(rand(1000))
+julia> Expectation()(rand(1000))
 0.4793223308812537
 
-julia> rm = RiskMeasures.Expectation()
+julia> rm = Expectation()
 ActuaryUtilities.RiskMeasures.Expectation()
 
 julia> rm(rand(1000))
@@ -211,8 +211,52 @@ function (rm::RiskMeasure)(risk)
     return integral1 - integral2
 end
 
+# ── Exact empirical specializations ─────────────────────────────────────────
+#
+# For a finite sample the Choquet integral above reduces to order statistics:
+# computing it by adaptive quadrature over the ecdf's step function is both
+# orders of magnitude slower and exposes integration tolerance at the steps.
+# These methods evaluate the same functional exactly.
+#
+# With the empirical cdf F(x_(k)) = k/n, the "first value above the αth
+# percentile" is the order statistic x_(k) with k the smallest index such that
+# k/n > α.
+function _first_index_above(n, α)
+    k = clamp(floor(Int, n * α) + 1, 1, n)
+    # floating-point n*α can land on either side of an exact boundary; nudge so
+    # that k is exactly the first index with k/n > α under float comparison
+    while k > 1 && (k - 1) / n > α
+        k -= 1
+    end
+    while k < n && k / n <= α
+        k += 1
+    end
+    return k
+end
+
+function (rm::VaR)(risk::AbstractArray{<:Real})
+    n = length(risk)
+    k = _first_index_above(n, rm.α)
+    return partialsort(vec(risk), k)
+end
+
+# The Choquet-CTE distorts the tail by 1/(1-α): the crossing order statistic
+# x_(k) receives the partial weight (k/n - α), and each of x_(k+1)…x_(n)
+# receives 1/n, all normalized by (1-α). (CTE(0) is then exactly the mean.)
+function (rm::CTE)(risk::AbstractArray{<:Real})
+    n = length(risk)
+    α = rm.α
+    k = _first_index_above(n, α)
+    tail = partialsort(vec(risk), k:n)
+    partial = (k / n - α) * first(tail)
+    rest = sum(@view tail[2:end]) / n
+    return (partial + rest) / (1 - α)
+end
+
+(rm::Expectation)(risk::AbstractArray{<:Real}) = sum(risk) / length(risk)
+
 """
-    cdf_function(risk)
+    cdf_func(risk)
 
 Returns the appropriate cumulative distribution function depending on the type, specifically:
 
@@ -223,90 +267,4 @@ Returns the appropriate cumulative distribution function depending on the type, 
 cdf_func(S::AbstractArray{<:Real}) = StatsBase.ecdf(S)
 cdf_func(S::Distributions.UnivariateDistribution) = x -> Distributions.cdf(S, x)
 
-######################################################################
-## This section is old, work-in-progress VaR and CTE revamp applicable only for 
-# AbstractArrays. Keeping this around for now in case perforamnce needs dicatate a specialized
-# version of the two, but the above implementation has proved more flexible and general
-# than below.
-
-
-# """
-#     VaR(v::AbstractArray,p::Real;rev::Bool=false)
-
-# The `p`th quantile of the vector `v` is the Value at Risk. Assumes more positive values are higher risk measures, so a higher p will return a more positive number., but this can be reversed if `rev` is `true`.
-
-# Also can be called with `ValueAtRisk(...)`.
-# """
-# function VaR_empirical(v::T, p; sorted=false) where {T<:AbstractArray}
-#     if sorted
-#         _VaR_sorted(v, p)
-#     else
-#         _VaR_sorted(sort(v), p)
-#     end
-# end
-
-# # Core VaR assumes v is sorted
-# function _VaR_sorted(v, p)
-#     i = 1
-#     n = length(v)
-#     q_prior = 0.0
-#     x_prior = first(v)
-#     for (i, x) in enumerate(v)
-#         q = i / n
-#         if q >= p
-#             # return weighted between two points
-#             return x * (p - q_prior) / (q - q_prior) + x_prior * (q - p) / (q - q_prior)
-
-#         end
-#         x_prior = x
-#         q_prior = q
-#     end
-
-#     return last(v)
-# end
-
-
-
-
-# """
-#     CTE(v::AbstractArray,p::Real;rev::Bool=false)
-
-# The average of the values ≥ the `p`th percentile of the vector `v` is the Conditiona Tail Expectation. Assumes more positive values are higher risk measures, so a higher p will return a more positive number, but this can be reversed if `rev` is `true`.
-
-# May also be called with `ConditionalTailExpectation(...)`.
-
-# Also known as Tail Value at Risk (TVaR), or Tail Conditional Expectation (TCE)
-# """
-# function CTE(v::T, p; sorted=false) where {T<:AbstractArray}
-#     if sorted
-#         _CTE_sorted(v, p)
-#     else
-#         _CTE_sorted(sort(v), p)
-#     end
-# end
-
-# # Core CTE assumes v is sorted
-# function _CTE_sorted(v, p)
-#     i = 1
-#     n = length(v)
-#     q_prior = 0.0
-#     x_prior = first(v)
-#     sub_total = zero(eltype(v))
-#     in_range = false
-#     for (i, x) in enumerate(v)
-#         q = i / n
-#         if in_range || q >= p
-#             # return weighted between two points
-#             # return x * (p - q_prior) / (q - q_prior) + x_prior * (q - p) / (q - q_prior)
-#             in_range = true
-
-#         end
-#         x_prior = x
-#         q_prior = q
-#     end
-
-#     return last(v)
-# end
-
-######################
 end

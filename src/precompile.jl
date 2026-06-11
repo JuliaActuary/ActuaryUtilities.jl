@@ -3,7 +3,7 @@
 @setup_workload begin
     # Putting some things in `setup` can reduce the size of the
     # precompile file and potentially make loading faster.
-    cfs = [10 for i in 1:10]
+    cfs = Float64[10 for i in 1:10]
 
     # 2021-03-31 rates from Treasury.gov
     rates = [0.01, 0.01, 0.03, 0.05, 0.07, 0.16, 0.35, 0.92, 1.40, 1.74, 2.31, 2.41] ./ 100
@@ -35,8 +35,8 @@
 
 
 
-        years_between(Date(2018, 9, 30), Date(2018, 9, 30))
-        duration(Date(2018, 9, 30), Date(2019, 9, 30))
+        years_between(Dates.Date(2018, 9, 30), Dates.Date(2018, 9, 30))
+        duration(Dates.Date(2018, 9, 30), Dates.Date(2019, 9, 30))
 
     end
 end

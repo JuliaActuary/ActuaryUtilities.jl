@@ -5,12 +5,15 @@ using Test
 using Distributions
 using StatsBase
 using Random
+import ForwardDiff
+import QuadGK
 
 const FM = ActuaryUtilities.FinanceModels
 const FC = ActuaryUtilities.FinanceCore
 
 
 include("risk_measures.jl")
+include("audit.jl")
 
 @testset "Temporal functions" begin
     @testset "years_between" begin
@@ -1475,4 +1478,9 @@ end
         eff_fd = (rj(dn) - rj(up)) / (2Δ * rj(curve))
         @test duration(Effective(), flm, curve, tenors) ≈ eff_fd atol = 1e-4
     end
+end
+
+using Aqua
+@testset "Aqua.jl" begin
+    Aqua.test_all(ActuaryUtilities; ambiguities = false)
 end

@@ -1,7 +1,7 @@
 name = "ActuaryUtilities"
 uuid = "bdd23359-8b1c-4f88-b89b-d11982a786f4"
 authors = ["Alec Loudenback"]
-version = "5.8.0"
+version = "5.9.0"
 
 [deps]
 Dates = "ade2ca70-3891-5945-98fb-dc099432e06a"
@@ -9,8 +9,6 @@ Distributions = "31c24e10-a181-5473-b8eb-7969acd0382f"
 FinanceCore = "b9b1ffdd-6612-4b69-8227-7663be06e089"
 FinanceModels = "77f2ae65-bdde-421f-ae9d-22f1af19dd76"
 ForwardDiff = "f6369f11-7733-5829-9624-2563aa707210"
-Optimization = "7f7a1694-90dd-40f0-9382-eb1efda571ba"
-OptimizationOptimJL = "36348300-93cb-4f02-beb5-3c3902f8871e"
 PrecompileTools = "aea7be01-6a6a-4083-8856-8a6e6704d82a"
 QuadGK = "1fd47b50-473d-5c70-9696-f719f8f3bcdc"
 Random = "9a3f8284-a2c9-5f02-9a11-845980a1fd5c"
@@ -18,16 +16,17 @@ Reexport = "189a3867-3050-52da-a836-e630ba90ab69"
 StatsBase = "2913bbd2-ae8a-5f71-8c99-4fb6c76f3a91"
 
 [compat]
+Dates = "1"
 Distributions = "0.25"
-FinanceCore = "^2"
+FinanceCore = "2, 3"
 FinanceModels = "5.5.1, 6"
-ForwardDiff = "^0.10"
-Optimization = "4.8.0, 5"
-OptimizationOptimJL = "0.4.5"
+ForwardDiff = "0.10, 1"
 PrecompileTools = "^1"
 QuadGK = "^2"
+Random = "1"
 Reexport = "^1.2"
 StatsBase = "^0.33,0.34"
+Test = "1"
 julia = "^1.10"
 
 [extras]
