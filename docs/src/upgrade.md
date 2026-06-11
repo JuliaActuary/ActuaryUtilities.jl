@@ -15,6 +15,7 @@ Non-breaking unless you relied on the specific edge-case behaviors noted below.
 - **`moic` throws an explicit `ArgumentError`** when the input has no positive or no negative cashflows ("moic requires at least one positive (distribution) and one negative (contribution) cashflow"); previously such degenerate input surfaced as an obscure reduce-over-empty-collection error.
 - **Analytic fast paths** for `Modified` duration and `convexity` with flat yields (`Real`, `Rate{Periodic}`, `Rate{Continuous}`, `Yield.Constant`): same values as the AD path (equality-tested), substantially faster.
 - **`present_values` is now O(n)** (previously O(n²) and recursive — very long cashflow vectors could overflow the stack) and propagates AD dual numbers through its accumulator.
+- **Legacy bump-and-reprice `duration(keyrate::KeyRateZero/KeyRatePar, curve, cashflows)`** now derives timepoints from embedded `Cashflow` times (previously it used the vector *indices*, so e.g. semiannual cashflows at 0.5…5.0 got a key-rate grid out to 10 years). Results change for `Cashflow`-vector inputs; plain amount vectors are unaffected. When every timepoint is below 1, the default `krd_points` grid would be empty and now raises an `ArgumentError` asking for an explicit grid (previously an obscure `MethodError`).
 
 ### Dependencies & ecosystem
 
