@@ -35,7 +35,7 @@ dur = duration(zrc, tenors, cfs, tenors)
 
 ```@example sensitivities
 # Scalar DV01
-dv01 = duration(DV01(), zrc, tenors, cfs, tenors)
+dv01_scalar = duration(DV01(), zrc, tenors, cfs, tenors)
 ```
 
 ```@example sensitivities
@@ -221,8 +221,8 @@ The default two-curve valuation uses multiplicative discount factors: `V = Σ cf
 For fixed cashflows, IR01 and CS01 are identical because base and credit rates enter additively. A **credit-risky floating rate bond** breaks this symmetry — its coupons reset to the risk-free forward rate plus a fixed credit spread, so bumping base rates changes both coupon amounts and discount factors (partially canceling), while bumping credit rates only affects discounting:
 
 ```@example sensitivities
-spread = 0.02
-face   = 100.0
+credit_spread = 0.02
+face          = 100.0
 
 floater_result = sensitivities(KeyRates(tenors), base, credit) do base_curve, credit_curve
     total = 0.0
@@ -233,7 +233,7 @@ floater_result = sensitivities(KeyRates(tenors), base, credit) do base_curve, cr
 
         # Coupon resets to risk-free forward rate + fixed credit spread
         fwd = df_base_prev / df_base - 1.0
-        total += face * (fwd + spread) * df_base * df_credit
+        total += face * (fwd + credit_spread) * df_base * df_credit
 
         # Principal at maturity
         t == 5 && (total += face * df_base * df_credit)
@@ -544,15 +544,15 @@ end
 (; ad_dv01, fd_dv01, max_abs_diff = maximum(abs.(ad_dv01 .- fd_dv01)))
 ```
 
-## Validating AD with TransformedYield
+## Validating AD with TenorShift
 
-AD gives the instantaneous rate of change (the derivative), while `TransformedYield` lets you apply an actual finite shift and observe the PV change. Comparing the two is a useful sanity check — the AD-predicted change should closely match the actual change for small shifts:
+AD gives the instantaneous rate of change (the derivative), while `TenorShift` (created via `curve + (z, t) -> ...`) lets you apply an actual finite shift and observe the PV change. Comparing the two is a useful sanity check — the AD-predicted change should closely match the actual change for small shifts:
 
 ```@example sensitivities
 # AD: total DV01 across all tenors — already in dollar-per-1bp units
 total_dv01 = sum(duration(DV01(), KeyRates(val_tenors), val_zrc, val_cfs, val_tenors))
 
-# TransformedYield: actual PV change under a +1 bp parallel shift
+# TenorShift: actual PV change under a +1 bp parallel shift
 pv_base    = present_value(val_zrc, val_cfs, val_tenors)
 shifted    = val_zrc + (z, t) -> z + Continuous(0.0001)  # +1 bp
 pv_shifted = present_value(shifted, val_cfs, val_tenors)
@@ -566,4 +566,4 @@ predicted_change = total_dv01
    ratio            = round(actual_change / predicted_change, digits = 6))
 ```
 
-The ratio is very close to 1.0, confirming AD and TransformedYield agree. The small deviation is due to convexity — DV01 is a first-order (linear) approximation, while the actual PV change includes higher-order effects.
+The ratio is very close to 1.0, confirming AD and TenorShift agree. The small deviation is due to convexity — DV01 is a first-order (linear) approximation, while the actual PV change includes higher-order effects.

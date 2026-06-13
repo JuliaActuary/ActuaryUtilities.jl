@@ -8,6 +8,8 @@
 ## Quickstart
 
 ```julia
+using ActuaryUtilities
+
 cfs = [5, 5, 105]
 times    = [1, 2, 3]
 
@@ -50,7 +52,7 @@ zrc = ZeroRateCurve(rates, tenors)
 cfs = Cashflow.([5.0, 5.0, 5.0, 5.0, 105.0], tenors)
 
 # All key rate sensitivities in one AD pass
-result = sensitivities(zrc, cfs)
+result = sensitivities(KeyRates(tenors), zrc, cfs)
 result.value       # present value
 result.durations   # key rate durations (vector)
 result.convexities # cross-convexity matrix
@@ -63,9 +65,10 @@ result.convexities # cross-convexity matrix
 
 ```julia
 using FinanceModels: ShortRate
+using Random: Xoshiro
 
 hw = ShortRate.HullWhite(0.1, 0.01, zrc)
-hw_result = sensitivities(hw, cfs, tenors; n_scenarios=1000, rng=Xoshiro(42))
+hw_result = sensitivities(KeyRates(tenors), hw, cfs, tenors; n_scenarios=1000, rng=Xoshiro(42))
 hw_result.durations   # key rate durations under stochastic dynamics
 ```
 
@@ -115,7 +118,7 @@ discount(r,cashflows)
 r = Rate(0.05,Periodic(1));
 
 convert(Periodic(2),  r)   # convert to compounded twice per timestep
-convert(Continuous(2),r)   # convert to compounded twice per timestep
+convert(Continuous(), r)   # convert to continuous compounding
 ```
 
 For more on Rates, see [FinanceCore.jl](https://github.com/JuliaActuary/FinanceCore.jl). [FinanceModels.jl](https://github.com/JuliaActuary/FinanceModels.jl) also provides a rich and flexible set of yield models to use.
