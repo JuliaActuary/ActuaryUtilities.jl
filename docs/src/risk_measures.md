@@ -31,7 +31,8 @@ Using $H$ as a risk measure and $X$ as the associated risk distribution:
 
 For any non-random $c$
 
-%$H(X + c) = H(X) + c$%
+$$H(X + c) = H(X) + c$$
+
 This means that adding a constant amount (positive or negative) to a risk adds the same amount to the risk measure. It also implies that the risk measure for a non-random loss, with known value c, say, is just the amount of the loss c.
 
 ### 2. Positive Homogeneity
@@ -64,7 +65,7 @@ In "Properties of Distortion Risk Measures" (Balbás, Garrido, Mayoral) also no
 
 Completeness is the property that the distortion function associated with the risk measure produces a unique mapping between the original risk's survival function $S(x)$ and the distorted  $S*(x)$ for each $x$. See [Distortion Risk Measures](@ref) for more detail on this.
 
-In practice, this means that a non-complete risk measure ignores some part of the risk distribution (e.g. CTE and VaR don't use the full distribution and have the same)
+In practice, this means that a non-complete risk measure ignores some part of the risk distribution (e.g. `CTE` and `VaR` do not use the full distribution, so two risks that differ only outside the measured tail can produce the same value of the risk measure).
 
 #### Exhaustive
 
@@ -72,10 +73,10 @@ A risk measure is "exhaustive" if it is coherent and complete.
 
 #### Adaptable
 
-A risk measure is "adapted" or "adaptable" if its distortion function (see [Distortion Risk Measures](@ref)) $g$:
+A risk measure is "adapted" or "adaptable" if its distortion function (see [Distortion Risk Measures](@ref)) $g$ satisfies:
 
-    1. $g$ is strictly concave, that is $g$ is strictly decreasing. 
-    2. $lim_{u\to0+} g\prime(u) = \inf and lim_{u\to1-} g\prime(u) = 0.
+1. $g$ is strictly concave, that is, $g^\prime$ is strictly decreasing.
+2. $\lim_{u\to 0^+} g^\prime(u) = \infty$ and $\lim_{u\to 1^-} g^\prime(u) = 0$.
 
 Adaptive risk measures are exhaustive but the converse is not true.
 
@@ -111,6 +112,9 @@ To calculate a risk measure $H$, we integrate the distorted $F$ across all possi
 $$H(X) = E^*(X) = - \int_{-\infty}^0 g(F(x))dx + \int_0^{+\infty}[1-g(F(x))]dx$$
 
 That is, the risk measure ($H$) is equal to the expected value of the distortion of the risk distribution ($E^*(X)$).
+
+!!! note "How the computation is performed"
+    When `risk` is a continuous `Distributions.jl` distribution, this integral is evaluated by numerical quadrature of the distorted distribution function. When `risk` is an array of outcomes, the same Choquet integral reduces to a finite weighted sum of the sample's order statistics, and `VaR`, `CTE`, and `Expectation` evaluate that sum exactly (no quadrature or approximation error); the other distortion measures integrate the distorted empirical CDF numerically.
 
 ## Examples
 
@@ -192,7 +196,7 @@ let
         )
     lines!(ax,
         αs,
-        [RiskMeasures.Expectation()(outcomes) for α in αs],
+        [Expectation()(outcomes) for α in αs],
         label = "Expectation",
         )
     axislegend(ax,position=:lt)

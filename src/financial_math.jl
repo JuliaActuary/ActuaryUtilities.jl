@@ -1,11 +1,10 @@
 module FinancialMath
 
 import ..FinanceCore
+import ..FinanceCore: irr, internal_rate_of_return, pv, present_value
 import ..FinanceModels
 import ..ForwardDiff
 import ..ActuaryUtilities: duration
-import ..Optimization
-import ..OptimizationOptimJL
 import Random
 
 export irr, internal_rate_of_return, spread,
@@ -22,33 +21,34 @@ Efficiently calculate a vector representing the present value of the given cashf
 # Examples
 ```julia-repl
 julia> present_values(0.00, [1,1,1])
-[3,2,1]
+3-element Vector{Float64}:
+ 3.0
+ 2.0
+ 1.0
 
-julia> present_values(ForwardYield([0.1,0.2]), [10,20],[0,1]) # after `using FinanceModels`
-2-element Vector{Float64}:
- 28.18181818181818
- 18.18181818181818
+julia> present_values(0.05, [10,10,110], [1,2,3])
+3-element Vector{Float64}:
+ 113.61624014685238
+ 109.297052154195
+ 104.76190476190476
 ```
 
 """
 function present_values(interest, cashflows, times = eachindex(cashflows))
-    return present_values_accumulator(interest, cashflows, times)
-end
-
-function present_values_accumulator(interest, cashflows, times, pvs = [0.0])
-    from_time = length(times) == 1 ? 0.0 : times[end - 1]
-    pv = FinanceCore.discount(interest, from_time, last(times)) * (first(pvs) + last(cashflows))
-    pvs = pushfirst!(pvs, pv)
-
-    if length(cashflows) > 1
-
-        new_cfs = @view cashflows[1:(end - 1)]
-        new_times = @view times[1:(end - 1)]
-        return present_values_accumulator(interest, new_cfs, new_times, pvs)
-    else
-        # last discount and return
-        return pvs[1:(end - 1)] # end-1 get rid of trailing 0.0
+    length(cashflows) == length(times) || throw(DimensionMismatch("cashflows and times must have equal length"))
+    n = length(cashflows)
+    # single reverse scan: pvs[k] is the value at times[k-1] (time zero for k = 1)
+    # of cashflows k..n. O(n) and non-recursive (the prior implementation was
+    # O(n²) with recursion depth n), and the element type follows the data so
+    # AD dual numbers propagate.
+    acc = zero(FinanceCore.discount(interest, first(times)) * first(cashflows))
+    pvs = Vector{typeof(acc)}(undef, n)
+    @inbounds for k in n:-1:1
+        from = k == 1 ? zero(times[k]) : times[k - 1]
+        acc = FinanceCore.discount(interest, from, times[k]) * (acc + cashflows[k])
+        pvs[k] = acc
     end
+    return pvs
 end
 
 
@@ -77,7 +77,7 @@ Assumptions:
 
 Returns `nothing` if cashflow stream never breaks even.
 
-```julia
+```julia-repl
 julia> breakeven(0.10, [-10,1,2,3,4,8])
 5
 
@@ -127,7 +127,7 @@ struct Modified <: Duration end
 
 Dollar Value of 01. The dollar change in value for a 1 basis point (0.01%) parallel shift in rates.
 
-`DV01 = -∂V/∂r / 10000`, so a DV01 of 0.045 means the position loses \$0.045 per \$100 notional for a 1bp rate increase.
+`DV01 = -∂V/∂r / 10000`, so a DV01 of 0.045 means the position loses \\\$0.045 per \\\$100 notional for a 1bp rate increase.
 
 See also: [`IR01`](@ref), [`CS01`](@ref)
 """
@@ -222,7 +222,7 @@ Shift the par curve by the given amount at the given timepoint. Use in conjuncti
 
 Unlike other duration statistics which are computed using analytic derivatives, `KeyRateDuration`s are computed via a shift-and-compute the yield curve approach.
 
-`KeyRatePar` is more commonly reported (than [`KeyRateZero`](@ref)) in the fixed income markets, even though the latter has more analytically attractive properties. See the discussion of KeyRateDuration in the FinanceModels.jl docs.
+`KeyRatePar` is more commonly reported (than [`KeyRateZero`](@ref)) in the fixed income markets, even though [`KeyRateZero`](@ref) has more analytically attractive properties. See the discussion of KeyRateDuration in the FinanceModels.jl docs.
 
 """
 struct KeyRatePar{T, R} <: KeyRateDuration
@@ -234,11 +234,11 @@ end
 """
     KeyRateZero(timepoint,shift=0.001) <: KeyRateDuration
 
-Shift the par curve by the given amount at the given timepoint. Use in conjunction with `duration` to calculate the key rate duration.
+Shift the **zero** curve by the given amount at the given timepoint. Use in conjunction with `duration` to calculate the key rate duration.
 
 Unlike other duration statistics which are computed using analytic derivatives, `KeyRateDuration` is computed via a shift-and-compute the yield curve approach.
 
-`KeyRateZero` is less commonly reported (than [`KeyRatePar`](@ref)) in the fixed income markets, even though the latter has more analytically attractive properties. See the discussion of KeyRateDuration in the FinanceModels.jl docs.
+`KeyRateZero` is less commonly reported (than [`KeyRatePar`](@ref)) in the fixed income markets, even though zero-curve shifts have more analytically attractive properties (rates beyond the shifted timepoint are unaffected). See the discussion of KeyRateDuration in the FinanceModels.jl docs.
 """
 struct KeyRateZero{T, R} <: KeyRateDuration
     timepoint::T
@@ -255,7 +255,7 @@ A convenience constructor for [`KeyRateZero`](@ref).
 [`KeyRateZero`](@ref) is chosen as the default constructor because it has more attractive properties than [`KeyRatePar`](@ref):
 
 - rates after the key `timepoint` remain unaffected by the `shift`
-  - e.g. this causes a 6-year zero coupon bond would have a negative duration if the 5-year par rate was used
+  - e.g. shifting the 5-year par rate would (incorrectly) give a 6-year zero coupon bond a negative key rate duration, while a 5-year zero-rate shift leaves it unaffected
 
 
 """
@@ -274,8 +274,6 @@ Calculates the Macaulay, Modified, DV01, IR01, or CS01 duration. `times` may be 
 
 `cfs` can be an `AbstractVector{<:Cashflow}` (from FinanceCore), in which case `times` is extracted automatically and should be omitted.
 
-Note that the calculated duration will depend on the periodicity convention of the `interest_rate`: a `Periodic` yield (or yield model with that convention) will be a slightly different computed duration than a `Continous` which follows from the present value differing according to the periodicity.
-
 When not given `Modified()` or `Macaulay()` as an argument, will default to `Modified()`.
 
 - Modified duration: the relative change per point of yield change.
@@ -283,6 +281,25 @@ When not given `Modified()` or `Macaulay()` as an argument, will default to `Mod
 - DV01: the absolute change per basis point (hundredth of a percentage point).
 - IR01: the absolute change per basis point shift in the risk-free (base) curve, holding credit spread constant.
 - CS01: the absolute change per basis point shift in the credit spread, holding the risk-free (base) curve constant.
+
+# Periodicity convention
+
+The Modified duration returned depends on the space in which the parallel rate shock is applied, and this differs between plain rates and yield *models*:
+
+- A scalar (e.g. `0.04`) or a `Rate` is shocked in its own compounding space. A scalar is treated as `Periodic(0.04, 1)`, so Modified = Macaulay / (1 + 0.04); in general a `Periodic(y, m)` rate gives Modified = Macaulay / (1 + y/m), and a `Continuous(y)` rate gives Modified = Macaulay.
+- A yield model (e.g. `Yield.Constant(0.04)` from FinanceModels) composes the shock in continuous-zero space, so Modified = Macaulay under the curve's own discounting, regardless of the compounding convention stored in the model.
+
+The same inputs therefore produce two different numbers by design:
+
+```julia-repl
+julia> times = 1:5; cfs = [0,0,0,0,100];
+
+julia> duration(0.04, cfs, times)                  # Periodic(1) shock: Macaulay / 1.04
+4.8076923076923075
+
+julia> duration(Yield.Constant(0.04), cfs, times)  # continuous-zero shock: Macaulay
+5.0
+```
 
 # Examples
 
@@ -308,7 +325,7 @@ julia> duration(Modified(),0.03,cfs,times)
 4.854368932038835
 
 julia> convexity(0.03,cfs,times)
-28.277877274012614
+28.277877274012635
 
 ```
 
@@ -320,7 +337,7 @@ julia> my_lump_sum_value(i) = lump_sum_value(100,5,i)
 julia> duration(0.03,my_lump_sum_value)
 4.854368932038835
 julia> convexity(0.03,my_lump_sum_value)
-28.277877274012617
+28.277877274012642
 
 ```
 """
@@ -333,10 +350,69 @@ function duration(::Modified, yield, cfs, times)
     return duration(yield, D)
 end
 
+# ── Analytic Modified-duration fast paths for flat yields ───────────────────
+#
+# Each method below is exactly equal to the generic AD path (locked by
+# equality tests vs `duration(yield, i -> price(i, cfs, times))`); the only
+# difference between yield types is the space in which the parallel shock `i`
+# is applied by `i + yield`:
+#
+# * `Real` y: nominal `Periodic(1)` space → V(i) = Σ cf·(1+y+i)^(-t),
+#   so Modified = Macaulay / (1 + y).
+# * `Rate{Periodic(m)}`: the rate's own nominal space →
+#   Modified = Macaulay / (1 + y/m).
+# * `Rate{Continuous}`: the continuous rate itself → Modified = Macaulay.
+# * `Yield.Constant`: model arithmetic composes in continuous-zero space
+#   (`Constant(i) + Constant(y)` adds continuous rates), so Modified = Macaulay
+#   under the curve's own discounting, regardless of the stored compounding.
+#
+# Macaulay here is the signed cashflow-weighted time Σ t·cf·d / Σ cf·d, which
+# matches the generic path's d/di log|V| for any sign of V.
+
+function _macaulay_ratio(yield, cfs, times)
+    # @inbounds below indexes `times` by `eachindex(cfs)` — a silent mismatch
+    # would read out of bounds rather than zip-truncate
+    length(cfs) == length(times) || throw(DimensionMismatch("cfs and times must have equal length"))
+    t1 = FinanceCore.timepoint(first(cfs), first(times))
+    z = _cf_value(first(cfs)) * FinanceCore.discount(yield, t1)
+    V = zero(z)
+    Vt = zero(z * t1)
+    @inbounds for k in eachindex(cfs)
+        t = FinanceCore.timepoint(cfs[k], times[k])
+        cfd = _cf_value(cfs[k]) * FinanceCore.discount(yield, t)
+        V += cfd
+        Vt += t * cfd
+    end
+    return Vt / V
+end
+
+function duration(::Modified, yield::Real, cfs::AbstractVector, times)
+    return _macaulay_ratio(yield, cfs, times) / (1 + yield)
+end
+function duration(::Modified, yield::FinanceCore.Rate{<:Real, FinanceCore.Periodic}, cfs::AbstractVector, times)
+    m = yield.compounding.frequency
+    return _macaulay_ratio(yield, cfs, times) / (1 + FinanceCore.rate(yield) / m)
+end
+function duration(::Modified, yield::FinanceCore.Rate{<:Real, FinanceCore.Continuous}, cfs::AbstractVector, times)
+    return _macaulay_ratio(yield, cfs, times)
+end
+function duration(::Modified, yield::FinanceModels.Yield.Constant{<:FinanceCore.Rate}, cfs::AbstractVector, times)
+    return _macaulay_ratio(yield.rate, cfs, times)
+end
+
 function duration(yield, valuation_function::T) where {T <: Function}
-    D(i) = log(valuation_function(i + yield))
+    # `abs`: duration is defined on the magnitude of value, consistent with
+    # `price` (used by the cashflow forms) and the `convexity` sibling — a
+    # negative-valued (liability) valuation function is a valid input
+    D(i) = log(abs(valuation_function(i + yield)))
     return δV = -ForwardDiff.derivative(D, 0.0)
 end
+
+# Element access for cashflow vectors that may be either numeric or
+# wrapped `FinanceCore.Cashflow` values. The scalar duration / convexity
+# fast paths use this so they work uniformly across both representations.
+@inline _cf_value(c::FinanceCore.Cashflow) = FinanceCore.amount(c)
+@inline _cf_value(c) = c
 
 function duration(yield, cfs, times)
     return duration(Modified(), yield, vec(cfs), times)
@@ -377,7 +453,7 @@ julia> cfs = [5, 5, 5, 105];
 julia> times = 1:4;
 
 julia> duration(IR01(), 0.03, 0.02, cfs, times)
-0.03465054893498076
+0.035459505041623596
 
 julia> duration(IR01(), 0.03, 0.02, cfs, times) ≈ duration(DV01(), 0.05, cfs, times)
 true
@@ -408,7 +484,7 @@ julia> cfs = [5, 5, 5, 105];
 julia> times = 1:4;
 
 julia> duration(CS01(), 0.03, 0.02, cfs, times)
-0.03465054893498076
+0.035459505041623596
 
 julia> duration(CS01(), 0.03, 0.02, cfs, times) ≈ duration(DV01(), 0.05, cfs, times)
 true
@@ -444,7 +520,7 @@ julia> duration(Macaulay(),0.03,cfs,times)
 julia> duration(Modified(),0.03,cfs,times)
 4.854368932038835
 julia> convexity(0.03,cfs,times)
-28.277877274012614
+28.277877274012635
 
 ```
 
@@ -456,7 +532,7 @@ julia> my_lump_sum_value(i) = lump_sum_value(100,5,i)
 julia> duration(0.03,my_lump_sum_value)
 4.854368932038835
 julia> convexity(0.03,my_lump_sum_value)
-28.277877274012617
+28.277877274012642
 
 ```
 
@@ -466,8 +542,60 @@ function convexity(yield, cfs, times)
 end
 
 function convexity(yield, cfs)
-    times = 1:length(cfs)
-    return convexity(yield, i -> price(i, cfs, times))
+    times = FinanceCore.timepoint.(cfs, 1:length(cfs))
+    return convexity(yield, cfs, times)
+end
+
+# ── Analytic convexity fast paths for flat yields ───────────────────────────
+#
+# Exactly equal to the generic nested-AD path (locked by equality tests vs
+# `convexity(yield, i -> price(i, cfs, times))`). As with the Modified-duration
+# fast paths above, the weight and divisor follow from where `yield + x`
+# applies the shock:
+#
+# * `Real` y: V(x) = Σ cf·(1+y+x)^(-t) → Σ cf·d·t(t+1) / V / (1+y)²
+# * `Rate{Periodic(m)}`: V(x) = Σ cf·(1+(y+x)/m)^(-mt) → Σ cf·d·t(t+1/m) / V / (1+y/m)²
+# * `Rate{Continuous}`: V(x) = Σ cf·e^(-(y+x)t) → Σ cf·d·t² / V
+# * `Yield.Constant`: shock composes in continuous-zero space as log(1+x), so
+#   V(x) = Σ cf·d·(1+x)^(-t) → Σ cf·d·t(t+1) / V (no divisor).
+#
+# The ratio uses the signed V, matching the generic path's |V|-normalized
+# second derivative for any sign of V (signs cancel).
+
+function _convexity_ratio(yield, weight, cfs, times)
+    # @inbounds below indexes `times` by `eachindex(cfs)` — a silent mismatch
+    # would read out of bounds rather than zip-truncate
+    length(cfs) == length(times) || throw(DimensionMismatch("cfs and times must have equal length"))
+    t1 = FinanceCore.timepoint(first(cfs), first(times))
+    z = _cf_value(first(cfs)) * FinanceCore.discount(yield, t1)
+    V = zero(z)
+    Vw = zero(z * t1 * t1)
+    @inbounds for k in eachindex(cfs)
+        t = FinanceCore.timepoint(cfs[k], times[k])
+        cfd = _cf_value(cfs[k]) * FinanceCore.discount(yield, t)
+        V += cfd
+        Vw += weight(t) * cfd
+    end
+    return Vw / V
+end
+
+function convexity(yield::Real, cfs::AbstractVector, times)
+    return _convexity_ratio(yield, t -> t * (t + 1), cfs, times) / (1 + yield)^2
+end
+function convexity(yield::FinanceCore.Rate{<:Real, FinanceCore.Periodic}, cfs::AbstractVector, times)
+    m = yield.compounding.frequency
+    return _convexity_ratio(yield, t -> t * (t + 1 / m), cfs, times) / (1 + FinanceCore.rate(yield) / m)^2
+end
+function convexity(yield::FinanceCore.Rate{<:Real, FinanceCore.Continuous}, cfs::AbstractVector, times)
+    return _convexity_ratio(yield, t -> t * t, cfs, times)
+end
+function convexity(yield::FinanceModels.Yield.Constant{<:FinanceCore.Rate}, cfs::AbstractVector, times)
+    return _convexity_ratio(yield.rate, t -> t * (t + 1), cfs, times)
+end
+# disambiguation vs `convexity(curve::AYM, tenors, cfs::AbstractVector{<:Cashflow})`:
+# a Cashflow vector in the third position means (tenors, cashflows), not (cfs, times)
+function convexity(yield::FinanceModels.Yield.Constant{<:FinanceCore.Rate}, tenors::AbstractVector, cfs::AbstractVector{<:FinanceCore.Cashflow})
+    return convexity(yield, tenors, _extract_cfs_times(cfs)...)
 end
 
 function convexity(yield, valuation_function::T) where {T <: Function}
@@ -490,7 +618,8 @@ zero rate corresponding to the timepoint within the `KeyRateDuration` is shifted
 
 The `curve` may be any FinanceModels.jl curve (e.g. does not have to be a curve constructed via `FinanceModels.Zero(...)`).
 
-!!! Experimental: Due to the paucity of examples in the literature, this feature does not have unit tests like the rest of JuliaActuary functionality. Additionally, the API may change in a future major/minor version update.
+!!! warning "Experimental"
+    Due to the paucity of examples in the literature, this feature does not have unit tests like the rest of JuliaActuary functionality. Additionally, the API may change in a future major/minor version update.
 
 # Examples
 
@@ -547,6 +676,11 @@ tent function for key-rate duration bump-and-reprice:
 """
 function _tent_bump(shift, τ, krd_points)
     idx = findfirst(==(τ), krd_points)
+    idx === nothing && throw(
+        ArgumentError(
+            "KeyRateDuration timepoint $τ is not a point of the krd_points grid $krd_points; pass krd_points containing the shifted timepoint"
+        )
+    )
     n = length(krd_points)
 
     τ_left = idx > 1 ? krd_points[idx-1] : nothing
@@ -595,7 +729,7 @@ _ensure_yield_model(curve::Real) = FinanceModels.Yield.Constant(curve)
 function _krd_new_curve(keyrate::KeyRateZero, curve, krd_points)
     bump = _tent_bump(keyrate.shift, keyrate.timepoint, krd_points)
     base = _ensure_yield_model(curve)
-    return FinanceModels.Yield.TransformedYield(base, bump)
+    return FinanceModels.Yield.TenorShift(base, bump)
 end
 
 function _krd_new_curve(keyrate::KeyRatePar, curve, krd_points)
@@ -614,17 +748,24 @@ function _krd_new_curve(keyrate::KeyRatePar, curve, krd_points)
     return new_curve
 end
 
-function duration(keyrate::KeyRateDuration, curve, cashflows, timepoints)
-    krd_points = 1:maximum(timepoints)
-    return duration(keyrate, curve, cashflows, timepoints, krd_points)
+function _default_krd_points(timepoints)
+    mt = maximum(timepoints)
+    mt >= 1 || throw(
+        ArgumentError(
+            "the default krd_points grid 1:maximum(timepoints) is empty because all timepoints are < 1; pass krd_points explicitly"
+        )
+    )
+    return 1:mt
+end
 
+function duration(keyrate::KeyRateDuration, curve, cashflows, timepoints)
+    return duration(keyrate, curve, cashflows, timepoints, _default_krd_points(timepoints))
 end
 
 function duration(keyrate::KeyRateDuration, curve, cashflows)
-    timepoints = eachindex(cashflows)
-    krd_points = 1:maximum(timepoints)
-    return duration(keyrate, curve, cashflows, timepoints, krd_points)
-
+    # extract embedded Cashflow times where present; otherwise the index is the time
+    timepoints = FinanceCore.timepoint.(cashflows, eachindex(cashflows))
+    return duration(keyrate, curve, cashflows, timepoints, _default_krd_points(timepoints))
 end
 
 """ 
@@ -632,29 +773,50 @@ end
 
 Return the solved-for constant spread to add to `curve1` in order to equate the discounted `cashflows` with `curve2`
 
+The spread is found via a damped Newton iteration on the pricing residual and is solved to machine precision; an `ErrorException` is thrown if the solve does not converge within `maxiter` iterations.
+
+!!! note
+    For mixed-sign cashflows the pricing residual can have more than one exact root (e.g. a duration-neutral asset/liability pair); the root reached from a starting spread of zero is returned.
+
 # Examples
 
 ```julia-repl
-spread(0.04, 0.05, cfs)
-Rate{Float64, Periodic}(0.010000000000000009, Periodic(1))
+julia> spread(0.04, 0.05, fill(10.0, 10))
+Periodic(0.010000000000000009, 1)
 ```
 """
-function spread(curve1, curve2, cashflows, times = eachindex(cashflows))
+function spread(curve1, curve2, cashflows, times = eachindex(cashflows); tol = 1.0e-12, maxiter = 100)
     times = FinanceCore.timepoint.(cashflows, times)
     cashflows = FinanceCore.amount.(cashflows)
     pv2 = FinanceCore.pv(curve2, cashflows, times)
 
-
-    function f(s, p)
-        return abs2(FinanceCore.pv(curve1 + FinanceCore.Periodic(only(s), 1), cashflows, times) - pv2)
+    # Newton + AD on the smooth pricing residual — converges to machine
+    # precision in a handful of iterations, vs. the previous derivative-free
+    # simplex minimization of the squared residual, whose attainable precision
+    # was only ~sqrt of the function tolerance. The step is damped because the
+    # residual is not monotone for mixed-sign cashflows: a duration-neutral
+    # portfolio has f′(0) ≈ 0, and an undamped step would launch the iterate
+    # out of the valid spread domain (s > -1).
+    f(s) = FinanceCore.pv(curve1 + FinanceCore.Periodic(s, 1), cashflows, times) - pv2
+    ftol = tol * max(one(pv2), abs(pv2))
+    max_step = 0.25
+    s = 0.0
+    fs = f(s)
+    converged = abs(fs) < ftol
+    iters = 0
+    while !converged && iters < maxiter
+        d = ForwardDiff.derivative(f, s)
+        step = fs / d
+        if !isfinite(step) || abs(step) > max_step
+            step = isnan(step) ? max_step : copysign(max_step, step)
+        end
+        s = max(s - step, -0.999)
+        fs = f(s)
+        converged = abs(fs) < ftol
+        iters += 1
     end
-
-    s0 = zeros(1)
-
-    prob = Optimization.OptimizationProblem(f, s0, nothing)
-    sol = Optimization.solve(prob, OptimizationOptimJL.NelderMead())
-    return FinanceCore.Periodic(only(sol.u), 1)
-
+    converged || throw(ErrorException("spread did not converge in $maxiter iterations (last residual = $fs)"))
+    return FinanceCore.Periodic(s, 1)
 end
 
 """
@@ -671,6 +833,13 @@ julia> moic([-10,20,30])
 
 """
 function moic(cfs::T) where {T <: AbstractArray}
+    has_pos = any(cf -> FinanceCore.amount(cf) > 0, cfs)
+    has_neg = any(cf -> FinanceCore.amount(cf) < 0, cfs)
+    has_pos && has_neg || throw(
+        ArgumentError(
+            "moic requires at least one positive (distribution) and one negative (contribution) cashflow"
+        )
+    )
     returned = sum(FinanceCore.amount(cf) for cf in cfs if FinanceCore.amount(cf) > 0)
     invested = -sum(FinanceCore.amount(cf) for cf in cfs if FinanceCore.amount(cf) < 0)
     return returned / invested
@@ -765,6 +934,171 @@ _valuation(cfs, times) = curve -> sum(cf * curve(t) for (cf, t) in zip(cfs, time
 # Two-curve standard valuation (additive on rates → multiplicative on discount factors)
 _valuation2(cfs, times) = (base, credit) -> sum(cf * base(t) * credit(t) for (cf, t) in zip(cfs, times))
 
+# ─── Closed-form KRD for the vanilla cashflow case ──────────────────────
+#
+# When the valuation function is just `Σ cf_k · disc(curve, t_k)`, the
+# gradient and Hessian of V(b) w.r.t. the hat-bump vector b are linear /
+# quadratic in the hat weights at each cashflow time. The triangular hats
+# only support 1–2 pillars per time, so each t_k writes at most 2 entries
+# of the gradient and a 2×2 Hessian block. Total work is O(N_cf),
+# independent of the number of KRD pillars — no ForwardDiff Dual
+# arithmetic over an N-wide partials vector. Numerically equivalent to
+# `_keyrate_ad` for these inputs; just much cheaper for typical bond /
+# liability cashflow vectors.
+
+# Active hat pair at `t`. Returns (i, w_i, j, w_j) such that the hat sum
+# at t equals `w_i * b[i] + w_j * b[j]`. At/beyond the endpoints only one
+# hat is active (the other weight is 0 and j == i).
+@inline function _active_hats(tenors, t)
+    n = length(tenors)
+    if t <= first(tenors)
+        return 1, one(float(t)), 1, zero(float(t))
+    elseif t >= last(tenors)
+        return n, one(float(t)), n, zero(float(t))
+    else
+        i = searchsortedlast(tenors, t)
+        w_right = (t - tenors[i]) / (tenors[i + 1] - tenors[i])
+        w_left  = one(w_right) - w_right
+        return i, w_left, i + 1, w_right
+    end
+end
+
+function _keyrate_analytic(curve::AYM, tenors::AbstractVector,
+                           cfs::AbstractVector, times; order = 1)
+    n = length(tenors)
+    T = float(promote_type(eltype(cfs), eltype(times)))
+    grad = zeros(T, n)
+    hess = order >= 2 ? zeros(T, n, n) : nothing
+    V = zero(T)
+    @inbounds for k in eachindex(cfs)
+        t = times[k]
+        d = FinanceCore.discount(curve, t)
+        cfd = cfs[k] * d
+        V += cfd
+        i, wi, j, wj = _active_hats(tenors, t)
+        grad[i] -= t * cfd * wi
+        if i != j
+            grad[j] -= t * cfd * wj
+        end
+        if order >= 2
+            tt = t * t * cfd
+            hess[i, i] += tt * wi * wi
+            if i != j
+                hess[i, j] += tt * wi * wj
+                hess[j, i] += tt * wj * wi
+                hess[j, j] += tt * wj * wj
+            end
+        end
+    end
+    return order >= 2 ? (; value = V, gradient = grad, hessian = hess) :
+                        (; value = V, gradient = grad)
+end
+
+# Two-curve analytic. base and credit share the tenor grid; the discount
+# is the product disc_base(t) · disc_credit(t). The base / credit
+# gradients are independent, and all three Hessian blocks (base, credit,
+# cross) share the same per-cashflow shape: t² · cfd · hat_i · hat_j over
+# the active hat pair. (Cross block is the mixed partial
+# ∂²V/(∂b_base[i] ∂b_credit[j]); positive — two -t chain factors square.)
+function _keyrate_analytic(base::AYM, credit::AYM, tenors::AbstractVector,
+                           cfs::AbstractVector, times; order = 1)
+    n = length(tenors)
+    T = float(promote_type(eltype(cfs), eltype(times)))
+    base_grad   = zeros(T, n)
+    credit_grad = zeros(T, n)
+    base_hess   = order >= 2 ? zeros(T, n, n) : nothing
+    credit_hess = order >= 2 ? zeros(T, n, n) : nothing
+    cross_hess  = order >= 2 ? zeros(T, n, n) : nothing
+    V = zero(T)
+    @inbounds for k in eachindex(cfs)
+        t = times[k]
+        d = FinanceCore.discount(base, t) * FinanceCore.discount(credit, t)
+        cfd = cfs[k] * d
+        V += cfd
+        i, wi, j, wj = _active_hats(tenors, t)
+        gi = t * cfd * wi
+        base_grad[i]   -= gi
+        credit_grad[i] -= gi
+        if i != j
+            gj = t * cfd * wj
+            base_grad[j]   -= gj
+            credit_grad[j] -= gj
+        end
+        if order >= 2
+            tt = t * t * cfd
+            ii = tt * wi * wi
+            base_hess[i, i]   += ii
+            credit_hess[i, i] += ii
+            cross_hess[i, i]  += ii
+            if i != j
+                ij = tt * wi * wj
+                jj = tt * wj * wj
+                base_hess[i, j]   += ij; base_hess[j, i]   += ij; base_hess[j, j]   += jj
+                credit_hess[i, j] += ij; credit_hess[j, i] += ij; credit_hess[j, j] += jj
+                cross_hess[i, j]  += ij; cross_hess[j, i]  += ij; cross_hess[j, j]  += jj
+            end
+        end
+    end
+    if order >= 2
+        return (; value = V,
+                  base_gradient   = base_grad,
+                  credit_gradient = credit_grad,
+                  base_hessian    = base_hess,
+                  credit_hessian  = credit_hess,
+                  cross_hessian   = cross_hess)
+    else
+        return (; value = V,
+                  base_gradient   = base_grad,
+                  credit_gradient = credit_grad)
+    end
+end
+
+# N-curve analytic. `curves::NamedTuple{roles}` of L curves with a shared tenor
+# grid; the discount is the product ∏_layers disc_layer(t). All roles must be
+# discount-role layers (multiplicatively composed); do not pass `:index`.
+# Under multiplicative composition every per-role gradient and every (role,
+# role) Hessian block carry identical values, so the helper returns a single
+# shared gradient vector and a single shared Hessian matrix. Public wrappers
+# alias these across the role NamedTuple positions.
+function _ncurve_analytic(curves::NamedTuple, tenors::AbstractVector,
+                              cfs::AbstractVector, times; order = 1)
+    L = length(curves)
+    n = length(tenors)
+    T = float(promote_type(eltype(cfs), eltype(times)))
+    grad_shared = zeros(T, n)
+    hess_shared = order >= 2 ? zeros(T, n, n) : nothing
+    V = zero(T)
+    @inbounds for k in eachindex(cfs)
+        t = times[k]
+        d = one(T)
+        for c in values(curves)
+            d *= FinanceCore.discount(c, t)
+        end
+        cfd = cfs[k] * d
+        V += cfd
+        i, wi, j, wj = _active_hats(tenors, t)
+        grad_shared[i] -= t * cfd * wi
+        if i != j
+            grad_shared[j] -= t * cfd * wj
+        end
+        if order >= 2
+            tt = t * t * cfd
+            hess_shared[i, i] += tt * wi * wi
+            if i != j
+                ij = tt * wi * wj
+                hess_shared[i, j] += ij
+                hess_shared[j, i] += ij
+                hess_shared[j, j] += tt * wj * wj
+            end
+        end
+    end
+    if order >= 2
+        return (; value = V, gradient = grad_shared, hessian = hess_shared)
+    else
+        return (; value = V, gradient = grad_shared)
+    end
+end
+
 ## AbstractYieldModel + KeyRates(tenors): KRD / IR01 / CS01 / convexity / sensitivities
 #
 # These dispatches accept any `FinanceModels.Yield.AbstractYieldModel`. The
@@ -851,7 +1185,8 @@ function duration(kr::KeyRates, valuation_fn::Function, curve::AYM)
     return -ad.gradient ./ ad.value
 end
 function duration(kr::KeyRates, curve::AYM, cfs, times)
-    return duration(kr, _valuation(cfs, times), curve)
+    an = _keyrate_analytic(curve, kr.tenors, cfs, times)
+    return -an.gradient ./ an.value
 end
 duration(kr::KeyRates, curve::AYM, cfs::AbstractVector{<:FinanceCore.Cashflow}) = duration(kr, curve, _extract_cfs_times(cfs)...)
 
@@ -877,7 +1212,8 @@ function duration(::DV01, kr::KeyRates, valuation_fn::Function, curve::AYM)
     return -ad.gradient ./ 10_000
 end
 function duration(::DV01, kr::KeyRates, curve::AYM, cfs, times)
-    return duration(DV01(), kr, _valuation(cfs, times), curve)
+    an = _keyrate_analytic(curve, kr.tenors, cfs, times)
+    return -an.gradient ./ 10_000
 end
 duration(::DV01, kr::KeyRates, curve::AYM, cfs::AbstractVector{<:FinanceCore.Cashflow}) = duration(DV01(), kr, curve, _extract_cfs_times(cfs)...)
 
@@ -905,7 +1241,8 @@ function duration(::IR01, kr::KeyRates, valuation_fn::Function, base::AYM, credi
     return -ad.base_gradient ./ 10_000
 end
 function duration(::IR01, kr::KeyRates, base::AYM, credit::AYM, cfs, times)
-    return duration(IR01(), kr, _valuation2(cfs, times), base, credit)
+    an = _keyrate_analytic(base, credit, kr.tenors, cfs, times)
+    return -an.base_gradient ./ 10_000
 end
 duration(::IR01, kr::KeyRates, base::AYM, credit::AYM, cfs::AbstractVector{<:FinanceCore.Cashflow}) = duration(IR01(), kr, base, credit, _extract_cfs_times(cfs)...)
 
@@ -922,7 +1259,8 @@ function duration(::CS01, kr::KeyRates, valuation_fn::Function, base::AYM, credi
     return -ad.credit_gradient ./ 10_000
 end
 function duration(::CS01, kr::KeyRates, base::AYM, credit::AYM, cfs, times)
-    return duration(CS01(), kr, _valuation2(cfs, times), base, credit)
+    an = _keyrate_analytic(base, credit, kr.tenors, cfs, times)
+    return -an.credit_gradient ./ 10_000
 end
 duration(::CS01, kr::KeyRates, base::AYM, credit::AYM, cfs::AbstractVector{<:FinanceCore.Cashflow}) = duration(CS01(), kr, base, credit, _extract_cfs_times(cfs)...)
 
@@ -942,27 +1280,54 @@ duration(vf::Function, ::CS01, kr::KeyRates, base::AYM, credit::AYM)      = dura
     convexity(kr::KeyRates, curve::AbstractYieldModel, cfs, times) -> Matrix
     convexity(base::AbstractYieldModel, credit::AbstractYieldModel, tenors, cfs, times) -> NamedTuple
     convexity(kr::KeyRates, base, credit, cfs, times) -> NamedTuple
+    convexity(kr::KeyRates, curves::NamedTuple, cfs, times) -> NamedTuple{roles}{roles}
 
-Key-rate convexity (matrix) and scalar convexity for any `AbstractYieldModel`
-or pair. Mirrors `duration` but returns ∂²V/∂rᵢ∂rⱼ rather than ∂V/∂rᵢ.
+Key-rate convexity (matrix) and scalar convexity for any `AbstractYieldModel`,
+pair, or named tuple of discount-role curves. Mirrors `duration` but returns
+∂²V/∂rᵢ∂rⱼ rather than ∂V/∂rᵢ.
+
+For the `NamedTuple` form, every named curve must be a discount-role layer
+(multiplicatively composed); do not pass `:index`. Per-role and per-pair
+outputs alias a single shared matrix — values coincide by construction
+under multiplicative composition. `copy` if you need independent buffers.
+
+The scalar forms (first two signatures) return the parallel-shift second
+derivative ∂²V/∂s² under a *continuous-rate* shock — matching the matrix
+forms exactly under partition of unity of the KRD hats. `tenors` is accepted
+for API symmetry but is not used by the scalar derivative computation.
 
 If you also want the durations / DV01s, prefer [`sensitivities`](@ref) — it returns
 the value, gradient, and Hessian from one AD pass at the same cost.
 """
-function convexity(valuation_fn::Function, curve::AYM, tenors)
-    return sum(convexity(KeyRates(tenors), valuation_fn, curve))
+# Continuous-shock parallel-shift convexity via a single scalar second
+# derivative. Under partition of unity of the KRD hat functions (`_hat_bump`
+# above), `sum(convexity(KeyRates(tenors), …))` equals ∂²V/∂s² for parallel
+# shift `s` by the chain rule — the matrix path returns the right number but
+# pays O(N² AD work + dense Hessian allocation) for what is an O(1) scalar
+# second derivative. This helper performs the scalar derivative directly on a
+# `TenorShift`-bumped curve, matching the matrix-sum form exactly while
+# avoiding the per-pillar Hessian.
+function _parallel_continuous_convexity(curve::AYM, valuation_fn)
+    bumped(s) = FinanceModels.Yield.TenorShift(curve, (z, t) -> z + FinanceCore.Continuous(s))
+    v(s) = abs(valuation_fn(bumped(s)))
+    ∂²V = ForwardDiff.derivative(s2 -> ForwardDiff.derivative(v, s2), 0.0)
+    return ∂²V / v(0.0)
 end
-function convexity(curve::AYM, tenors, cfs, times)
-    return sum(convexity(KeyRates(tenors), curve, cfs, times))
-end
-convexity(curve::AYM, tenors, cfs::AbstractVector{<:FinanceCore.Cashflow}) = convexity(curve, tenors, _extract_cfs_times(cfs)...)
+
+convexity(valuation_fn::Function, curve::AYM, _tenors) =
+    _parallel_continuous_convexity(curve, valuation_fn)
+convexity(curve::AYM, _tenors, cfs, times) =
+    _parallel_continuous_convexity(curve, c -> sum(_cf_value(cfs[k]) * FinanceCore.discount(c, times[k]) for k in eachindex(cfs)))
+convexity(curve::AYM, _tenors, cfs::AbstractVector{<:FinanceCore.Cashflow}) =
+    convexity(curve, _tenors, _extract_cfs_times(cfs)...)
 
 function convexity(kr::KeyRates, valuation_fn::Function, curve::AYM)
     ad = _keyrate_ad(curve, kr.tenors, valuation_fn; order = 2)
     return ad.hessian ./ ad.value
 end
 function convexity(kr::KeyRates, curve::AYM, cfs, times)
-    return convexity(kr, _valuation(cfs, times), curve)
+    an = _keyrate_analytic(curve, kr.tenors, cfs, times; order = 2)
+    return an.hessian ./ an.value
 end
 convexity(kr::KeyRates, curve::AYM, cfs::AbstractVector{<:FinanceCore.Cashflow}) = convexity(kr, curve, _extract_cfs_times(cfs)...)
 
@@ -971,7 +1336,14 @@ function convexity(valuation_fn::Function, base::AYM, credit::AYM, tenors)
     return (; base = sum(cv.base), credit = sum(cv.credit), cross = sum(cv.cross))
 end
 function convexity(base::AYM, credit::AYM, tenors, cfs, times)
-    return convexity(_valuation2(cfs, times), base, credit, tenors)
+    # static cashflows: the analytic helper computes the same blocks as the
+    # (2n)×(2n) ForwardDiff Hessian the do-block form pays for, in O(N_cf)
+    an = _keyrate_analytic(base, credit, tenors, cfs, times; order = 2)
+    return (;
+        base = sum(an.base_hessian) / an.value,
+        credit = sum(an.credit_hessian) / an.value,
+        cross = sum(an.cross_hessian) / an.value,
+    )
 end
 convexity(base::AYM, credit::AYM, tenors, cfs::AbstractVector{<:FinanceCore.Cashflow}) = convexity(base, credit, tenors, _extract_cfs_times(cfs)...)
 
@@ -984,9 +1356,27 @@ function convexity(kr::KeyRates, valuation_fn::Function, base::AYM, credit::AYM)
     )
 end
 function convexity(kr::KeyRates, base::AYM, credit::AYM, cfs, times)
-    return convexity(kr, _valuation2(cfs, times), base, credit)
+    an = _keyrate_analytic(base, credit, kr.tenors, cfs, times; order = 2)
+    return (;
+        base   = an.base_hessian   ./ an.value,
+        credit = an.credit_hessian ./ an.value,
+        cross  = an.cross_hessian  ./ an.value,
+    )
 end
 convexity(kr::KeyRates, base::AYM, credit::AYM, cfs::AbstractVector{<:FinanceCore.Cashflow}) = convexity(kr, base, credit, _extract_cfs_times(cfs)...)
+
+# Multi-curve NamedTuple cashflow form. Per-role and per-role-pair convexities
+# for static cashflows. All L² blocks alias one shared N×N matrix — values
+# coincide by construction under multiplicative discount composition.
+function convexity(kr::KeyRates, curves::NamedTuple, cfs, times)
+    an = _ncurve_analytic(curves, kr.tenors, cfs, times; order = 2)
+    roles = keys(curves)
+    L = length(roles)
+    normalized = an.hessian ./ an.value
+    return NamedTuple{roles}(ntuple(_ -> NamedTuple{roles}(ntuple(_ -> normalized, L)), L))
+end
+convexity(kr::KeyRates, curves::NamedTuple, cfs::AbstractVector{<:FinanceCore.Cashflow}) =
+    convexity(kr, curves, _extract_cfs_times(cfs)...)
 
 # Do-block-first forwarders (support `f(args...) do x; ...; end` syntax)
 convexity(vf::Function, kr::KeyRates, curve::AYM)                 = convexity(kr, vf, curve)
@@ -1012,7 +1402,12 @@ function sensitivities(kr::KeyRates, valuation_fn::Function, curve::AYM)
     )
 end
 function sensitivities(kr::KeyRates, curve::AYM, cfs, times)
-    return sensitivities(kr, _valuation(cfs, times), curve)
+    an = _keyrate_analytic(curve, kr.tenors, cfs, times; order = 2)
+    return (;
+        value       = an.value,
+        durations   = -an.gradient ./ an.value,
+        convexities = an.hessian ./ an.value,
+    )
 end
 sensitivities(kr::KeyRates, curve::AYM, cfs::AbstractVector{<:FinanceCore.Cashflow}) = sensitivities(kr, curve, _extract_cfs_times(cfs)...)
 
@@ -1025,7 +1420,12 @@ function sensitivities(::DV01, kr::KeyRates, valuation_fn::Function, curve::AYM)
     )
 end
 function sensitivities(::DV01, kr::KeyRates, curve::AYM, cfs, times)
-    return sensitivities(DV01(), kr, _valuation(cfs, times), curve)
+    an = _keyrate_analytic(curve, kr.tenors, cfs, times; order = 2)
+    return (;
+        value       = an.value,
+        dv01s       = -an.gradient ./ 10_000,
+        convexities = an.hessian ./ an.value,
+    )
 end
 sensitivities(::DV01, kr::KeyRates, curve::AYM, cfs::AbstractVector{<:FinanceCore.Cashflow}) = sensitivities(DV01(), kr, curve, _extract_cfs_times(cfs)...)
 
@@ -1043,9 +1443,36 @@ function sensitivities(kr::KeyRates, valuation_fn::Function, base::AYM, credit::
     )
 end
 function sensitivities(kr::KeyRates, base::AYM, credit::AYM, cfs, times)
-    return sensitivities(kr, _valuation2(cfs, times), base, credit)
+    an = _keyrate_analytic(base, credit, kr.tenors, cfs, times; order = 2)
+    return (;
+        value             = an.value,
+        base_durations    = -an.base_gradient   ./ an.value,
+        credit_durations  = -an.credit_gradient ./ an.value,
+        convexities       = (;
+            base   = an.base_hessian   ./ an.value,
+            credit = an.credit_hessian ./ an.value,
+            cross  = an.cross_hessian  ./ an.value,
+        ),
+    )
 end
 sensitivities(kr::KeyRates, base::AYM, credit::AYM, cfs::AbstractVector{<:FinanceCore.Cashflow}) = sensitivities(kr, base, credit, _extract_cfs_times(cfs)...)
+
+# Multi-curve NamedTuple cashflow form. One AD-free pass returns per-role
+# durations + per-role-pair N×N convexity blocks. All per-role durations
+# alias one shared vector; all L² Hessian blocks alias one shared matrix —
+# values coincide by construction under multiplicative discount composition.
+function sensitivities(kr::KeyRates, curves::NamedTuple, cfs, times)
+    an = _ncurve_analytic(curves, kr.tenors, cfs, times; order = 2)
+    roles = keys(curves)
+    L = length(roles)
+    dur_normalized  = -an.gradient ./ an.value
+    conv_normalized =  an.hessian  ./ an.value
+    durations   = NamedTuple{roles}(ntuple(_ -> dur_normalized, L))
+    convexities = NamedTuple{roles}(ntuple(_ -> NamedTuple{roles}(ntuple(_ -> conv_normalized, L)), L))
+    return (; value = an.value, durations, convexities)
+end
+sensitivities(kr::KeyRates, curves::NamedTuple, cfs::AbstractVector{<:FinanceCore.Cashflow}) =
+    sensitivities(kr, curves, _extract_cfs_times(cfs)...)
 
 function sensitivities(::DV01, kr::KeyRates, valuation_fn::Function, base::AYM, credit::AYM)
     ad = _keyrate_ad(base, credit, kr.tenors, valuation_fn; order = 2)
@@ -1061,7 +1488,17 @@ function sensitivities(::DV01, kr::KeyRates, valuation_fn::Function, base::AYM, 
     )
 end
 function sensitivities(::DV01, kr::KeyRates, base::AYM, credit::AYM, cfs, times)
-    return sensitivities(DV01(), kr, _valuation2(cfs, times), base, credit)
+    an = _keyrate_analytic(base, credit, kr.tenors, cfs, times; order = 2)
+    return (;
+        value        = an.value,
+        base_dv01s   = -an.base_gradient   ./ 10_000,
+        credit_dv01s = -an.credit_gradient ./ 10_000,
+        convexities  = (;
+            base   = an.base_hessian   ./ an.value,
+            credit = an.credit_hessian ./ an.value,
+            cross  = an.cross_hessian  ./ an.value,
+        ),
+    )
 end
 sensitivities(::DV01, kr::KeyRates, base::AYM, credit::AYM, cfs::AbstractVector{<:FinanceCore.Cashflow}) = sensitivities(DV01(), kr, base, credit, _extract_cfs_times(cfs)...)
 
@@ -1159,7 +1596,13 @@ duration(::Spread,    kr::KeyRates, target::_Contractish, curve::AYM) = sensitiv
 duration(target::_Contractish, curve::AYM, tenors) = duration(Effective(), target, curve, tenors)
 duration(kr::KeyRates, target::_Contractish, curve::AYM) = duration(Effective(), kr, target, curve)
 
-convexity(::Effective, target::_Contractish, curve::AYM, tenors) = convexity(c -> _cvalue(target, c), curve, tenors)
+# Effective convexity: parallel-shift second derivative of the contract's
+# present value under a continuous-rate shock. Routes through the O(1) scalar
+# helper above (`_parallel_continuous_convexity`), which is numerically
+# equivalent to the prior `sum(convexity(KeyRates(tenors), …))` matrix-sum form
+# under partition of unity but avoids the O(N²) Hessian.
+convexity(::Effective, target::_Contractish, curve::AYM, _tenors) =
+    _parallel_continuous_convexity(curve, c -> _cvalue(target, c))
 
 """
     dv01(args...)
@@ -1204,7 +1647,7 @@ function sensitivities(valuation, curves::NamedTuple; tenors)
         key_rate = NamedTuple{roles}(map(g -> -g ./ v, values(grads))))
 end
 sensitivities(curves::NamedTuple, valuation::Function; tenors) = sensitivities(valuation, curves; tenors)  # do-block form
-function sensitivities(target::_Contractish, tenors; discount::NamedTuple, index)
+function sensitivities(target::_Contractish, tenors::AbstractVector; discount::NamedTuple, index)
     layers = keys(discount)
     return sensitivities(merge(discount, (; index = index)); tenors) do c
         _cvalue2(target, c.index, reduce(+, getfield(c, r) for r in layers))
@@ -1216,7 +1659,7 @@ end
 
 Constant continuously-compounded spread `s` on the `credit` (discount) curve such that
 the model price equals `market_price`, with coupons estimated on `forward` (held fixed).
-Returns the spread and its sensitivity (\$/1bp parallel move of `credit + s`). Newton + AD.
+Returns the spread and its sensitivity (\\\$/1bp parallel move of `credit + s`). Newton + AD.
 """
 function zspread(contract::FinanceCore.AbstractContract, credit::AYM, market_price; forward::AYM = credit, s0 = 0.0, tol = 1e-12, maxiter = 100)
     ks = _contract_keys(contract)
@@ -1246,8 +1689,21 @@ per-period amount fixed at the last reset) until `next_reset`, after which it fl
 A `Composite` of a coupon-only stub at `next_reset` plus a forward-starting floater for
 the remainder (principal rides the forward leg). Gives the conventional rate duration
 ≈ time to next reset; without it the idealized effective duration is ≈ 0 at a reset.
+
+The remaining term `fl.maturity - next_reset` must be an integer number of coupon
+periods. Otherwise the forward-starting leg would carry a stub first coupon whose
+fix-in-advance reference rate looks back before time zero — a quietly mispriced
+quantity on curves that extrapolate below ``t = 0`` and a `DomainError` on
+`ZeroRateCurve` — so non-commensurate inputs throw an `ArgumentError`.
 """
 function locked_floater(fl::FinanceModels.Bond.Floating, current_coupon, next_reset)
+    freq = fl.frequency.frequency
+    n_periods = (fl.maturity - next_reset) * freq
+    isapprox(n_periods, round(n_periods); atol = 1.0e-8) || throw(
+        ArgumentError(
+            "locked_floater requires fl.maturity - next_reset ($(fl.maturity - next_reset)) to be an integer number of coupon periods (frequency $freq); a stub first coupon on the forward leg would reference a forward rate starting before time zero"
+        )
+    )
     stub = FinanceCore.Cashflow(current_coupon, next_reset)
     rest = FinanceModels.Forward(next_reset,
         FinanceModels.Bond.Floating(fl.coupon_rate, fl.frequency, fl.maturity - next_reset, fl.key))
@@ -1298,7 +1754,7 @@ sensitivities(vf::Function, kr::KeyRates, hw::HW; kw...)         = sensitivities
 sensitivities(vf::Function, ::DV01, kr::KeyRates, hw::HW; kw...) = sensitivities(DV01(), kr, vf, hw; kw...)
 
 # Cashflow-form wrappers that delegate to the do-block forms above
-function sensitivities(kr::KeyRates, hw::HW, cfs, times;
+function sensitivities(kr::KeyRates, hw::HW, cfs::AbstractVector, times;
                        n_scenarios=1000, timestep=1/12, horizon=nothing,
                        rng=Random.default_rng())
     h = horizon === nothing ? maximum(times) + 1.0 : Float64(horizon)
@@ -1307,7 +1763,7 @@ function sensitivities(kr::KeyRates, hw::HW, cfs, times;
     end
 end
 
-function sensitivities(::DV01, kr::KeyRates, hw::HW, cfs, times;
+function sensitivities(::DV01, kr::KeyRates, hw::HW, cfs::AbstractVector, times;
                        n_scenarios=1000, timestep=1/12, horizon=nothing,
                        rng=Random.default_rng())
     h = horizon === nothing ? maximum(times) + 1.0 : Float64(horizon)

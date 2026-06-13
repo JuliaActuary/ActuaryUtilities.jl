@@ -7,12 +7,12 @@ export years_between, duration,
     accum_offset
 
 """
-    Years_Between(d1::Date, d2::Date)
-    
-Compute the number of integer years between two dates, with the 
+    years_between(d1::Date, d2::Date, overlap=true)
+
+Compute the number of integer years between two dates, with the
 first date typically before the second. Will return negative number if
-first date is after the second. Use third argument to indicate if calendar 
-anniversary should count as a full year.
+first date is after the second. The third argument `overlap` indicates whether
+the calendar anniversary should count as a full year (default `true`).
 
 # Examples
 ```julia

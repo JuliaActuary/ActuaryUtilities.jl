@@ -5,12 +5,15 @@ using Test
 using Distributions
 using StatsBase
 using Random
+import ForwardDiff
+import QuadGK
 
 const FM = ActuaryUtilities.FinanceModels
 const FC = ActuaryUtilities.FinanceCore
 
 
 include("risk_measures.jl")
+include("audit.jl")
 
 @testset "Temporal functions" begin
     @testset "years_between" begin
@@ -504,6 +507,32 @@ end
         @test conv[2, 3] ≈ 0.0 atol = 1e-6
     end
 
+    @testset "scalar convexity(curve, tenors, ...) ≡ sum(KRD Hessian) (POU regression guard)" begin
+        # Under partition of unity of the KRD hat functions, the continuous-
+        # shock parallel-shift scalar convexity equals the sum of the N×N
+        # key-rate Hessian by the chain rule. The scalar entry points now
+        # route through `_parallel_continuous_convexity` (TenorShift + two
+        # nested ForwardDiff.derivatives), avoiding the Hessian build entirely.
+        # Locks the equivalence in.
+        rates  = [0.02, 0.025, 0.03, 0.035, 0.04]
+        tenors = [1.0, 2.0, 3.0, 5.0, 7.0]
+        zrc    = FM.ZeroRateCurve(rates, tenors, FM.Spline.Linear())
+        cfs    = [5.0, 5.0, 5.0, 5.0, 105.0]
+        times  = [1.0, 2.0, 3.0, 4.0, 5.0]
+
+        scalar_form = convexity(zrc, tenors, cfs, times)
+        matrix_sum  = sum(convexity(KeyRates(tenors), zrc, cfs, times))
+        @test scalar_form ≈ matrix_sum atol = 1e-8
+
+        vf_scalar = convexity(c -> sum(cf * FC.discount(c, t) for (cf, t) in zip(cfs, times)), zrc, tenors)
+        vf_matrix = sum(convexity(KeyRates(tenors), c -> sum(cf * FC.discount(c, t) for (cf, t) in zip(cfs, times)), zrc))
+        @test vf_scalar ≈ vf_matrix atol = 1e-8
+
+        # Cashflow-vector form
+        cashflows = [FC.Cashflow(cfs[k], times[k]) for k in eachindex(cfs)]
+        @test convexity(zrc, tenors, cashflows) ≈ matrix_sum atol = 1e-8
+    end
+
     @testset "two-curve IR01/CS01" begin
         base_rates = [0.03, 0.03, 0.03, 0.03, 0.03]
         credit_rates = [0.02, 0.02, 0.02, 0.02, 0.02]
@@ -610,6 +639,41 @@ end
         dur_cub = duration(KeyRates(tenors), zrc_cub, cfs, tenors)
 
         @test dur_lin ≈ dur_cub atol = 1e-4
+    end
+
+    @testset "multi-curve NamedTuple: analytic ≈ _ncurve_ad (gradient/Hessian)" begin
+        # _ncurve_analytic must agree with _ncurve_ad on the vanilla cashflow
+        # case (static cfs, multiplicative discount product). Regression guard
+        # for the closed-form derivation of multi-curve KRD.
+        rates  = fill(0.03, 5)
+        tenors = [1.0, 2.0, 3.0, 4.0, 5.0]
+        zrc1   = FM.ZeroRateCurve(rates,         tenors, FM.Spline.Linear())
+        zrc2   = FM.ZeroRateCurve(rates .+ 0.005, tenors, FM.Spline.Linear())
+        zrc3   = FM.ZeroRateCurve(rates .+ 0.002, tenors, FM.Spline.Linear())
+        amts   = [5.0, 5.0, 5.0, 5.0, 105.0]
+        times  = [1.0, 2.0, 3.0, 4.0, 5.0]
+        nt3    = (; rf = zrc1, credit = zrc2, ilp = zrc3)
+
+        vf(c) = sum(amts[k] * FC.discount(c.rf, times[k]) *
+                              FC.discount(c.credit, times[k]) *
+                              FC.discount(c.ilp, times[k]) for k in eachindex(amts))
+        v_ad, g_ad = ActuaryUtilities.FinancialMath._ncurve_ad(vf, nt3, tenors)
+        an = ActuaryUtilities.FinancialMath._ncurve_analytic(nt3, tenors, amts, times; order = 2)
+
+        @test v_ad ≈ an.value rtol = 1e-12
+        # The analytic helper returns a single shared gradient vector — under
+        # multiplicative discount composition the per-role gradients coincide.
+        for r in (:rf, :credit, :ilp)
+            @test maximum(abs.(g_ad[r] .- an.gradient)) < 1e-12
+        end
+
+        # Public API surfaces accept the NamedTuple form.
+        sens = sensitivities(KeyRates(tenors), nt3, amts, times)
+        @test sens.value ≈ v_ad rtol = 1e-12
+        @test maximum(abs.(sens.durations.rf .- (-g_ad.rf ./ v_ad))) < 1e-12
+        conv = convexity(KeyRates(tenors), nt3, amts, times)
+        @test conv.rf.rf isa AbstractMatrix
+        @test conv.rf.credit ≈ conv.credit.rf  # symmetric under multiplicative discount
     end
 end
 
@@ -1209,6 +1273,76 @@ end
     @test KeyRates(1:5) isa KeyRates
 end
 
+@testset "AD vs analytic KRD: byte-equivalence across curve types and arities" begin
+    # The analytic helpers `_keyrate_analytic` (single/two-curve) and
+    # `_ncurve_analytic` (NamedTuple) must produce the same value, gradient,
+    # and Hessian as the AD path (`_keyrate_ad`, `_ncurve_ad`) for the vanilla
+    # cashflow case. Regression guard against future drift between the two
+    # implementations of the same math.
+    KRA   = ActuaryUtilities.FinancialMath._keyrate_analytic
+    KRA_N = ActuaryUtilities.FinancialMath._ncurve_analytic
+    KRAD  = ActuaryUtilities.FinancialMath._keyrate_ad
+    NCAD  = ActuaryUtilities.FinancialMath._ncurve_ad
+
+    tenors  = collect(1.0:30.0)
+    rates   = fill(0.03, 30)
+    rates2  = rates .+ 0.005
+    curves  = [
+        FM.ZeroRateCurve(rates,  tenors, FM.Spline.Linear()),
+        FM.ZeroRateCurve(rates,  tenors, FM.Spline.MonotoneConvex()),
+        FM.Yield.Constant(FC.Continuous(0.03)),
+    ]
+
+    cfs_full = collect(FM.Projection(FM.Bond.Fixed(0.04, FC.Periodic(2), 5), curves[1], FM.CashflowProjection()))
+    amts  = FC.amount.(cfs_full)
+    times = FC.timepoint.(cfs_full)
+
+    @testset "single-curve [$(typeof(c).name.name)]" for c in curves
+        ad = KRAD(c, tenors,
+                  i -> sum(amts[k] * FC.discount(i, times[k]) for k in eachindex(amts));
+                  order = 2)
+        an = KRA(c, tenors, amts, times; order = 2)
+        @test ad.value ≈ an.value rtol = 1e-12
+        @test maximum(abs.(ad.gradient .- an.gradient)) < 1e-12
+        @test maximum(abs.(ad.hessian  .- an.hessian))  < 1e-12
+    end
+
+    @testset "two-curve" begin
+        base   = curves[1]
+        credit = FM.ZeroRateCurve(rates2, tenors, FM.Spline.Linear())
+        ad = KRAD(base, credit, tenors,
+                  (b, c) -> sum(amts[k] * FC.discount(b, times[k]) * FC.discount(c, times[k])
+                                 for k in eachindex(amts));
+                  order = 2)
+        an = KRA(base, credit, tenors, amts, times; order = 2)
+        @test ad.value ≈ an.value rtol = 1e-12
+        @test maximum(abs.(ad.base_gradient   .- an.base_gradient))   < 1e-12
+        @test maximum(abs.(ad.credit_gradient .- an.credit_gradient)) < 1e-12
+        @test maximum(abs.(ad.base_hessian    .- an.base_hessian))    < 1e-12
+        @test maximum(abs.(ad.credit_hessian  .- an.credit_hessian))  < 1e-12
+        @test maximum(abs.(ad.cross_hessian   .- an.cross_hessian))   < 1e-12
+    end
+
+    @testset "NamedTuple (3 curves)" begin
+        c1 = curves[1]
+        c2 = FM.ZeroRateCurve(rates2,       tenors, FM.Spline.Linear())
+        c3 = FM.ZeroRateCurve(rates .+ 0.002, tenors, FM.Spline.Linear())
+        nt = (; rf = c1, credit = c2, ilp = c3)
+        ad_v, ad_g = NCAD(c -> sum(amts[k] * FC.discount(c.rf, times[k]) *
+                                              FC.discount(c.credit, times[k]) *
+                                              FC.discount(c.ilp, times[k])
+                                    for k in eachindex(amts)),
+                          nt, tenors)
+        an = KRA_N(nt, tenors, amts, times; order = 2)
+        @test ad_v ≈ an.value rtol = 1e-12
+        # Per-role gradients from the AD path all agree with the single shared
+        # gradient returned by the analytic helper.
+        for r in (:rf, :credit, :ilp)
+            @test maximum(abs.(ad_g[r] .- an.gradient)) < 1e-12
+        end
+    end
+end
+
 @testset "Hull-White convenience method: pathwise consistency" begin
     # The four `sensitivities(KeyRates, hw, ...)` convenience methods snapshot
     # one UInt64 from the user's rng and rebuild Xoshiro(seed) inside each AD
@@ -1274,6 +1408,31 @@ end
         @test s.forward_duration ≈ 0.0 atol = 1e-8
     end
 
+    @testset "floater: effective convexity (dynamic cashflows under reproject)" begin
+        # The new `convexity(::Effective)` routes through TenorShift +
+        # ForwardDiff on a closure that calls `reproject(target, c)` — i.e.
+        # cashflows are themselves curve-dependent (the coupon resets follow
+        # the bumped curve). The result must still equal the matrix-sum form
+        # (same AD chain, just unrolled). Locks the dynamic-cashflow path.
+        _cvalue_flm(c) = FC.present_value(c, ActuaryUtilities.reproject(flm, c))
+        @test convexity(Effective(), flm, curve, tenors) ≈
+              sum(convexity(KeyRates(tenors), _cvalue_flm, curve)) atol = 1e-10
+    end
+
+    @testset "fixed bond: effective convexity matches matrix-sum (POU equivalence regression guard)" begin
+        # Under partition of unity of the KRD hat functions, sum(N×N key-rate
+        # Hessian) = continuous-shock parallel-shift second derivative by the
+        # chain rule. The optimized `convexity(::Effective, …)` computes that
+        # scalar directly via TenorShift, in O(1) rather than O(N²) AD work.
+        # Locks the numerical equivalence in for future refactors of either
+        # path. Note: `convexity(curve, cfs)` uses a *periodic* shock and is
+        # NOT equivalent here — see `_parallel_continuous_convexity` for why.
+        cfs = collect(FM.Projection(fb, curve, FM.CashflowProjection()))
+        amts = FC.amount.(cfs); times = FC.timepoint.(cfs)
+        @test convexity(Effective(), fb, curve, tenors) ≈
+              sum(convexity(KeyRates(tenors), curve, amts, times)) atol = 1e-8
+    end
+
     @testset "default duration & dv01 verb" begin
         @test duration(flm, curve, tenors) ≈ duration(Effective(), flm, curve, tenors)
         @test dv01(Effective(), flm, curve, tenors) ≈ sensitivities(flm, curve, tenors).effective_dv01
@@ -1319,4 +1478,9 @@ end
         eff_fd = (rj(dn) - rj(up)) / (2Δ * rj(curve))
         @test duration(Effective(), flm, curve, tenors) ≈ eff_fd atol = 1e-4
     end
+end
+
+using Aqua
+@testset "Aqua.jl" begin
+    Aqua.test_all(ActuaryUtilities)
 end

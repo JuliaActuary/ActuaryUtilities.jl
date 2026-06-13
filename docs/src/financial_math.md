@@ -5,6 +5,8 @@ Provides a set of common routines in financial maths.
 ## Quickstart
 
 ```julia
+using ActuaryUtilities
+
 cfs = [5, 5, 105]
 times    = [1, 2, 3]
 
@@ -22,7 +24,7 @@ convexity(discount_rate, cfs, times)               #  10.62
 
 ## Curve Transformations
 
-[`FinanceModels.Yield.TransformedYield`](https://docs.juliaactuary.org/FinanceModels/dev/) lets you lazily transform any yield curve's zero rates via `curve + (z, t) -> new_rate`. This is useful for scenario analysis (parallel shifts, twists, stresses) without refitting.
+[`FinanceModels.Yield.TenorShift`](https://docs.juliaactuary.org/FinanceModels/dev/) lets you lazily transform any yield curve's zero rates via `curve + (z, t) -> new_rate`. This is useful for scenario analysis (parallel shifts, twists, stresses) without refitting.
 
 ### Parallel shift
 
