@@ -1482,5 +1482,5 @@ end
 
 using Aqua
 @testset "Aqua.jl" begin
-    Aqua.test_all(ActuaryUtilities; ambiguities = false)
+    Aqua.test_all(ActuaryUtilities)
 end

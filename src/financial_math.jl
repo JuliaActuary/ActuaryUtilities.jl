@@ -1647,7 +1647,7 @@ function sensitivities(valuation, curves::NamedTuple; tenors)
         key_rate = NamedTuple{roles}(map(g -> -g ./ v, values(grads))))
 end
 sensitivities(curves::NamedTuple, valuation::Function; tenors) = sensitivities(valuation, curves; tenors)  # do-block form
-function sensitivities(target::_Contractish, tenors; discount::NamedTuple, index)
+function sensitivities(target::_Contractish, tenors::AbstractVector; discount::NamedTuple, index)
     layers = keys(discount)
     return sensitivities(merge(discount, (; index = index)); tenors) do c
         _cvalue2(target, c.index, reduce(+, getfield(c, r) for r in layers))
@@ -1754,7 +1754,7 @@ sensitivities(vf::Function, kr::KeyRates, hw::HW; kw...)         = sensitivities
 sensitivities(vf::Function, ::DV01, kr::KeyRates, hw::HW; kw...) = sensitivities(DV01(), kr, vf, hw; kw...)
 
 # Cashflow-form wrappers that delegate to the do-block forms above
-function sensitivities(kr::KeyRates, hw::HW, cfs, times;
+function sensitivities(kr::KeyRates, hw::HW, cfs::AbstractVector, times;
                        n_scenarios=1000, timestep=1/12, horizon=nothing,
                        rng=Random.default_rng())
     h = horizon === nothing ? maximum(times) + 1.0 : Float64(horizon)
@@ -1763,7 +1763,7 @@ function sensitivities(kr::KeyRates, hw::HW, cfs, times;
     end
 end
 
-function sensitivities(::DV01, kr::KeyRates, hw::HW, cfs, times;
+function sensitivities(::DV01, kr::KeyRates, hw::HW, cfs::AbstractVector, times;
                        n_scenarios=1000, timestep=1/12, horizon=nothing,
                        rng=Random.default_rng())
     h = horizon === nothing ? maximum(times) + 1.0 : Float64(horizon)
