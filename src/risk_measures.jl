@@ -78,7 +78,7 @@ g(rm::VaR, x) = x < (1 - rm.α) ? 0 : 1
 """
 [`VaR`](@ref)
 """
-ValueAtRisk = VaR
+const ValueAtRisk = VaR
 
 """
     CTE(α)::RiskMeasure
@@ -119,7 +119,7 @@ g(rm::CTE, x) = x < (1 - rm.α) ? x / (1 - rm.α) : 1
 """
 [`CTE`](@ref)
 """
-ConditionalTailExpectation = CTE
+const ConditionalTailExpectation = CTE
 
 """
     WangTransform(α)::RiskMeasure

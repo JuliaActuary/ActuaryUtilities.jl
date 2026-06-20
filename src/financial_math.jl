@@ -259,7 +259,7 @@ A convenience constructor for [`KeyRateZero`](@ref).
 
 
 """
-KeyRate = KeyRateZero
+const KeyRate = KeyRateZero
 
 """
     duration(Macaulay(),interest_rate,cfs,times)
@@ -369,22 +369,10 @@ end
 # Macaulay here is the signed cashflow-weighted time Σ t·cf·d / Σ cf·d, which
 # matches the generic path's d/di log|V| for any sign of V.
 
-function _macaulay_ratio(yield, cfs, times)
-    # @inbounds below indexes `times` by `eachindex(cfs)` — a silent mismatch
-    # would read out of bounds rather than zip-truncate
-    length(cfs) == length(times) || throw(DimensionMismatch("cfs and times must have equal length"))
-    t1 = FinanceCore.timepoint(first(cfs), first(times))
-    z = _cf_value(first(cfs)) * FinanceCore.discount(yield, t1)
-    V = zero(z)
-    Vt = zero(z * t1)
-    @inbounds for k in eachindex(cfs)
-        t = FinanceCore.timepoint(cfs[k], times[k])
-        cfd = _cf_value(cfs[k]) * FinanceCore.discount(yield, t)
-        V += cfd
-        Vt += t * cfd
-    end
-    return Vt / V
-end
+# Macaulay (cashflow-weighted average time) is the identity-weighted ratio.
+# Shares the guarded `@inbounds` accumulation kernel `_weighted_ratio` (defined
+# alongside the convexity fast paths below) with the convexity statistics.
+_macaulay_ratio(yield, cfs, times) = _weighted_ratio(yield, identity, cfs, times)
 
 function duration(::Modified, yield::Real, cfs::AbstractVector, times)
     return _macaulay_ratio(yield, cfs, times) / (1 + yield)
@@ -562,14 +550,17 @@ end
 # The ratio uses the signed V, matching the generic path's |V|-normalized
 # second derivative for any sign of V (signs cancel).
 
-function _convexity_ratio(yield, weight, cfs, times)
+# Shared accumulation kernel: Σ weight(t)·cf·d / Σ cf·d. `weight = identity`
+# gives the Macaulay ratio (Modified-duration fast paths above); the t(t+1)/t²
+# weights below give the convexity statistics.
+function _weighted_ratio(yield, weight, cfs, times)
     # @inbounds below indexes `times` by `eachindex(cfs)` — a silent mismatch
     # would read out of bounds rather than zip-truncate
     length(cfs) == length(times) || throw(DimensionMismatch("cfs and times must have equal length"))
     t1 = FinanceCore.timepoint(first(cfs), first(times))
     z = _cf_value(first(cfs)) * FinanceCore.discount(yield, t1)
     V = zero(z)
-    Vw = zero(z * t1 * t1)
+    Vw = zero(weight(t1) * z)
     @inbounds for k in eachindex(cfs)
         t = FinanceCore.timepoint(cfs[k], times[k])
         cfd = _cf_value(cfs[k]) * FinanceCore.discount(yield, t)
@@ -580,17 +571,17 @@ function _convexity_ratio(yield, weight, cfs, times)
 end
 
 function convexity(yield::Real, cfs::AbstractVector, times)
-    return _convexity_ratio(yield, t -> t * (t + 1), cfs, times) / (1 + yield)^2
+    return _weighted_ratio(yield, t -> t * (t + 1), cfs, times) / (1 + yield)^2
 end
 function convexity(yield::FinanceCore.Rate{<:Real, FinanceCore.Periodic}, cfs::AbstractVector, times)
     m = yield.compounding.frequency
-    return _convexity_ratio(yield, t -> t * (t + 1 / m), cfs, times) / (1 + FinanceCore.rate(yield) / m)^2
+    return _weighted_ratio(yield, t -> t * (t + 1 / m), cfs, times) / (1 + FinanceCore.rate(yield) / m)^2
 end
 function convexity(yield::FinanceCore.Rate{<:Real, FinanceCore.Continuous}, cfs::AbstractVector, times)
-    return _convexity_ratio(yield, t -> t * t, cfs, times)
+    return _weighted_ratio(yield, t -> t * t, cfs, times)
 end
 function convexity(yield::FinanceModels.Yield.Constant{<:FinanceCore.Rate}, cfs::AbstractVector, times)
-    return _convexity_ratio(yield.rate, t -> t * (t + 1), cfs, times)
+    return _weighted_ratio(yield.rate, t -> t * (t + 1), cfs, times)
 end
 # disambiguation vs `convexity(curve::AYM, tenors, cfs::AbstractVector{<:Cashflow})`:
 # a Cashflow vector in the third position means (tenors, cashflows), not (cfs, times)
