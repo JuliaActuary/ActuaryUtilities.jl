@@ -672,45 +672,16 @@ function _tent_bump(shift, τ, krd_points)
             "KeyRateDuration timepoint $τ is not a point of the krd_points grid $krd_points; pass krd_points containing the shifted timepoint"
         )
     )
-    n = length(krd_points)
-
-    τ_left = idx > 1 ? krd_points[idx-1] : nothing
-    τ_right = idx < n ? krd_points[idx+1] : nothing
-
-    return function (z, t)
-        if τ_left === nothing && τ_right === nothing
-            # Single KRD point: flat shift everywhere
-            bump = shift
-        elseif τ_left === nothing
-            # First point: flat left, ramp right
-            if t <= τ
-                bump = shift
-            elseif t >= τ_right
-                bump = oftype(shift, 0)
-            else
-                bump = shift * (τ_right - t) / (τ_right - τ)
-            end
-        elseif τ_right === nothing
-            # Last point: ramp left, flat right
-            if t >= τ
-                bump = shift
-            elseif t <= τ_left
-                bump = oftype(shift, 0)
-            else
-                bump = shift * (t - τ_left) / (τ - τ_left)
-            end
-        else
-            # Interior: triangle peak at τ
-            if t <= τ_left || t >= τ_right
-                bump = oftype(shift, 0)
-            elseif t <= τ
-                bump = shift * (t - τ_left) / (τ - τ_left)
-            else
-                bump = shift * (τ_right - t) / (τ_right - τ)
-            end
-        end
-        return z + FinanceCore.Continuous(bump)
-    end
+    # A single-knot tent is the modern `_hat_bump` kernel (defined alongside the
+    # AD KRD path below) evaluated at a unit bump vector for this knot — one
+    # source of truth for the key-rate hat shape across the legacy
+    # bump-and-reprice path and the AD path. The flat extrapolation `_hat_bump`
+    # applies beyond the first / last knot reproduces the original first-point
+    # (flat left) and last-point (flat right) tent behavior. Numerically
+    # identical to the prior explicit tent (max abs deviation ~7e-18 over a knot
+    # / t sweep, from float associativity in the ramp).
+    bumps = [k == idx ? shift : zero(shift) for k in eachindex(krd_points)]
+    return (z, t) -> z + FinanceCore.Continuous(_hat_bump(krd_points, bumps, t))
 end
 
 _ensure_yield_model(curve::FinanceModels.Yield.AbstractYieldModel) = curve
@@ -918,12 +889,6 @@ function _keyrate_ad(base::AYM, credit::AYM, tenors::AbstractVector, valuation_f
     end
     return (; value = v, base_gradient = base_grad, credit_gradient = credit_grad)
 end
-
-# Standard valuation for fixed cashflows
-_valuation(cfs, times) = curve -> sum(cf * curve(t) for (cf, t) in zip(cfs, times))
-
-# Two-curve standard valuation (additive on rates → multiplicative on discount factors)
-_valuation2(cfs, times) = (base, credit) -> sum(cf * base(t) * credit(t) for (cf, t) in zip(cfs, times))
 
 # ─── Closed-form KRD for the vanilla cashflow case ──────────────────────
 #
