@@ -993,10 +993,12 @@ function _ncurve_analytic(curves::NamedTuple, tenors::AbstractVector,
     V = zero(T)
     @inbounds for k in eachindex(cfs)
         t = times[k]
-        d = one(T)
-        for c in values(curves)
-            d *= FinanceCore.discount(c, t)
-        end
+        # `prod` over the curve tuple is unrolled and type-stable even when the
+        # roles have different concrete types (e.g. a ZeroRateCurve base with a
+        # flat Constant credit). A `for c in values(curves)` loop would make `c`
+        # non-concrete for a heterogeneous tuple and box `discount(c, t)` once
+        # per cashflow — an O(N_cf) allocation hit on the two-curve IR01/CS01 path.
+        d = prod(c -> FinanceCore.discount(c, t), values(curves))
         cfd = cfs[k] * d
         V += cfd
         i, wi, j, wj = _active_hats(tenors, t)
