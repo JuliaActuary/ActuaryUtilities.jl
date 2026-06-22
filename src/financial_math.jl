@@ -954,94 +954,25 @@ _valuation2(cfs, times) = (base, credit) -> sum(cf * base(t) * credit(t) for (cf
     end
 end
 
-function _keyrate_analytic(curve::AYM, tenors::AbstractVector,
-                           cfs::AbstractVector, times; order = 1)
-    n = length(tenors)
-    T = float(promote_type(eltype(cfs), eltype(times)))
-    grad = zeros(T, n)
-    hess = order >= 2 ? zeros(T, n, n) : nothing
-    V = zero(T)
-    @inbounds for k in eachindex(cfs)
-        t = times[k]
-        d = FinanceCore.discount(curve, t)
-        cfd = cfs[k] * d
-        V += cfd
-        i, wi, j, wj = _active_hats(tenors, t)
-        grad[i] -= t * cfd * wi
-        if i != j
-            grad[j] -= t * cfd * wj
-        end
-        if order >= 2
-            tt = t * t * cfd
-            hess[i, i] += tt * wi * wi
-            if i != j
-                hess[i, j] += tt * wi * wj
-                hess[j, i] += tt * wj * wi
-                hess[j, j] += tt * wj * wj
-            end
-        end
-    end
-    return order >= 2 ? (; value = V, gradient = grad, hessian = hess) :
-                        (; value = V, gradient = grad)
-end
+# Single- and two-curve analytic KRD are the L = 1 and L = 2 cases of the
+# multi-curve kernel `_ncurve_analytic` (just below). For the vanilla
+# `Σ cf · ∏ disc` valuation the per-role gradients and all three Hessian blocks
+# (base, credit, cross) coincide — see the kernel's note — so the two-curve
+# adapter aliases the single shared gradient / Hessian into the base / credit /
+# cross names. Downstream callers only broadcast (`./`) these, never mutate them
+# in place, so the aliasing is safe and the public two-curve forms still hand
+# back distinct output buffers.
+_keyrate_analytic(curve::AYM, tenors::AbstractVector, cfs::AbstractVector, times; order = 1) =
+    _ncurve_analytic((; curve), tenors, cfs, times; order)
 
-# Two-curve analytic. base and credit share the tenor grid; the discount
-# is the product disc_base(t) · disc_credit(t). The base / credit
-# gradients are independent, and all three Hessian blocks (base, credit,
-# cross) share the same per-cashflow shape: t² · cfd · hat_i · hat_j over
-# the active hat pair. (Cross block is the mixed partial
-# ∂²V/(∂b_base[i] ∂b_credit[j]); positive — two -t chain factors square.)
 function _keyrate_analytic(base::AYM, credit::AYM, tenors::AbstractVector,
                            cfs::AbstractVector, times; order = 1)
-    n = length(tenors)
-    T = float(promote_type(eltype(cfs), eltype(times)))
-    base_grad   = zeros(T, n)
-    credit_grad = zeros(T, n)
-    base_hess   = order >= 2 ? zeros(T, n, n) : nothing
-    credit_hess = order >= 2 ? zeros(T, n, n) : nothing
-    cross_hess  = order >= 2 ? zeros(T, n, n) : nothing
-    V = zero(T)
-    @inbounds for k in eachindex(cfs)
-        t = times[k]
-        d = FinanceCore.discount(base, t) * FinanceCore.discount(credit, t)
-        cfd = cfs[k] * d
-        V += cfd
-        i, wi, j, wj = _active_hats(tenors, t)
-        gi = t * cfd * wi
-        base_grad[i]   -= gi
-        credit_grad[i] -= gi
-        if i != j
-            gj = t * cfd * wj
-            base_grad[j]   -= gj
-            credit_grad[j] -= gj
-        end
-        if order >= 2
-            tt = t * t * cfd
-            ii = tt * wi * wi
-            base_hess[i, i]   += ii
-            credit_hess[i, i] += ii
-            cross_hess[i, i]  += ii
-            if i != j
-                ij = tt * wi * wj
-                jj = tt * wj * wj
-                base_hess[i, j]   += ij; base_hess[j, i]   += ij; base_hess[j, j]   += jj
-                credit_hess[i, j] += ij; credit_hess[j, i] += ij; credit_hess[j, j] += jj
-                cross_hess[i, j]  += ij; cross_hess[j, i]  += ij; cross_hess[j, j]  += jj
-            end
-        end
-    end
-    if order >= 2
-        return (; value = V,
-                  base_gradient   = base_grad,
-                  credit_gradient = credit_grad,
-                  base_hessian    = base_hess,
-                  credit_hessian  = credit_hess,
-                  cross_hessian   = cross_hess)
-    else
-        return (; value = V,
-                  base_gradient   = base_grad,
-                  credit_gradient = credit_grad)
-    end
+    an = _ncurve_analytic((; base, credit), tenors, cfs, times; order)
+    order >= 2 || return (; value = an.value,
+                            base_gradient = an.gradient, credit_gradient = an.gradient)
+    return (; value = an.value,
+              base_gradient = an.gradient, credit_gradient = an.gradient,
+              base_hessian  = an.hessian,  credit_hessian = an.hessian, cross_hessian = an.hessian)
 end
 
 # N-curve analytic. `curves::NamedTuple{roles}` of L curves with a shared tenor
@@ -1049,8 +980,9 @@ end
 # discount-role layers (multiplicatively composed); do not pass `:index`.
 # Under multiplicative composition every per-role gradient and every (role,
 # role) Hessian block carry identical values, so the helper returns a single
-# shared gradient vector and a single shared Hessian matrix. Public wrappers
-# alias these across the role NamedTuple positions.
+# shared gradient vector and a single shared Hessian matrix. The single-, two-,
+# and N-curve public wrappers all delegate here and alias these across their
+# role positions.
 function _ncurve_analytic(curves::NamedTuple, tenors::AbstractVector,
                               cfs::AbstractVector, times; order = 1)
     L = length(curves)
@@ -1061,10 +993,12 @@ function _ncurve_analytic(curves::NamedTuple, tenors::AbstractVector,
     V = zero(T)
     @inbounds for k in eachindex(cfs)
         t = times[k]
-        d = one(T)
-        for c in values(curves)
-            d *= FinanceCore.discount(c, t)
-        end
+        # `prod` over the curve tuple is unrolled and type-stable even when the
+        # roles have different concrete types (e.g. a ZeroRateCurve base with a
+        # flat Constant credit). A `for c in values(curves)` loop would make `c`
+        # non-concrete for a heterogeneous tuple and box `discount(c, t)` once
+        # per cashflow — an O(N_cf) allocation hit on the two-curve IR01/CS01 path.
+        d = prod(c -> FinanceCore.discount(c, t), values(curves))
         cfd = cfs[k] * d
         V += cfd
         i, wi, j, wj = _active_hats(tenors, t)
@@ -1089,6 +1023,14 @@ function _ncurve_analytic(curves::NamedTuple, tenors::AbstractVector,
         return (; value = V, gradient = grad_shared)
     end
 end
+
+# Normalize the three Hessian blocks of a two-curve AD/analytic result into the
+# `(; base, credit, cross)` convexity NamedTuple. Each `./` allocates a fresh
+# array, so callers always receive distinct output buffers even when the
+# analytic inputs alias a single shared matrix.
+_conv_blocks(r) = (; base   = r.base_hessian   ./ r.value,
+                     credit = r.credit_hessian ./ r.value,
+                     cross  = r.cross_hessian  ./ r.value)
 
 ## AbstractYieldModel + KeyRates(tenors): KRD / IR01 / CS01 / convexity / sensitivities
 #
@@ -1340,19 +1282,11 @@ convexity(base::AYM, credit::AYM, tenors, cfs::AbstractVector{<:FinanceCore.Cash
 
 function convexity(kr::KeyRates, valuation_fn::Function, base::AYM, credit::AYM)
     ad = _keyrate_ad(base, credit, kr.tenors, valuation_fn; order = 2)
-    return (;
-        base = ad.base_hessian ./ ad.value,
-        credit = ad.credit_hessian ./ ad.value,
-        cross = ad.cross_hessian ./ ad.value,
-    )
+    return _conv_blocks(ad)
 end
 function convexity(kr::KeyRates, base::AYM, credit::AYM, cfs, times)
     an = _keyrate_analytic(base, credit, kr.tenors, cfs, times; order = 2)
-    return (;
-        base   = an.base_hessian   ./ an.value,
-        credit = an.credit_hessian ./ an.value,
-        cross  = an.cross_hessian  ./ an.value,
-    )
+    return _conv_blocks(an)
 end
 convexity(kr::KeyRates, base::AYM, credit::AYM, cfs::AbstractVector{<:FinanceCore.Cashflow}) = convexity(kr, base, credit, _extract_cfs_times(cfs)...)
 
@@ -1426,11 +1360,7 @@ function sensitivities(kr::KeyRates, valuation_fn::Function, base::AYM, credit::
         value = ad.value,
         base_durations = -ad.base_gradient ./ ad.value,
         credit_durations = -ad.credit_gradient ./ ad.value,
-        convexities = (;
-            base = ad.base_hessian ./ ad.value,
-            credit = ad.credit_hessian ./ ad.value,
-            cross = ad.cross_hessian ./ ad.value,
-        ),
+        convexities = _conv_blocks(ad),
     )
 end
 function sensitivities(kr::KeyRates, base::AYM, credit::AYM, cfs, times)
@@ -1439,11 +1369,7 @@ function sensitivities(kr::KeyRates, base::AYM, credit::AYM, cfs, times)
         value             = an.value,
         base_durations    = -an.base_gradient   ./ an.value,
         credit_durations  = -an.credit_gradient ./ an.value,
-        convexities       = (;
-            base   = an.base_hessian   ./ an.value,
-            credit = an.credit_hessian ./ an.value,
-            cross  = an.cross_hessian  ./ an.value,
-        ),
+        convexities       = _conv_blocks(an),
     )
 end
 sensitivities(kr::KeyRates, base::AYM, credit::AYM, cfs::AbstractVector{<:FinanceCore.Cashflow}) = sensitivities(kr, base, credit, _extract_cfs_times(cfs)...)
@@ -1471,11 +1397,7 @@ function sensitivities(::DV01, kr::KeyRates, valuation_fn::Function, base::AYM, 
         value = ad.value,
         base_dv01s = -ad.base_gradient ./ 10_000,
         credit_dv01s = -ad.credit_gradient ./ 10_000,
-        convexities = (;
-            base = ad.base_hessian ./ ad.value,
-            credit = ad.credit_hessian ./ ad.value,
-            cross = ad.cross_hessian ./ ad.value,
-        ),
+        convexities = _conv_blocks(ad),
     )
 end
 function sensitivities(::DV01, kr::KeyRates, base::AYM, credit::AYM, cfs, times)
@@ -1484,11 +1406,7 @@ function sensitivities(::DV01, kr::KeyRates, base::AYM, credit::AYM, cfs, times)
         value        = an.value,
         base_dv01s   = -an.base_gradient   ./ 10_000,
         credit_dv01s = -an.credit_gradient ./ 10_000,
-        convexities  = (;
-            base   = an.base_hessian   ./ an.value,
-            credit = an.credit_hessian ./ an.value,
-            cross  = an.cross_hessian  ./ an.value,
-        ),
+        convexities  = _conv_blocks(an),
     )
 end
 sensitivities(::DV01, kr::KeyRates, base::AYM, credit::AYM, cfs::AbstractVector{<:FinanceCore.Cashflow}) = sensitivities(DV01(), kr, base, credit, _extract_cfs_times(cfs)...)
