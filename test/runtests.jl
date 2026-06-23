@@ -1480,6 +1480,85 @@ end
     end
 end
 
+# Reference: OpenGamma "Bond Pricing" (M. Henrard, Quantitative Research, 2011),
+# §5.2 Floating rate note (FRN). That note fixes the multi-curve convention this
+# package implements: coupons are ESTIMATED on the forward/index curve I (eq. 3)
+# and coupons + notional are DISCOUNTED on the issuer/credit curve C (eq. 4):
+#
+#   F_i = (1/δ_i)(P^I(s_i)/P^I(e_i) − 1)                            (3)
+#   PV  = Σ_i δ_i N_i (F_i + s_i) P^C(t_i)  +  N P^C(t_N)           (4)   (settle S = 0)
+#
+# Market risk of a credit FRN under this convention maps onto the package's
+# floating-rate decomposition as:
+#   IR01 — 1bp parallel shift of the risk-free curve, which drives BOTH the index
+#          I (so coupons re-fix) AND the issuer discount C = rf + spread  ⇒ Effective
+#   CS01 — 1bp parallel shift of the issuer credit spread only (C moves; the coupons
+#          estimated on I are held fixed)                                  ⇒ Spread
+# A floater therefore shows |IR01| ≈ 0 (≈ next reset) and CS01 ≈ maturity — the
+# textbook FRN signature. The reference price / IR01 / CS01 are rebuilt below from
+# eq. (3)–(4) directly (independent of the package's projection machinery), then the
+# package is checked against them.
+@testset "OpenGamma §5.2 FRN reference: IR01 / CS01" begin
+    tenors   = [1.0, 2.0, 3.0, 4.0, 5.0]
+    rf_zeros = [0.020, 0.024, 0.027, 0.029, 0.030]   # continuous-comp risk-free zeros
+    cs       = 0.010                                  # 100bp issuer credit spread
+    margin   = 0.005                                  # 50bp FRN quoted margin (coupon_rate)
+    m        = 1                                       # annual coupons ⇒ accrual δ = 1/m
+    δ        = 1 / m
+
+    rf     = FM.Yield.Spline(FM.Spline.Linear(), tenors, rf_zeros)  # index / Ibor forward, I
+    credit = rf + ((z, t) -> z + FC.Continuous(cs))                 # issuer discount, C = rf + spread
+    fl     = FM.Bond.Floating(margin, FC.Periodic(m), 5.0, "IDX")
+
+    # Independent OpenGamma eq. (3)+(4) PV with distinct curves I and C (N = 1, S = 0).
+    function og_pv(Icrv, Ccrv)
+        Pprev = 1.0                                          # P^I(t_0) = P^I(0) = 1
+        pv = 0.0
+        for t in tenors
+            Fi    = m * (Pprev / FC.discount(Icrv, t) - 1)   # eq. (3): forward over [t-1/m, t]
+            pv   += δ * (Fi + margin) * FC.discount(Ccrv, t) # eq. (4): coupon δ(F+s) on C
+            Pprev = FC.discount(Icrv, t)
+        end
+        return pv + FC.discount(Ccrv, tenors[end])           # notional, discounted on C
+    end
+
+    bump(crv, d) = crv + ((z, t) -> z + FC.Continuous(d))
+    bp = 1e-4
+    pv_ir(d) = og_pv(bump(rf, d), bump(credit, d))   # IR01: rf moves ⇒ both I and C shift
+    pv_cs(d) = og_pv(rf, bump(credit, d))            # CS01: only C shifts; coupons held on I
+
+    pv_ref   = og_pv(rf, credit)
+    ir01_ref = (pv_ir(-bp) - pv_ir(bp)) / 2          # dv01 ≈ (V(−1bp) − V(+1bp)) / 2
+    cs01_ref = (pv_cs(-bp) - pv_cs(bp)) / 2
+
+    s = sensitivities(fl, rf, credit, tenors)
+
+    @testset "reproduces OpenGamma eq.(3)+(4) price" begin
+        @test s.value ≈ pv_ref atol = 1e-12
+        @test FC.present_value(credit, reproject(fl, rf)) ≈ pv_ref atol = 1e-12
+        @test pv_ref ≈ 0.9760496203 atol = 1e-9                       # regression anchor
+    end
+
+    @testset "IR01 ⇒ Effective, CS01 ⇒ Spread (vs eq.(3)+(4) 1bp bump)" begin
+        @test s.effective_dv01 ≈ ir01_ref rtol = 1e-4
+        @test s.spread_dv01    ≈ cs01_ref rtol = 1e-4
+        @test dv01(Effective(), fl, rf, credit, tenors) ≈ ir01_ref rtol = 1e-4   # public verbs
+        @test dv01(Spread(),    fl, rf, credit, tenors) ≈ cs01_ref rtol = 1e-4
+        @test s.effective_dv01 ≈ s.forward_dv01 + s.spread_dv01 atol = 1e-12      # eff = fwd + spr
+        @test s.effective_dv01 ≈ -2.381601e-6 rtol = 1e-5            # regression anchors
+        @test s.spread_dv01    ≈ 4.585068e-4 rtol = 1e-5
+    end
+
+    @testset "FRN signature: |IR01| ≈ 0 (next reset) ≪ CS01 ≈ maturity" begin
+        @test abs(s.effective_dv01) < abs(s.spread_dv01) / 50   # rate risk ≈ killed by re-fixing
+        @test 4.5 < s.spread_duration < 5.0                     # ≈ time to maturity
+        @test abs(s.effective_duration) < 0.1                   # ≈ time to next reset (≈ 0)
+        cs01_kr = s.spread_key_rate .* s.value ./ 1e4           # CS01 risk concentrates at...
+        @test argmax(cs01_kr) == length(tenors)                 # ...the notional repayment (maturity)
+        @test cs01_kr[end] > 0.9 * cs01_ref
+    end
+end
+
 using Aqua
 @testset "Aqua.jl" begin
     Aqua.test_all(ActuaryUtilities)
