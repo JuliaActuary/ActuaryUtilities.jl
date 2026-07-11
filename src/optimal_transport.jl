@@ -16,9 +16,16 @@ export wasserstein, transportmap, pushforward, driftsignificance, worstcase
 # the L^p gap between quantile functions and needs no solver. For two equally
 # sized samples that reduces to sorting both and comparing point-by-point.
 
-# quantile access on either a sample or a distribution
-_q(x::AbstractVector{<:Real}, u) = Statistics.quantile(x, u)
-_q(d::Distributions.UnivariateDistribution, u) = Distributions.quantile(d, u)
+# Build a quantile function `u -> Q(u)` for either a sample or a distribution,
+# doing any sorting ONCE up front. Callers evaluate it on a whole grid of `u`s, so
+# a per-call `Statistics.quantile` (which re-sorts the vector every time) would be
+# quadratic; sorting once here keeps the grid loop linear.
+_quantile_fn(d::Distributions.UnivariateDistribution) = u -> Distributions.quantile(d, u)
+function _quantile_fn(x::AbstractVector{<:Real})
+    isempty(x) && throw(ArgumentError("empty sample: a Wasserstein/quantile needs at least one observation"))
+    xs = sort(collect(x))
+    return u -> Statistics.quantile(xs, u; sorted=true)
+end
 
 _pnorm(diffs, p) = (Statistics.mean(abs.(diffs) .^ p))^(1 / p)
 
@@ -65,19 +72,23 @@ end
 # both samples: exact sorted matching when equally sized, else compare the two
 # empirical quantile functions on a shared midpoint grid.
 function _wasserstein(a::AbstractVector{<:Real}, b::AbstractVector{<:Real}, p)
+    (isempty(a) || isempty(b)) &&
+        throw(ArgumentError("empty sample: wasserstein needs at least one observation in each of `a`, `b`"))
     if length(a) == length(b)
         return _pnorm(sort(collect(a)) .- sort(collect(b)), p)
     end
     n = max(length(a), length(b))
     us = ((1:n) .- 0.5) ./ n
-    return _pnorm([_q(a, u) - _q(b, u) for u in us], p)
+    Qa, Qb = _quantile_fn(a), _quantile_fn(b)   # each sorts once, not per-`u`
+    return _pnorm([Qa(u) - Qb(u) for u in us], p)
 end
 
 # at least one argument is a distribution: integrate the quantile gap on a grid
 function _wasserstein(a, b, p)
     n = 4096
     us = ((1:n) .- 0.5) ./ n
-    _pnorm([_q(a, u) - _q(b, u) for u in us], p)
+    Qa, Qb = _quantile_fn(a), _quantile_fn(b)
+    _pnorm([Qa(u) - Qb(u) for u in us], p)
 end
 
 """
@@ -108,7 +119,8 @@ julia> T(0.0), T(1.0)
 """
 function transportmap(source, target)
     F = RiskMeasures.cdf_func(source)
-    return x -> _q(target, F(x))
+    Qt = _quantile_fn(target)                  # sorts a sample `target` once, not per call
+    return x -> Qt(F(x))
 end
 
 # When `source` is an empirical sample, the plain ecdf reaches exactly 1.0 at the
@@ -116,12 +128,14 @@ end
 # Use midpoint plotting positions instead: the k-th of n order statistics maps to
 # rank (k - 0.5)/n, keeping every transported value finite.
 function transportmap(source::AbstractVector{<:Real}, target)
+    isempty(source) && throw(ArgumentError("empty `source` sample: transportmap needs at least one observation"))
     xs = sort(collect(source))
     n = length(xs)
+    Qt = _quantile_fn(target)                  # sorts a sample `target` once, not per call
     return function (x)
         k = searchsortedlast(xs, x)            # number of sample points ≤ x (0…n)
         u = clamp((k - 0.5) / n, 0.5 / n, 1 - 0.5 / n)
-        return _q(target, u)
+        return Qt(u)
     end
 end
 
@@ -147,7 +161,15 @@ Returns a `NamedTuple` `(; distance, threshold, pvalue, significant)`:
 - `distance`  — the observed `wasserstein(a, b; p)`
 - `threshold` — the `level` quantile of the permuted distances (the noise floor)
 - `pvalue`    — fraction of permuted distances ≥ `distance` (add-one smoothed)
-- `significant` — `distance > threshold`
+- `significant` — `distance > threshold` (equivalently, `pvalue < 1 - level` up to
+  add-one smoothing and ties)
+
+!!! warning "Reproducibility for decisions of record"
+    The permutation floor is stochastic. With the default
+    `rng = Random.default_rng()` the `pvalue`, `threshold`, and — for a borderline
+    move — the `significant` flag will differ from run to run on identical data.
+    For any governance/reporting decision, pass an explicitly seeded `rng` (e.g.
+    `rng = MersenneTwister(seed)`) so the result is auditable and reproducible.
 
 ## Example
 
@@ -194,17 +216,21 @@ governance dial in the units of the loss.
 
 The budget-optimal adverse distribution shifts the worst `1 - tail` fraction of
 outcomes outward by `Δ = radius * (1 - tail)^(-1/p)`, which costs exactly `radius`
-in ``W_p`` and maximizes tail-focused measures. For `rm = CTE(α)` with `tail = α`
-this attains the sharp stability bound
+in ``W_p`` and maximizes tail-focused measures. Concretely it shifts the tail
+order statistics ``x_{(k)}, \\dots, x_{(n)}`` — using the *same* tail boundary
+``k`` that [`VaR`](@ref) and [`CTE`](@ref) use on a sample, so the two agree
+exactly even under ties. For `rm = CTE(α)` with `tail = α` this attains the sharp
+stability bound
 
 ```math
 |\\mathrm{CTE}_\\alpha(\\mu) - \\mathrm{CTE}_\\alpha(\\nu)|
     \\le (1-\\alpha)^{-1/p}\\, W_p(\\mu,\\nu) ,
 ```
 
-so `worstcase(CTE(α), s; radius=r) == CTE(α)(s) + r*(1-α)^(-1/p)`. For other risk
-measures it evaluates `rm` on the same budget-`r` adverse scenario (a concrete
-distribution inside the ball), i.e. a lower bound on the true worst case.
+exactly (up to floating point): `worstcase(CTE(α), s; radius=r) ≈ CTE(α)(s) +
+r*(1-α)^(-1/p)`. For other risk measures it evaluates `rm` on the same budget-`r`
+adverse scenario (a concrete distribution inside the ball), i.e. a lower bound on
+the true worst case.
 
 The factor `(1 - tail)^(-1/p)` is the price of tail focus: deeper-tail capital is
 intrinsically more fragile to model error, so the same `radius` buys a larger
@@ -227,10 +253,19 @@ function worstcase(rm::RiskMeasure, sample::AbstractVector{<:Real};
     radius >= 0 || throw(ArgumentError("radius must be ≥ 0, got $radius"))
     0 <= tail < 1 || throw(ArgumentError("tail must be in [0, 1), got $tail"))
     p >= 1 || throw(ArgumentError("p must be ≥ 1, got $p"))
+    isempty(sample) && throw(ArgumentError("empty `sample`: worstcase needs at least one observation"))
     Δ = radius * (1 - tail)^(-1 / p)
-    thr = Statistics.quantile(sample, tail)
-    adverse = [x >= thr ? x + Δ : x for x in sample]
-    return rm(adverse)
+    # Shift the tail order statistics x_(k)…x_(n) by Δ. `k` is taken from the SAME
+    # boundary VaR/CTE use on a sample (`_first_index_above`), rather than from a
+    # `Statistics.quantile` *value* + `x ≥ thr` test. The value-threshold form
+    # silently disagrees with CTE's own tail by O(1/n) when the quantile
+    # conventions differ, and over-/under-shifts under ties; the rank form makes
+    # the CTE bound exact by construction and unambiguous at atoms.
+    xs = sort(vec(sample))
+    n = length(xs)
+    k = RiskMeasures._first_index_above(n, tail)
+    @views xs[k:n] .+= Δ
+    return rm(xs)
 end
 
 end

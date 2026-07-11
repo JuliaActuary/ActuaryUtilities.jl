@@ -19,6 +19,9 @@
         @test wasserstein([1, 2, 3, 4, 5], [10, 20]) > 0
 
         @test_throws ArgumentError wasserstein([1, 2], [3, 4]; p=0.5)
+        # empty samples fail loudly rather than returning NaN
+        @test_throws ArgumentError wasserstein(Float64[], [1.0, 2.0])
+        @test_throws ArgumentError wasserstein([1.0, 2.0], Float64[])
     end
 
     @testset "transportmap / pushforward" begin
@@ -62,6 +65,31 @@
         loading(α) = worstcase(CTE(α), s; radius=250) - CTE(α)(s)
         @test loading(0.995) > loading(0.95)
 
+        # Small-sample exactness: the bound must hold to machine precision, not just
+        # O(1/n). Here n=10, α=0.25 is a case where a `Statistics.quantile` value +
+        # `x ≥ thr` shift would exclude x_(k) and under-attain the bound by ~7%,
+        # while the rank-based (order-statistic) shift matches CTE's own tail exactly.
+        let sm = collect(1.0:10.0)
+            for (α, p, r) in ((0.25, 1, 3.0), (0.7, 2, 2.0), (0.0, 1, 1.5))
+                @test worstcase(CTE(α), sm; radius=r, p=p) ≈
+                      CTE(α)(sm) + r * (1 - α)^(-1 / p) rtol = 1e-12
+            end
+        end
+
+        # Ties/atoms: the tail boundary is by RANK, so exactly the worst
+        # ceil((1-tail)·n) order statistics move — the CTE bound stays exact even
+        # when many observations equal the threshold value.
+        let st = [fill(0.0, 80); fill(50.0, 15); fill(100.0, 5)]   # heavy tie at 50
+            @test worstcase(CTE(0.9), st; radius=4.0, p=2) ≈
+                  CTE(0.9)(st) + 4.0 * (1 - 0.9)^(-1 / 2) rtol = 1e-12
+        end
+
+        # original sample is not mutated
+        let s0 = rand(LogNormal(0, 1), 1_000), s1 = copy(s0)
+            worstcase(CTE(0.95), s0; radius=10)
+            @test s0 == s1
+        end
+
         # composes with any risk measure; a measure without a natural tail needs `tail`.
         # (WangTransform has no fast array method, so use a small sample here.)
         @test worstcase(VaR(0.95), s; radius=100) ≥ VaR(0.95)(s)
@@ -69,6 +97,7 @@
         @test worstcase(WangTransform(0.95), sw; radius=100, tail=0.95) > WangTransform(0.95)(sw)
         @test_throws ArgumentError worstcase(WangTransform(0.95), s; radius=100)
         @test_throws ArgumentError worstcase(CTE(0.95), s; radius=-1)
+        @test_throws ArgumentError worstcase(CTE(0.95), Float64[]; radius=100)
     end
 
     @testset "driftsignificance" begin
