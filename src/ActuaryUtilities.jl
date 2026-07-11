@@ -19,10 +19,12 @@ function duration end
 
 include("financial_math.jl")
 include("risk_measures.jl")
+include("optimal_transport.jl")
 include("utilities.jl")
 
 @reexport using .FinancialMath
 @reexport using .RiskMeasures
+@reexport using .OptimalTransport
 @reexport using .Utilities
 
 include("precompile.jl")

@@ -205,11 +205,106 @@ let
 end
 ```
 
+## Optimal Transport & Robustness
+
+A risk measure collapses a whole loss distribution to a single number. Optimal
+transport (OT) supplies the complementary half — the **geometry *between*
+distributions**: how far apart two risks are, how a rank-preserving stress moves
+*every* measure at once, whether a quarter-over-quarter change is real, and how
+much a risk measure can move under model error. In one dimension OT is closed
+form (transport is just rank matching), so these tools need no solver — they are
+sorting and quantile arithmetic layered on the same `rm(risk)` interface.
+
+### Distance between two risks — [`wasserstein`](@ref)
+
+Where a risk measure says *where* a book sits, the Wasserstein distance says *how
+far apart* two books are, in the units of the loss and aware of the whole shape:
+
+```julia
+a = rand(LogNormal(log(1000) - 0.18, 0.6), 100_000)
+b = rand(LogNormal(log(1150) - 0.32, 0.8), 100_000)   # higher mean + fatter tail
+
+wasserstein(a, b)          # ≈ 210   average claim displacement (W₁, in \$)
+wasserstein(a, b; p=2)     # ≈ 480   W₂ penalizes the tail move more
+```
+
+It also accepts `Distributions.UnivariateDistribution`s directly, e.g.
+`wasserstein(Normal(0, 1), Normal(3, 1)) == 3`.
+
+### One stress drives the whole panel — [`transportmap`](@ref) / [`pushforward`](@ref)
+
+Rather than stressing each measure separately, define **one** rank-preserving
+transport map, push the book through it, and recompute every measure consistently:
+
+```julia
+base_law = LogNormal(log(1000) - 0.18, 0.6)                    # the assumed base
+T        = transportmap(base_law, LogNormal(log(1300) - 0.32, 0.8))  # → target
+sample   = rand(base_law, 100_000)
+stress   = pushforward(sample, T)
+
+for rm in (Expectation(), VaR(0.95), CTE(0.95), VaR(0.995), CTE(0.995))
+    println(rm, ": ", round(rm(sample)), " → ", round(rm(stress)))
+end
+```
+
+The map is auditable ("we revalued each percentile") rather than a reshuffling of
+who is risky.
+
+### Distributionally robust risk measures — [`worstcase`](@ref)
+
+`worstcase(rm, sample; radius=r)` returns the worst value of `rm` over a
+Wasserstein ball of radius `r` — a governance dial in the units of the loss for
+"how bad could this number be if my book is off by up to `r` of transport cost?"
+For `CTE(α)` it attains the sharp stability bound
+``|\mathrm{CTE}_\alpha(\mu)-\mathrm{CTE}_\alpha(\nu)| \le (1-\alpha)^{-1/p}\,W_p``:
+
+```julia
+base = rand(LogNormal(log(1000) - 0.18, 0.6), 200_000)
+
+CTE(0.95)(base),  worstcase(CTE(0.95),  base; radius=250)   # ≈ (2980, 4100)
+CTE(0.995)(base), worstcase(CTE(0.995), base; radius=250)   # ≈ (4890, 8430)
+```
+
+Same \$250 radius, a larger loading deeper in the tail — deep-tail capital is
+intrinsically more fragile to model error. Because `worstcase` takes the risk
+measure as an argument it works for `VaR`, `WangTransform`, or any custom
+`RiskMeasure` (pass `tail` for measures without a natural tail level).
+
+!!! note "VaR is fragile, CTE is not"
+    These tools also expose a *structural* fact about the measures. Where the loss
+    density is thin near the quantile, a tiny transport move (small `wasserstein`)
+    can swing `VaR` by a large amount, while `CTE` — a tail *average* — obeys the
+    Lipschitz bound above. For capital that must be stable under model or portfolio
+    perturbation, prefer `CTE`; if you must report `VaR`, check the density near the
+    quantile.
+
+### Is a change real? — [`driftsignificance`](@ref)
+
+A risk number that moved quarter-to-quarter may just be sampling noise.
+`driftsignificance` compares the observed `wasserstein` against the distances
+produced by *random* re-splits of the pooled data, so only moves that clear the
+noise floor are flagged:
+
+```julia
+q1 = rand(LogNormal(log(1000) - 0.18, 0.60), 4_000)   # this quarter
+q2 = rand(LogNormal(log(1030) - 0.19, 0.62), 4_000)   # next quarter
+
+ds = driftsignificance(q1, q2)
+ds.distance, ds.threshold, ds.significant             # e.g. (≈50, ≈28, true)
+```
+
+!!! warning "Three cautions"
+    (1) A distance or robustness number is only meaningful *with* its ground cost —
+    absolute \$, log/relative, or tail-weighted — so report the cost alongside.
+    (2) These are distributional statements, not per-policyholder causal ones.
+    (3) With atoms/ties (discrete losses, curtate lifetimes) fix the quantile
+    convention so the OT layer and the risk measures agree at the ties.
+
 ## API
 
 ### Exported API
 ```@autodocs
-Modules = [ActuaryUtilities.RiskMeasures]
+Modules = [ActuaryUtilities.RiskMeasures, ActuaryUtilities.OptimalTransport]
 Private = false
 ```
 
