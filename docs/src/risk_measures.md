@@ -250,23 +250,26 @@ end
 The map is auditable ("we revalued each percentile") rather than a reshuffling of
 who is risky.
 
-### Distributionally robust risk measures — [`worstcase`](@ref)
+### Distributionally robust risk measures — [`robustvalue`](@ref)
 
-`worstcase(rm, sample; radius=r)` returns the worst value of `rm` over a
+`robustvalue(rm, sample; radius=r)` is a robust version of `rm` over a
 Wasserstein ball of radius `r` — a governance dial in the units of the loss for
 "how bad could this number be if my book is off by up to `r` of transport cost?"
-For `CTE(α)` it attains the sharp stability bound
-``|\mathrm{CTE}_\alpha(\mu)-\mathrm{CTE}_\alpha(\nu)| \le (1-\alpha)^{-1/p}\,W_p``:
+For `CTE(α)` it is the **exact worst case**, attaining the sharp stability bound
+``|\mathrm{CTE}_\alpha(\mu)-\mathrm{CTE}_\alpha(\nu)| \le (1-\alpha)^{-1/p}\,W_p``;
+for every other measure it evaluates `rm` on a budget-exact adverse scenario
+inside the ball, which is a **lower bound** on the true worst case — a
+distinction that matters if the number feeds capital or model-risk governance:
 
 ```julia
 base = rand(LogNormal(log(1000) - 0.18, 0.6), 200_000)
 
-CTE(0.95)(base),  worstcase(CTE(0.95),  base; radius=250)   # ≈ (2980, 4100)
-CTE(0.995)(base), worstcase(CTE(0.995), base; radius=250)   # ≈ (4890, 8430)
+CTE(0.95)(base),  robustvalue(CTE(0.95),  base; radius=250)   # ≈ (2980, 4100)
+CTE(0.995)(base), robustvalue(CTE(0.995), base; radius=250)   # ≈ (4890, 8430)
 ```
 
 Same \$250 radius, a larger loading deeper in the tail — deep-tail capital is
-intrinsically more fragile to model error. Because `worstcase` takes the risk
+intrinsically more fragile to model error. Because `robustvalue` takes the risk
 measure as an argument it works for `VaR`, `WangTransform`, or any custom
 `RiskMeasure` (pass `tail` for measures without a natural tail level).
 
@@ -297,8 +300,11 @@ ds.distance, ds.threshold, ds.significant             # e.g. (≈50, ≈28, true
     (1) A distance or robustness number is only meaningful *with* its ground cost —
     absolute \$, log/relative, or tail-weighted — so report the cost alongside.
     (2) These are distributional statements, not per-policyholder causal ones.
-    (3) With atoms/ties (discrete losses, curtate lifetimes) fix the quantile
-    convention so the OT layer and the risk measures agree at the ties.
+    (3) With atoms/ties (discrete losses, curtate lifetimes) the quantile
+    convention matters. This module uses the inverse empirical cdf (a step
+    function) throughout, matching the convention of `VaR`/`CTE` on samples, so
+    the OT layer and the risk measures agree at ties; keep that in mind when
+    comparing against tools that interpolate quantiles.
 
 ### Discussion: how to read these numbers, and what is deliberately left out
 
@@ -349,10 +355,10 @@ not: in more than one dimension the transport map is no longer a sorted matching
 and requires an actual OT solve. That capability is a natural future extension
 (dispatched on multivariate inputs, lit up when a package such as
 `OptimalTransport.jl` is loaded), and it is a real addition rather than a
-re-wrapping of the exact 1-D routines. Note that [`worstcase`](@ref) does **not**
-generalize for free: its budget-optimal "shove the worst `1 - tail` fraction by
-`Δ`" form is intrinsically a one-dimensional tail result, and the multivariate
-worst case over a Wasserstein ball is a separate optimization problem.
+re-wrapping of the exact 1-D routines. Note that [`robustvalue`](@ref) does **not**
+generalize for free: its "shift the tail mass outward by `Δ`" form is
+intrinsically a one-dimensional tail result, and the multivariate worst case
+over a Wasserstein ball is a separate optimization problem.
 
 ## API
 

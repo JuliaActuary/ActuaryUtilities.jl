@@ -7,7 +7,7 @@ import ..RiskMeasures: RiskMeasure, CTE, VaR
 import Random
 import Statistics
 
-export wasserstein, transportmap, pushforward, driftsignificance, worstcase
+export wasserstein, transportmap, pushforward, driftsignificance, robustvalue
 
 # ── One-dimensional optimal transport is closed form ────────────────────────
 #
@@ -17,14 +17,17 @@ export wasserstein, transportmap, pushforward, driftsignificance, worstcase
 # sized samples that reduces to sorting both and comparing point-by-point.
 
 # Build a quantile function `u -> Q(u)` for either a sample or a distribution,
-# doing any sorting ONCE up front. Callers evaluate it on a whole grid of `u`s, so
-# a per-call `Statistics.quantile` (which re-sorts the vector every time) would be
-# quadratic; sorting once here keeps the grid loop linear.
+# doing any sorting ONCE up front. For a sample this is the inverse ECDF
+# Q(u) = x_(⌈u·n⌉) — a step function, NOT `Statistics.quantile`: its default
+# interpolation describes a different, continuous distribution, which breaks the
+# exact OT identities at atoms (e.g. it would push [1,2] onto [12.5,17.5] instead
+# of [10,20] for target [10,20]).
 _quantile_fn(d::Distributions.UnivariateDistribution) = u -> Distributions.quantile(d, u)
 function _quantile_fn(x::AbstractVector{<:Real})
     isempty(x) && throw(ArgumentError("empty sample: a Wasserstein/quantile needs at least one observation"))
     xs = sort(collect(x))
-    return u -> Statistics.quantile(xs, u; sorted=true)
+    n = length(xs)
+    return u -> xs[clamp(ceil(Int, u * n), 1, n)]
 end
 
 _pnorm(diffs, p) = (Statistics.mean(abs.(diffs) .^ p))^(1 / p)
@@ -44,7 +47,10 @@ W_p(a,b) = \\left( \\int_0^1 |Q_a(u) - Q_b(u)|^p \\, du \\right)^{1/p} .
 ```
 
 For two equally sized samples this is exactly the sorted, point-by-point matching
-`mean(abs.(sort(a) .- sort(b)).^p)^(1/p)` — no solver is required. Unlike
+`mean(abs.(sort(a) .- sort(b)).^p)^(1/p)`; for unequally sized samples the two
+step quantile functions are integrated exactly over their merged probability
+breakpoints — in both cases no solver is required and no approximation is made.
+Unlike
 divergence-based distances (KL, ``\\chi^2``) the Wasserstein distance is
 expressed in the units of the risk itself and is aware of the geometry of the
 outcome space: a \\\$10k loss is closer to \\\$11k than to \\\$1M.
@@ -62,25 +68,36 @@ julia> wasserstein(Normal(0, 1), Normal(0, 2); p=2) # same mean, |σ₁-σ₂|
 1.0
 ```
 
-See also [`transportmap`](@ref), [`driftsignificance`](@ref), [`worstcase`](@ref).
+See also [`transportmap`](@ref), [`driftsignificance`](@ref), [`robustvalue`](@ref).
 """
 function wasserstein(a, b; p::Real=1)
     p >= 1 || throw(ArgumentError("p must be ≥ 1, got $p"))
     _wasserstein(a, b, p)
 end
 
-# both samples: exact sorted matching when equally sized, else compare the two
-# empirical quantile functions on a shared midpoint grid.
+# both samples: exact in both cases. Equal sizes reduce to sorted point-by-point
+# matching; unequal sizes integrate |Qa - Qb|^p exactly by merging the breakpoints
+# {i/na} ∪ {j/nb} of the two inverse-ECDF step functions. A fixed evaluation grid
+# (or an interpolated quantile) computes a different number — e.g. the true
+# W₂([0], [0,2]) is √2, while a size-2 midpoint grid through `Statistics.quantile`
+# gives √1.25.
 function _wasserstein(a::AbstractVector{<:Real}, b::AbstractVector{<:Real}, p)
     (isempty(a) || isempty(b)) &&
         throw(ArgumentError("empty sample: wasserstein needs at least one observation in each of `a`, `b`"))
-    if length(a) == length(b)
-        return _pnorm(sort(collect(a)) .- sort(collect(b)), p)
+    na, nb = length(a), length(b)
+    as, bs = sort(collect(a)), sort(collect(b))
+    na == nb && return _pnorm(as .- bs, p)
+    i = j = 1
+    prev = 0.0
+    acc = 0.0
+    while i <= na && j <= nb
+        u = min(i / na, j / nb)
+        acc += (u - prev) * abs(as[i] - bs[j])^p
+        prev = u
+        i / na <= u && (i += 1)
+        j / nb <= u && (j += 1)
     end
-    n = max(length(a), length(b))
-    us = ((1:n) .- 0.5) ./ n
-    Qa, Qb = _quantile_fn(a), _quantile_fn(b)   # each sorts once, not per-`u`
-    return _pnorm([Qa(u) - Qb(u) for u in us], p)
+    return acc^(1 / p)
 end
 
 # at least one argument is a distribution: integrate the quantile gap on a grid
@@ -107,6 +124,14 @@ a `source` sample through `T` — see [`pushforward`](@ref) — yields a sample
 distributed as `target` while preserving each observation's rank, which makes `T`
 a natural, auditable **stress / scenario transform**: one map revalues every
 quantile consistently rather than reshuffling which outcomes are risky.
+
+When both `source` and `target` are samples, order statistics are matched through
+the inverse empirical cdf, so for equally sized, tie-free samples
+`pushforward(source, T)` reproduces `sort(target)` exactly. Two qualifications:
+for unequally sized samples the result is the target's quantiles evaluated at the
+source's ranks rather than a permutation of `target`, and tied `source` values
+cannot be split by any deterministic map — every copy of a tied value transports
+to the same target quantile.
 
 ## Example
 
@@ -206,31 +231,35 @@ _taillevel(rm::RiskMeasure) =
     throw(ArgumentError("$(typeof(rm)) has no natural tail level; pass `tail`"))
 
 """
-    worstcase(rm::RiskMeasure, sample; radius, p=2, tail=<rm's α>)
+    robustvalue(rm::RiskMeasure, sample; radius, p=2, tail=<rm's α>)
 
-The worst value of risk measure `rm` over a `p`-Wasserstein ball of the given
-`radius` around the empirical distribution of `sample` — a distributionally
-robust (Wasserstein-DRO) version of `rm`. `radius` answers "how bad could this
-number be if my book is off by up to `radius` of transport cost?" and is a
-governance dial in the units of the loss.
+A distributionally robust (Wasserstein-DRO) value of risk measure `rm` over the
+`p`-Wasserstein ball of the given `radius` around the empirical distribution of
+`sample`. `radius` answers "how bad could this number be if my book is off by up
+to `radius` of transport cost?" and is a governance dial in the units of the
+loss. What is returned depends on the measure:
 
-The budget-optimal adverse distribution shifts the worst `1 - tail` fraction of
-outcomes outward by `Δ = radius * (1 - tail)^(-1/p)`, which costs exactly `radius`
-in ``W_p`` and maximizes tail-focused measures. Concretely it shifts the tail
-order statistics ``x_{(k)}, \\dots, x_{(n)}`` — using the *same* tail boundary
-``k`` that [`VaR`](@ref) and [`CTE`](@ref) use on a sample, so the two agree
-exactly even under ties. For `rm = CTE(α)` with `tail = α` this attains the sharp
-stability bound
+- For `rm = CTE(α)` with `tail = α` (the default) the result is the **exact
+  worst case** `CTE(α)(sample) + radius * (1-α)^(-1/p)`, attaining the sharp
+  stability bound
 
-```math
-|\\mathrm{CTE}_\\alpha(\\mu) - \\mathrm{CTE}_\\alpha(\\nu)|
-    \\le (1-\\alpha)^{-1/p}\\, W_p(\\mu,\\nu) ,
-```
+  ```math
+  |\\mathrm{CTE}_\\alpha(\\mu) - \\mathrm{CTE}_\\alpha(\\nu)|
+      \\le (1-\\alpha)^{-1/p}\\, W_p(\\mu,\\nu) .
+  ```
 
-exactly (up to floating point): `worstcase(CTE(α), s; radius=r) ≈ CTE(α)(s) +
-r*(1-α)^(-1/p)`. For other risk measures it evaluates `rm` on the same budget-`r`
-adverse scenario (a concrete distribution inside the ball), i.e. a lower bound on
-the true worst case.
+  The maximizing distribution moves exactly the worst `1-α` of probability mass
+  outward by `radius * (1-α)^(-1/p)`, splitting the atom the tail boundary cuts
+  through, and sits on the boundary of the ball.
+
+- For any other risk measure the result is `rm` evaluated on a concrete adverse
+  scenario *inside* the ball: the tail order statistics ``x_{(k)}, \\dots,
+  x_{(n)}`` — the same tail boundary ``k`` that [`VaR`](@ref) and [`CTE`](@ref)
+  use on a sample — are shifted outward by `radius * (m/n)^(-1/p)`, where `m/n`
+  is the fraction of observations shifted, so the scenario costs exactly
+  `radius` in ``W_p``. This is a **lower bound** on the true worst case over the
+  ball, not the supremum itself — treat it as a principled adverse scenario, not
+  a proven maximum.
 
 The factor `(1 - tail)^(-1/p)` is the price of tail focus: deeper-tail capital is
 intrinsically more fragile to model error, so the same `radius` buys a larger
@@ -241,29 +270,35 @@ loading at `CTE(0.995)` than at `CTE(0.95)`.
 ```julia-repl
 julia> s = rand(LogNormal(log(1000) - 0.18, 0.6), 200_000);
 
-julia> CTE(0.95)(s), worstcase(CTE(0.95), s; radius=250)   # ≈ (2980, 4100)
+julia> CTE(0.95)(s), robustvalue(CTE(0.95), s; radius=250)   # ≈ (2980, 4100)
 ```
 
-`worstcase` takes the risk measure as an argument, so it works unchanged for
+`robustvalue` takes the risk measure as an argument, so it works unchanged for
 `VaR`, `WangTransform`, or any custom `RiskMeasure` (supply `tail` for measures
 without a natural tail level).
 """
-function worstcase(rm::RiskMeasure, sample::AbstractVector{<:Real};
+function robustvalue(rm::RiskMeasure, sample::AbstractVector{<:Real};
     radius::Real, p::Real=2, tail::Real=_taillevel(rm))
     radius >= 0 || throw(ArgumentError("radius must be ≥ 0, got $radius"))
     0 <= tail < 1 || throw(ArgumentError("tail must be in [0, 1), got $tail"))
     p >= 1 || throw(ArgumentError("p must be ≥ 1, got $p"))
-    isempty(sample) && throw(ArgumentError("empty `sample`: worstcase needs at least one observation"))
-    Δ = radius * (1 - tail)^(-1 / p)
-    # Shift the tail order statistics x_(k)…x_(n) by Δ. `k` is taken from the SAME
-    # boundary VaR/CTE use on a sample (`_first_index_above`), rather than from a
-    # `Statistics.quantile` *value* + `x ≥ thr` test. The value-threshold form
-    # silently disagrees with CTE's own tail by O(1/n) when the quantile
-    # conventions differ, and over-/under-shifts under ties; the rank form makes
-    # the CTE bound exact by construction and unambiguous at atoms.
-    xs = sort(vec(sample))
+    isempty(sample) && throw(ArgumentError("empty `sample`: robustvalue needs at least one observation"))
+    # CTE at its own tail level has a closed-form worst case. Its maximizer moves
+    # exactly mass 1-α, splitting the atom the tail boundary cuts through — a
+    # fractional weight an equally weighted sample cannot represent: any whole-atom
+    # shift either overspends the W_p budget or under-attains the bound whenever
+    # n*α is not an integer.
+    rm isa CTE && tail == rm.α && return rm(sample) + radius * (1 - tail)^(-1 / p)
+    # Otherwise evaluate `rm` on a budget-exact adverse scenario: shift the tail
+    # order statistics x_(k)…x_(n) — the SAME boundary `k` that VaR/CTE use on a
+    # sample, so the shifted set matches the measure's own tail even under ties —
+    # outward by Δ sized to the mass m/n actually moved, so the scenario costs
+    # exactly `radius` in W_p and stays inside the ball.
+    xs = sort!(float.(sample))                 # promote: Int samples cannot hold x + Δ
     n = length(xs)
     k = RiskMeasures._first_index_above(n, tail)
+    m = n - k + 1
+    Δ = radius * (m / n)^(-1 / p)
     @views xs[k:n] .+= Δ
     return rm(xs)
 end
