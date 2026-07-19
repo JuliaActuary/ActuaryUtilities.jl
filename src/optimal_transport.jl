@@ -78,7 +78,10 @@ evaluation budget scales with the number of empirical quantile segments; an
 explicit `maxevals` is a hard cap. If the requested tolerance cannot be verified,
 `wasserstein` throws rather than returning an unconverged approximation.
 For distributional `p=Inf`, this includes empirical-versus-bounded-distribution
-cases whose supremum is not certified within the evaluation budget.
+cases whose supremum is not certified within the evaluation budget. Infinite
+distance is returned only when proved by support bounds or a supported analytic
+family; unresolved same-side-unbounded pairs throw rather than relying on tail
+growth heuristics.
 
 ## References
 - "Optimal Transport for Actuarial Science", Arthur Charpentier, 2026.
@@ -173,18 +176,24 @@ function _wasserstein_infinity(a::Distributions.Normal, b::Distributions.Normal;
     a.σ == b.σ ? abs(a.μ - b.μ) : Inf
 end
 
+function _wasserstein_infinity(a::Distributions.LogNormal, b::Distributions.LogNormal; kwargs...)
+    Distributions.params(a) == Distributions.params(b) ? 0.0 : Inf
+end
+
+function _wasserstein_infinity(a::Distributions.Cauchy, b::Distributions.Cauchy; kwargs...)
+    a.σ == b.σ ? abs(a.μ - b.μ) : Inf
+end
+
 function _wasserstein_infinity(a, b; rtol, atol, maxevals)
     _support_proves_infinite(a, b) && return Inf
     alo, ahi = _support_bounds(a)
     blo, bhi = _support_bounds(b)
-    bounded_supports = all(isfinite, (alo, ahi, blo, bhi))
     endpoint_gap = zero(float(promote_type(typeof(alo), typeof(ahi), typeof(blo), typeof(bhi))))
     isfinite(alo) && isfinite(blo) && (endpoint_gap = max(endpoint_gap, abs(alo - blo)))
     isfinite(ahi) && isfinite(bhi) && (endpoint_gap = max(endpoint_gap, abs(ahi - bhi)))
     Qa, Qb = _quantile_fn(a), _quantile_fn(b)
     previous = -Inf
     stable = 0
-    growing = 0
     evaluations = 0
     n = 64
     budget = isnothing(maxevals) ? 100_000 : maxevals
@@ -202,12 +211,6 @@ function _wasserstein_infinity(a, b; rtol, atol, maxevals)
             stable >= 3 && return current
         else
             stable = 0
-        end
-        if isfinite(previous) && current - previous > tolerance
-            growing += 1
-            growing >= 8 && !bounded_supports && return Inf
-        else
-            growing = 0
         end
         previous = current
         n *= 2

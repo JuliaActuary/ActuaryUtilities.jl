@@ -42,6 +42,10 @@
         @test wasserstein(Cauchy(), Cauchy(3, 1); p=1) ≈ 3.0
         @test wasserstein(Normal(), Normal(3, 1); p=Inf) ≈ 3.0
         @test wasserstein(Normal(), Normal(0, 2); p=Inf) == Inf
+        @test wasserstein(LogNormal(0, 1), LogNormal(0, 1); p=Inf) == 0.0
+        @test wasserstein(LogNormal(0, 1), LogNormal(0, 2); p=Inf) == Inf
+        @test wasserstein(Cauchy(), Cauchy(3, 1); p=Inf) ≈ 3.0
+        @test wasserstein(Cauchy(), Cauchy(0, 2); p=Inf) == Inf
         @test wasserstein(Uniform(0, 1), Uniform(0, 2); p=Inf) ≈ 1.0
         @test wasserstein(Uniform(-2, 1), Uniform(0, 2); p=Inf) ≈ 2.0
         @test wasserstein(randn(MersenneTwister(11), 100), Normal(); p=Inf) == Inf
@@ -52,6 +56,8 @@
         # the initial quadrature pass merely because every empirical rank is a break.
         @test isfinite(wasserstein(randn(MersenneTwister(13), 10_000), Normal()))
         @test_throws ErrorException wasserstein(Uniform(0, 1), Uniform(3, 4); p=Inf, maxevals=64)
+        mix = MixtureModel([Normal(0, 1), Normal(5, 1)], [0.99, 0.01])
+        @test_throws ErrorException wasserstein(mix, Normal(); p=Inf)
     end
 
     @testset "transportmap / pushforward" begin
