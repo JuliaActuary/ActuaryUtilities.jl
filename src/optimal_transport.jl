@@ -77,6 +77,8 @@ For risks involving a distribution, the quantile integral is evaluated adaptivel
 evaluation budget scales with the number of empirical quantile segments; an
 explicit `maxevals` is a hard cap. If the requested tolerance cannot be verified,
 `wasserstein` throws rather than returning an unconverged approximation.
+For distributional `p=Inf`, this includes empirical-versus-bounded-distribution
+cases whose supremum is not certified within the evaluation budget.
 
 ## References
 - "Optimal Transport for Actuarial Science", Arthur Charpentier, 2026.
@@ -173,6 +175,12 @@ end
 
 function _wasserstein_infinity(a, b; rtol, atol, maxevals)
     _support_proves_infinite(a, b) && return Inf
+    alo, ahi = _support_bounds(a)
+    blo, bhi = _support_bounds(b)
+    bounded_supports = all(isfinite, (alo, ahi, blo, bhi))
+    endpoint_gap = zero(float(promote_type(typeof(alo), typeof(ahi), typeof(blo), typeof(bhi))))
+    isfinite(alo) && isfinite(blo) && (endpoint_gap = max(endpoint_gap, abs(alo - blo)))
+    isfinite(ahi) && isfinite(bhi) && (endpoint_gap = max(endpoint_gap, abs(ahi - bhi)))
     Qa, Qb = _quantile_fn(a), _quantile_fn(b)
     previous = -Inf
     stable = 0
@@ -181,10 +189,11 @@ function _wasserstein_infinity(a, b; rtol, atol, maxevals)
     n = 64
     budget = isnothing(maxevals) ? 100_000 : maxevals
     while evaluations + n - 1 <= budget
-        current = maximum(1:(n - 1)) do k
+        interior = maximum(1:(n - 1)) do k
             u = k / n
             abs(Qa(u) - Qb(u))
         end
+        current = max(endpoint_gap, interior)
         evaluations += n - 1
         !isfinite(current) && return Inf
         tolerance = max(atol, rtol * abs(current))
@@ -196,7 +205,7 @@ function _wasserstein_infinity(a, b; rtol, atol, maxevals)
         end
         if isfinite(previous) && current - previous > tolerance
             growing += 1
-            growing >= 8 && return Inf
+            growing >= 8 && !bounded_supports && return Inf
         else
             growing = 0
         end

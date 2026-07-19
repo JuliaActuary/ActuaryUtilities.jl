@@ -42,6 +42,8 @@
         @test wasserstein(Cauchy(), Cauchy(3, 1); p=1) ≈ 3.0
         @test wasserstein(Normal(), Normal(3, 1); p=Inf) ≈ 3.0
         @test wasserstein(Normal(), Normal(0, 2); p=Inf) == Inf
+        @test wasserstein(Uniform(0, 1), Uniform(0, 2); p=Inf) ≈ 1.0
+        @test wasserstein(Uniform(-2, 1), Uniform(0, 2); p=Inf) ≈ 2.0
         @test wasserstein(randn(MersenneTwister(11), 100), Normal(); p=Inf) == Inf
         # The empirical law is bounded, so its W₁ distance from a true Cauchy
         # law is infinite even when the observations themselves came from Cauchy.
