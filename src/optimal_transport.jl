@@ -69,6 +69,10 @@ julia> wasserstein(Normal(0, 1), Normal(0, 2); p=2) # same mean, |σ₁-σ₂|
 ```
 
 See also [`transportmap`](@ref), [`driftsignificance`](@ref), [`robustvalue`](@ref).
+
+## References
+- "Optimal Transport for Actuarial Science", Arthur Charpentier, 2026.
+  [⟨hal-05684645⟩](https://hal.science/hal-05684645)
 """
 function wasserstein(a, b; p::Real=1)
     p >= 1 || throw(ArgumentError("p must be ≥ 1, got $p"))

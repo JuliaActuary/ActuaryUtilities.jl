@@ -213,7 +213,10 @@ distributions**: how far apart two risks are, how a rank-preserving stress moves
 *every* measure at once, whether a quarter-over-quarter change is real, and how
 much a risk measure can move under model error. In one dimension OT is closed
 form (transport is just rank matching), so these tools need no solver — they are
-sorting and quantile arithmetic layered on the same `rm(risk)` interface.
+sorting and quantile arithmetic layered on the same `rm(risk)` interface. For a
+broad treatment of optimal transport in an actuarial context, see Charpentier
+(2026), ["Optimal Transport for Actuarial
+Science"](https://hal.science/hal-05684645) ⟨hal-05684645⟩.
 
 ### Distance between two risks — [`wasserstein`](@ref)
 
