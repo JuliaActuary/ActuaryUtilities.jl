@@ -4,6 +4,7 @@ import ..Distributions
 import ..StatsBase
 import ..RiskMeasures
 import ..RiskMeasures: RiskMeasure, CTE, VaR
+import ..QuadGK
 import Random
 import Statistics
 
@@ -30,10 +31,11 @@ function _quantile_fn(x::AbstractVector{<:Real})
     return u -> xs[clamp(ceil(Int, u * n), 1, n)]
 end
 
-_pnorm(diffs, p) = (Statistics.mean(abs.(diffs) .^ p))^(1 / p)
+_pnorm(diffs, p) = isinf(p) ? maximum(abs, diffs) :
+    (Statistics.mean(abs.(diffs) .^ p))^(1 / p)
 
 """
-    wasserstein(a, b; p=1)
+    wasserstein(a, b; p=1, rtol=sqrt(eps()), atol=0, maxevals=100_000)
 
 The `p`-Wasserstein (optimal transport) distance between two one-dimensional
 risks. Each of `a`, `b` may be a sample (`AbstractVector{<:Real}`) or a
@@ -70,13 +72,23 @@ julia> wasserstein(Normal(0, 1), Normal(0, 2); p=2) # same mean, |σ₁-σ₂|
 
 See also [`transportmap`](@ref), [`driftsignificance`](@ref), [`robustvalue`](@ref).
 
+For risks involving a distribution, the quantile integral is evaluated adaptively.
+`rtol`, `atol`, and `maxevals` control that calculation. If the requested
+tolerance cannot be verified, `wasserstein` throws rather than returning an
+unconverged approximation.
+
 ## References
 - "Optimal Transport for Actuarial Science", Arthur Charpentier, 2026.
   [⟨hal-05684645⟩](https://hal.science/hal-05684645)
 """
-function wasserstein(a, b; p::Real=1)
-    p >= 1 || throw(ArgumentError("p must be ≥ 1, got $p"))
-    _wasserstein(a, b, p)
+function wasserstein(a, b; p::Real=1, rtol::Real=sqrt(eps()),
+                     atol::Real=0, maxevals::Integer=100_000)
+    (p >= 1 && (isfinite(p) || p == Inf)) ||
+        throw(ArgumentError("p must be finite and ≥ 1, or Inf; got $p"))
+    (isfinite(rtol) && rtol >= 0) || throw(ArgumentError("rtol must be finite and nonnegative"))
+    (isfinite(atol) && atol >= 0) || throw(ArgumentError("atol must be finite and nonnegative"))
+    maxevals > 0 || throw(ArgumentError("maxevals must be positive"))
+    _wasserstein(a, b, p; rtol, atol, maxevals)
 end
 
 # both samples: exact in both cases. Equal sizes reduce to sorted point-by-point
@@ -85,7 +97,7 @@ end
 # (or an interpolated quantile) computes a different number — e.g. the true
 # W₂([0], [0,2]) is √2, while a size-2 midpoint grid through `Statistics.quantile`
 # gives √1.25.
-function _wasserstein(a::AbstractVector{<:Real}, b::AbstractVector{<:Real}, p)
+function _wasserstein(a::AbstractVector{<:Real}, b::AbstractVector{<:Real}, p; kwargs...)
     (isempty(a) || isempty(b)) &&
         throw(ArgumentError("empty sample: wasserstein needs at least one observation in each of `a`, `b`"))
     na, nb = length(a), length(b)
@@ -96,20 +108,92 @@ function _wasserstein(a::AbstractVector{<:Real}, b::AbstractVector{<:Real}, p)
     acc = 0.0
     while i <= na && j <= nb
         u = min(i / na, j / nb)
-        acc += (u - prev) * abs(as[i] - bs[j])^p
+        gap = abs(as[i] - bs[j])
+        acc = isinf(p) ? max(acc, gap) : acc + (u - prev) * gap^p
         prev = u
         i / na <= u && (i += 1)
         j / nb <= u && (j += 1)
     end
-    return acc^(1 / p)
+    return isinf(p) ? acc : acc^(1 / p)
 end
 
-# at least one argument is a distribution: integrate the quantile gap on a grid
-function _wasserstein(a, b, p)
-    n = 4096
-    us = ((1:n) .- 0.5) ./ n
+# A divergent endpoint integral has tail-shell masses that do not tend to zero.
+# This deliberately conservative detector only reports divergence when the last
+# five dyadic shells are essentially flat; ambiguous non-convergence remains an
+# error rather than being converted to a finite number or to Inf.
+function _divergent_quantile_tail(f)
+    shells = map(12:20) do k
+        ε = exp2(-k)
+        width = ε / 2
+        width * (f(3ε / 4) + f(1 - 3ε / 4))
+    end
+    tail = @view shells[end-4:end]
+    return all(isfinite, tail) && minimum(tail) > 0 && minimum(tail) / maximum(tail) > 0.98
+end
+
+_quantile_breaks(::Distributions.UnivariateDistribution) = Float64[]
+_quantile_breaks(x::AbstractVector) = collect((1:(length(x) - 1)) ./ length(x))
+
+function _wasserstein_finite(a, b, p; rtol, atol, maxevals)
     Qa, Qb = _quantile_fn(a), _quantile_fn(b)
-    _pnorm([Qa(u) - Qb(u) for u in us], p)
+    f(u) = abs(Qa(u) - Qb(u))^p
+    # Empirical quantiles jump at i/n. Supplying those known discontinuities as
+    # interval boundaries lets QuadGK spend its error budget on the continuous
+    # distribution quantile rather than repeatedly rediscovering every rank.
+    points = sort!(unique!([0.0; 0.5; _quantile_breaks(a); _quantile_breaks(b); 1.0]))
+    integral, err = QuadGK.quadgk(f, points...; rtol, atol, maxevals)
+    tolerance = max(atol, rtol * abs(integral))
+    if !isfinite(integral)
+        return Inf
+    elseif err <= tolerance
+        return integral^(1 / p)
+    elseif _divergent_quantile_tail(f)
+        return Inf
+    end
+    throw(ErrorException("wasserstein quantile integration did not converge: estimated error $err exceeds tolerance $tolerance"))
+end
+
+# Distributional W∞ is the supremum quantile gap. Successively refined midpoint
+# grids give monotone lower bounds; a finite answer is returned only after several
+# refinements agree. Persistent growth is reported as Inf only when clearly
+# unbounded, otherwise exhaustion is a loud convergence error.
+function _wasserstein_infinity(a, b; rtol, atol, maxevals)
+    Qa, Qb = _quantile_fn(a), _quantile_fn(b)
+    previous = -Inf
+    stable = 0
+    growing = 0
+    evaluations = 0
+    n = 64
+    while evaluations + n <= maxevals
+        current = maximum(1:n) do k
+            u = (k - 0.5) / n
+            abs(Qa(u) - Qb(u))
+        end
+        evaluations += n
+        !isfinite(current) && return Inf
+        tolerance = max(atol, rtol * abs(current))
+        if current - previous <= tolerance
+            stable += 1
+            stable >= 3 && return current
+        else
+            stable = 0
+        end
+        if isfinite(previous) && previous > 0 && current / previous > 1.25
+            growing += 1
+            growing >= 4 && return Inf
+        else
+            growing = 0
+        end
+        previous = current
+        n *= 2
+    end
+    throw(ErrorException("wasserstein W∞ supremum search did not converge within maxevals=$maxevals"))
+end
+
+# At least one argument is a distribution: use verified adaptive computation.
+function _wasserstein(a, b, p; rtol, atol, maxevals)
+    isinf(p) ? _wasserstein_infinity(a, b; rtol, atol, maxevals) :
+        _wasserstein_finite(a, b, p; rtol, atol, maxevals)
 end
 
 """

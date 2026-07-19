@@ -23,6 +23,9 @@
         # quantiles would give √1.25) and W₁ = 1.
         @test wasserstein([0], [0, 2]; p=2) ≈ sqrt(2)
         @test wasserstein([0], [0, 2]; p=1) ≈ 1.0
+        @test wasserstein([0], [0, 2]; p=Inf) ≈ 2.0
+        @test wasserstein([0.0, 10.0], [0.0, 0.0]; p=Inf) ≈ 10.0
+        @test wasserstein([0.0, 0.0], [0.0, 0.0]; p=Inf) == 0.0
         # hand-integrated: segments (0,.2]:|1-10| (.2,.4]:|2-10| (.4,.5]:|3-10|
         # (.5,.6]:|3-20| (.6,.8]:|4-20| (.8,1]:|5-20| ⇒ W₁ = 12
         @test wasserstein([1, 2, 3, 4, 5], [10, 20]) ≈ 12.0
@@ -32,6 +35,13 @@
         # empty samples fail loudly rather than returning NaN
         @test_throws ArgumentError wasserstein(Float64[], [1.0, 2.0])
         @test_throws ArgumentError wasserstein([1.0, 2.0], Float64[])
+
+        # Distribution forms use adaptive quantile integration and distinguish a
+        # genuinely divergent moment from tail cancellation between two laws.
+        @test wasserstein(Cauchy(), Dirac(0.0); p=1) == Inf
+        @test wasserstein(Cauchy(), Cauchy(3, 1); p=1) ≈ 3.0
+        @test wasserstein(Normal(), Normal(3, 1); p=Inf) ≈ 3.0
+        @test_throws ErrorException wasserstein(Normal(), Normal(3, 1); p=Inf, maxevals=64)
     end
 
     @testset "transportmap / pushforward" begin
