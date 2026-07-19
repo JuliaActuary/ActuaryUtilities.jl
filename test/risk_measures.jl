@@ -8,6 +8,14 @@
     @test_throws AssertionError CTE(1.5)
     @test_throws AssertionError WangTransform(0.0)
     @test_throws AssertionError WangTransform(1.0)
+    for bad in (0, -1, Inf, NaN)
+        @test_throws ArgumentError DualPower(bad)
+        @test_throws ArgumentError ProportionalHazard(bad)
+    end
+    @test DualPower(2).v == 2
+    @test ProportionalHazard(2).y == 2
+    @test DualPower{Float64}(2).v === 2.0
+    @test ProportionalHazard{Float64}(2).y === 2.0
 
     # https://utstat.utoronto.ca/sam/coorses/act466/rmn.pdf pg 17
     @test RiskMeasures.g(WangTransform(cdf(Normal(), 1)), 1 - cdf(LogNormal(0, 1), 12)) ≈ 0.06879 atol = 1e-5
@@ -102,4 +110,3 @@
     @test CTE(0.99)(L) ≈ 321.8 atol = 1e-1
 
 end
-

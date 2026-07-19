@@ -189,6 +189,12 @@ end
     # a silent mismatch must not read out of bounds (or zip-truncate)
     @test_throws DimensionMismatch duration(0.03, [1.0, 2.0, 3.0], [1.0, 2.0])
     @test_throws DimensionMismatch convexity(0.03, [1.0, 2.0, 3.0], 1:2)
+    curve = FM.Yield.Constant(0.03)
+    kr = KeyRates([1.0, 2.0, 3.0])
+    @test_throws DimensionMismatch sensitivities(kr, curve, [1.0, 2.0, 3.0], [1.0, 2.0])
+    # Extra time positions represent zero cashflows and are intentionally harmless.
+    @test sensitivities(kr, curve, [1.0, 2.0], [1.0, 2.0, 3.0]) ==
+          sensitivities(kr, curve, [1.0, 2.0], [1.0, 2.0])
 end
 
 @testset "locked_floater requires whole coupon periods on the forward leg" begin

@@ -174,7 +174,12 @@ DualPower(v) returns a functor which can then be called on a risk distribution.
 """
 struct DualPower{T} <: RiskMeasure
     v::T
+    function DualPower(v::T) where {T}
+        (isfinite(v) && v > 0) || throw(ArgumentError("v must be finite and strictly positive, got $v"))
+        return new{T}(v)
+    end
 end
+DualPower{T}(v) where {T} = DualPower(convert(T, v))
 g(rm::DualPower, x) = 1 - (1 - x)^rm.v
 
 """
@@ -199,7 +204,12 @@ julia> rm(rand(1000))
 """
 struct ProportionalHazard{T} <: RiskMeasure
     y::T
+    function ProportionalHazard(y::T) where {T}
+        (isfinite(y) && y > 0) || throw(ArgumentError("y must be finite and strictly positive, got $y"))
+        return new{T}(y)
+    end
 end
+ProportionalHazard{T}(y) where {T} = ProportionalHazard(convert(T, y))
 g(rm::ProportionalHazard, x) = x^(1 / rm.y)
 
 function (rm::RiskMeasure)(risk)
