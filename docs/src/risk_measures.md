@@ -205,11 +205,169 @@ let
 end
 ```
 
+## Optimal Transport & Robustness
+
+A risk measure collapses a whole loss distribution to a single number. Optimal
+transport (OT) supplies the complementary half — the **geometry *between*
+distributions**: how far apart two risks are, how a rank-preserving stress moves
+*every* measure at once, whether a quarter-over-quarter change is real, and how
+much a risk measure can move under model error. In one dimension OT is closed
+form (transport is just rank matching), so these tools need no solver — they are
+sorting and quantile arithmetic layered on the same `rm(risk)` interface. For a
+broad treatment of optimal transport in an actuarial context, see Charpentier
+(2026), ["Optimal Transport for Actuarial
+Science"](https://hal.science/hal-05684645) ⟨hal-05684645⟩.
+
+### Distance between two risks — [`wasserstein`](@ref)
+
+Where a risk measure says *where* a book sits, the Wasserstein distance says *how
+far apart* two books are, in the units of the loss and aware of the whole shape:
+
+```julia
+a = rand(LogNormal(log(1000) - 0.18, 0.6), 100_000)
+b = rand(LogNormal(log(1150) - 0.32, 0.8), 100_000)   # higher mean + fatter tail
+
+wasserstein(a, b)          # ≈ 210   average claim displacement (W₁, in \$)
+wasserstein(a, b; p=2)     # ≈ 480   W₂ penalizes the tail move more
+```
+
+It also accepts `Distributions.UnivariateDistribution`s directly, e.g.
+`wasserstein(Normal(0, 1), Normal(3, 1)) == 3`.
+
+### One stress drives the whole panel — [`transportmap`](@ref) / [`pushforward`](@ref)
+
+Rather than stressing each measure separately, define **one** rank-preserving
+transport map, push the book through it, and recompute every measure consistently:
+
+```julia
+base_law = LogNormal(log(1000) - 0.18, 0.6)                    # the assumed base
+T        = transportmap(base_law, LogNormal(log(1300) - 0.32, 0.8))  # → target
+sample   = rand(base_law, 100_000)
+stress   = pushforward(sample, T)
+
+for rm in (Expectation(), VaR(0.95), CTE(0.95), VaR(0.995), CTE(0.995))
+    println(rm, ": ", round(rm(sample)), " → ", round(rm(stress)))
+end
+```
+
+The map is auditable ("we revalued each percentile") rather than a reshuffling of
+who is risky.
+
+### Distributionally robust risk measures — [`robustvalue`](@ref)
+
+`robustvalue(rm, sample; radius=r)` is a robust version of `rm` over a
+Wasserstein ball of radius `r` — a governance dial in the units of the loss for
+"how bad could this number be if my book is off by up to `r` of transport cost?"
+For `CTE(α)` it is the **exact worst case**, attaining the sharp stability bound
+``|\mathrm{CTE}_\alpha(\mu)-\mathrm{CTE}_\alpha(\nu)| \le (1-\alpha)^{-1/p}\,W_p``;
+for every other measure it evaluates `rm` on a budget-exact adverse scenario
+inside the ball, which is a **lower bound** on the true worst case — a
+distinction that matters if the number feeds capital or model-risk governance:
+
+```julia
+base = rand(LogNormal(log(1000) - 0.18, 0.6), 200_000)
+
+CTE(0.95)(base),  robustvalue(CTE(0.95),  base; radius=250)   # ≈ (2980, 4100)
+CTE(0.995)(base), robustvalue(CTE(0.995), base; radius=250)   # ≈ (4890, 8430)
+```
+
+Same \$250 radius, a larger loading deeper in the tail — deep-tail capital is
+intrinsically more fragile to model error. Because `robustvalue` takes the risk
+measure as an argument it works for `VaR`, `WangTransform`, or any custom
+`RiskMeasure` (pass `tail` for measures without a natural tail level).
+
+!!! note "VaR is fragile, CTE is not"
+    These tools also expose a *structural* fact about the measures. Where the loss
+    density is thin near the quantile, a tiny transport move (small `wasserstein`)
+    can swing `VaR` by a large amount, while `CTE` — a tail *average* — obeys the
+    Lipschitz bound above. For capital that must be stable under model or portfolio
+    perturbation, prefer `CTE`; if you must report `VaR`, check the density near the
+    quantile.
+
+### Is a change real? — [`driftsignificance`](@ref)
+
+A risk number that moved quarter-to-quarter may just be sampling noise.
+`driftsignificance` compares the observed `wasserstein` against the distances
+produced by *random* re-splits of the pooled data, so only moves that clear the
+noise floor are flagged:
+
+```julia
+q1 = rand(LogNormal(log(1000) - 0.18, 0.60), 4_000)   # this quarter
+q2 = rand(LogNormal(log(1030) - 0.19, 0.62), 4_000)   # next quarter
+
+ds = driftsignificance(q1, q2)
+ds.distance, ds.threshold, ds.significant             # e.g. (≈50, ≈28, true)
+```
+
+!!! warning "Three cautions"
+    (1) A distance or robustness number is only meaningful *with* its ground cost —
+    absolute \$, log/relative, or tail-weighted — so report the cost alongside.
+    (2) These are distributional statements, not per-policyholder causal ones.
+    (3) With atoms/ties (discrete losses, curtate lifetimes) the quantile
+    convention matters. This module uses the inverse empirical cdf (a step
+    function) throughout, matching the convention of `VaR`/`CTE` on samples, so
+    the OT layer and the risk measures agree at ties; keep that in mind when
+    comparing against tools that interpolate quantiles.
+
+### Discussion: how to read these numbers, and what is deliberately left out
+
+Every verb above is *objective* — sorting and quantile arithmetic with no priors,
+no tuning knobs, and no solver. That is what keeps them auditable and exactly
+reproducible, and it is a deliberate scope choice. It also means each answers a
+narrower question than it might first appear, and [`driftsignificance`](@ref) is
+the one most worth thinking through before you lean on it.
+
+**A permutation test is a calibration, not a probability that the book changed.**
+`driftsignificance` pools the two samples, re-splits them at random many times, and
+asks how large the observed [`wasserstein`](@ref) distance is relative to the
+distances those random re-splits produce. Its implied null hypothesis is that the
+two periods are drawn from *exactly the same* law. In practice that null is never
+literally true — books always drift a little — so a "significant" result really
+tells you the samples were large enough to detect *some* change, not that the
+change is *material*. The `pvalue` is `P(distance this large | no drift)`, which is
+easy to misread as `P(drift is real | data)`; they are not the same number, and in
+a governance setting the misread is the default. The noise floor exists for a
+concrete reason: the plug-in Wasserstein distance is biased upward in finite
+samples — `wasserstein(x, y)` between two samples of the *same* law is positive,
+not zero — so the permutation floor is best understood as a bias correction for
+that estimator rather than as a hypothesis-testing ritual.
+
+**What a subjective (Bayesian) treatment would add — and why it is future work.**
+The question a capital or experience committee usually wants answered is not "is
+there any drift?" but "how big is the drift, with what uncertainty, and is it past
+a materiality threshold?" — a statement about *effect size*, not a point-null
+rejection. A Bayesian approach targets that directly: place a model (or a
+nonparametric Bayesian bootstrap — Dirichlet weights on the observations, for which
+the weighted one-dimensional Wasserstein distance is still closed form) over each
+period and report a *posterior* over the drift distance, from which a credible
+interval and `P(distance > materiality)` follow immediately. It would also let you
+borrow information across a history of quarters and handle the many-blocks,
+many-quarters multiplicity that makes any fixed-threshold flag trip on a
+predictable fraction of stable books. These methods are intentionally **not** part
+of the current release: they introduce priors and modelling choices that belong in
+a user's hands rather than baked into a library primitive, and the permutation test
+and a Bayesian posterior answer genuinely different questions (a calibration
+reference versus effect-size uncertainty). Treat the boolean `significant` flag as
+a screen, and — as the docstring warns — pin a seeded `rng` for any figure of
+record.
+
+**Multivariate risks need a solver.** Everything here is one-dimensional, where
+optimal transport is closed form (transport *is* rank matching). Genuinely joint
+risks — mortality × lapse, equity × rates, several lines of business at once — are
+not: in more than one dimension the transport map is no longer a sorted matching
+and requires an actual OT solve. That capability is a natural future extension
+(dispatched on multivariate inputs, lit up when a package such as
+`OptimalTransport.jl` is loaded), and it is a real addition rather than a
+re-wrapping of the exact 1-D routines. Note that [`robustvalue`](@ref) does **not**
+generalize for free: its "shift the tail mass outward by `Δ`" form is
+intrinsically a one-dimensional tail result, and the multivariate worst case
+over a Wasserstein ball is a separate optimization problem.
+
 ## API
 
 ### Exported API
 ```@autodocs
-Modules = [ActuaryUtilities.RiskMeasures]
+Modules = [ActuaryUtilities.RiskMeasures, ActuaryUtilities.OptimalTransport]
 Private = false
 ```
 
