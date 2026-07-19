@@ -35,7 +35,7 @@ _pnorm(diffs, p) = isinf(p) ? maximum(abs, diffs) :
     (Statistics.mean(abs.(diffs) .^ p))^(1 / p)
 
 """
-    wasserstein(a, b; p=1, rtol=sqrt(eps()), atol=0, maxevals=100_000)
+    wasserstein(a, b; p=1, rtol=1e-6, atol=0, maxevals=nothing)
 
 The `p`-Wasserstein (optimal transport) distance between two one-dimensional
 risks. Each of `a`, `b` may be a sample (`AbstractVector{<:Real}`) or a
@@ -73,21 +73,22 @@ julia> wasserstein(Normal(0, 1), Normal(0, 2); p=2) # same mean, |σ₁-σ₂|
 See also [`transportmap`](@ref), [`driftsignificance`](@ref), [`robustvalue`](@ref).
 
 For risks involving a distribution, the quantile integral is evaluated adaptively.
-`rtol`, `atol`, and `maxevals` control that calculation. If the requested
-tolerance cannot be verified, `wasserstein` throws rather than returning an
-unconverged approximation.
+`rtol`, `atol`, and `maxevals` control that calculation. By default the
+evaluation budget scales with the number of empirical quantile segments; an
+explicit `maxevals` is a hard cap. If the requested tolerance cannot be verified,
+`wasserstein` throws rather than returning an unconverged approximation.
 
 ## References
 - "Optimal Transport for Actuarial Science", Arthur Charpentier, 2026.
   [⟨hal-05684645⟩](https://hal.science/hal-05684645)
 """
-function wasserstein(a, b; p::Real=1, rtol::Real=sqrt(eps()),
-                     atol::Real=0, maxevals::Integer=100_000)
+function wasserstein(a, b; p::Real=1, rtol::Real=1.0e-6,
+                     atol::Real=0, maxevals::Union{Nothing,Integer}=nothing)
     (p >= 1 && (isfinite(p) || p == Inf)) ||
         throw(ArgumentError("p must be finite and ≥ 1, or Inf; got $p"))
     (isfinite(rtol) && rtol >= 0) || throw(ArgumentError("rtol must be finite and nonnegative"))
     (isfinite(atol) && atol >= 0) || throw(ArgumentError("atol must be finite and nonnegative"))
-    maxevals > 0 || throw(ArgumentError("maxevals must be positive"))
+    (isnothing(maxevals) || maxevals > 0) || throw(ArgumentError("maxevals must be positive"))
     _wasserstein(a, b, p; rtol, atol, maxevals)
 end
 
@@ -122,7 +123,7 @@ end
 # five dyadic shells are essentially flat; ambiguous non-convergence remains an
 # error rather than being converted to a finite number or to Inf.
 function _divergent_quantile_tail(f)
-    shells = map(12:20) do k
+    shells = map(20:30) do k
         ε = exp2(-k)
         width = ε / 2
         width * (f(3ε / 4) + f(1 - 3ε / 4))
@@ -141,7 +142,8 @@ function _wasserstein_finite(a, b, p; rtol, atol, maxevals)
     # interval boundaries lets QuadGK spend its error budget on the continuous
     # distribution quantile rather than repeatedly rediscovering every rank.
     points = sort!(unique!([0.0; 0.5; _quantile_breaks(a); _quantile_breaks(b); 1.0]))
-    integral, err = QuadGK.quadgk(f, points...; rtol, atol, maxevals)
+    budget = isnothing(maxevals) ? max(100_000, 30 * (length(points) - 1)) : maxevals
+    integral, err = QuadGK.quadgk(f, points; rtol, atol, maxevals=budget)
     tolerance = max(atol, rtol * abs(integral))
     if !isfinite(integral)
         return Inf
@@ -153,23 +155,37 @@ function _wasserstein_finite(a, b, p; rtol, atol, maxevals)
     throw(ErrorException("wasserstein quantile integration did not converge: estimated error $err exceeds tolerance $tolerance"))
 end
 
-# Distributional W∞ is the supremum quantile gap. Successively refined midpoint
-# grids give monotone lower bounds; a finite answer is returned only after several
-# refinements agree. Persistent growth is reported as Inf only when clearly
-# unbounded, otherwise exhaustion is a loud convergence error.
+# Distributional W∞ is the supremum quantile gap. The k/n grids are nested under
+# doubling, so their maxima are monotone lower bounds. A finite answer is returned
+# only after several refinements agree; unresolved tails fail loudly.
+_support_bounds(d::Distributions.UnivariateDistribution) = (minimum(d), maximum(d))
+_support_bounds(x::AbstractVector) = extrema(x)
+
+function _support_proves_infinite(a, b)
+    alo, ahi = _support_bounds(a)
+    blo, bhi = _support_bounds(b)
+    return xor(isfinite(alo), isfinite(blo)) || xor(isfinite(ahi), isfinite(bhi))
+end
+
+function _wasserstein_infinity(a::Distributions.Normal, b::Distributions.Normal; kwargs...)
+    a.σ == b.σ ? abs(a.μ - b.μ) : Inf
+end
+
 function _wasserstein_infinity(a, b; rtol, atol, maxevals)
+    _support_proves_infinite(a, b) && return Inf
     Qa, Qb = _quantile_fn(a), _quantile_fn(b)
     previous = -Inf
     stable = 0
     growing = 0
     evaluations = 0
     n = 64
-    while evaluations + n <= maxevals
-        current = maximum(1:n) do k
-            u = (k - 0.5) / n
+    budget = isnothing(maxevals) ? 100_000 : maxevals
+    while evaluations + n - 1 <= budget
+        current = maximum(1:(n - 1)) do k
+            u = k / n
             abs(Qa(u) - Qb(u))
         end
-        evaluations += n
+        evaluations += n - 1
         !isfinite(current) && return Inf
         tolerance = max(atol, rtol * abs(current))
         if current - previous <= tolerance
@@ -178,16 +194,16 @@ function _wasserstein_infinity(a, b; rtol, atol, maxevals)
         else
             stable = 0
         end
-        if isfinite(previous) && previous > 0 && current / previous > 1.25
+        if isfinite(previous) && current - previous > tolerance
             growing += 1
-            growing >= 4 && return Inf
+            growing >= 8 && return Inf
         else
             growing = 0
         end
         previous = current
         n *= 2
     end
-    throw(ErrorException("wasserstein W∞ supremum search did not converge within maxevals=$maxevals"))
+    throw(ErrorException("wasserstein W∞ supremum search did not converge within maxevals=$budget"))
 end
 
 # At least one argument is a distribution: use verified adaptive computation.
@@ -348,6 +364,10 @@ loss. What is returned depends on the measure:
   `radius` in ``W_p``. This is a **lower bound** on the true worst case over the
   ball, not the supremum itself — treat it as a principled adverse scenario, not
   a proven maximum.
+
+Because the exact CTE branch applies only when `tail == rm.α`, changing `tail`
+across that equality switches between the atom-splitting exact bound and the
+whole-atom adverse scenario; the returned value need not be continuous there.
 
 The factor `(1 - tail)^(-1/p)` is the price of tail focus: deeper-tail capital is
 intrinsically more fragile to model error, so the same `radius` buys a larger

@@ -952,7 +952,7 @@ end
 # role positions.
 function _ncurve_analytic(curves::NamedTuple, tenors::AbstractVector,
                               cfs::AbstractVector, times; order = 1)
-    length(times) >= length(cfs) || throw(
+    checkbounds(Bool, times, eachindex(cfs)) || throw(
         DimensionMismatch("times must contain at least one entry for each cashflow")
     )
     L = length(curves)

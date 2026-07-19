@@ -179,6 +179,7 @@ struct DualPower{T} <: RiskMeasure
         return new{T}(v)
     end
 end
+DualPower{T}(v) where {T} = DualPower(convert(T, v))
 g(rm::DualPower, x) = 1 - (1 - x)^rm.v
 
 """
@@ -208,6 +209,7 @@ struct ProportionalHazard{T} <: RiskMeasure
         return new{T}(y)
     end
 end
+ProportionalHazard{T}(y) where {T} = ProportionalHazard(convert(T, y))
 g(rm::ProportionalHazard, x) = x^(1 / rm.y)
 
 function (rm::RiskMeasure)(risk)

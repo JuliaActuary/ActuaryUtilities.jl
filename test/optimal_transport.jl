@@ -41,7 +41,15 @@
         @test wasserstein(Cauchy(), Dirac(0.0); p=1) == Inf
         @test wasserstein(Cauchy(), Cauchy(3, 1); p=1) ≈ 3.0
         @test wasserstein(Normal(), Normal(3, 1); p=Inf) ≈ 3.0
-        @test_throws ErrorException wasserstein(Normal(), Normal(3, 1); p=Inf, maxevals=64)
+        @test wasserstein(Normal(), Normal(0, 2); p=Inf) == Inf
+        @test wasserstein(randn(MersenneTwister(11), 100), Normal(); p=Inf) == Inf
+        # The empirical law is bounded, so its W₁ distance from a true Cauchy
+        # law is infinite even when the observations themselves came from Cauchy.
+        @test wasserstein(rand(MersenneTwister(12), Cauchy(), 5_000), Cauchy()) == Inf
+        # Scenario counts used in practice must not exhaust the default budget on
+        # the initial quadrature pass merely because every empirical rank is a break.
+        @test isfinite(wasserstein(randn(MersenneTwister(13), 10_000), Normal()))
+        @test_throws ErrorException wasserstein(Uniform(0, 1), Uniform(3, 4); p=Inf, maxevals=64)
     end
 
     @testset "transportmap / pushforward" begin

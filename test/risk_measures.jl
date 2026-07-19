@@ -14,6 +14,8 @@
     end
     @test DualPower(2).v == 2
     @test ProportionalHazard(2).y == 2
+    @test DualPower{Float64}(2).v === 2.0
+    @test ProportionalHazard{Float64}(2).y === 2.0
 
     # https://utstat.utoronto.ca/sam/coorses/act466/rmn.pdf pg 17
     @test RiskMeasures.g(WangTransform(cdf(Normal(), 1)), 1 - cdf(LogNormal(0, 1), 12)) ≈ 0.06879 atol = 1e-5
