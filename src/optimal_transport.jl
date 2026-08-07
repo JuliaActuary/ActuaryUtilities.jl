@@ -5,10 +5,9 @@ import ..StatsBase
 import ..RiskMeasures
 import ..RiskMeasures: RiskMeasure, CTE, VaR
 import ..QuadGK
-import Random
 import Statistics
 
-export wasserstein, transportmap, pushforward, driftsignificance, robustvalue
+export wasserstein, transportmap, pushforward, robustvalue
 
 # ── One-dimensional optimal transport is closed form ────────────────────────
 #
@@ -70,7 +69,7 @@ julia> wasserstein(Normal(0, 1), Normal(0, 2); p=2) # same mean, |σ₁-σ₂|
 1.0
 ```
 
-See also [`transportmap`](@ref), [`driftsignificance`](@ref), [`robustvalue`](@ref).
+See also [`transportmap`](@ref), [`robustvalue`](@ref).
 
 For risks involving a distribution, the quantile integral is evaluated adaptively.
 `rtol`, `atol`, and `maxevals` control that calculation. By default the
@@ -287,58 +286,6 @@ Apply a transport map `T` (e.g. from [`transportmap`](@ref)) to every element of
 `sample`, returning the transported (stressed) sample. Equivalent to `T.(sample)`.
 """
 pushforward(sample, T) = map(T, sample)
-
-"""
-    driftsignificance(a, b; p=1, nperm=1000, level=0.9, rng=Random.default_rng())
-
-Test whether the Wasserstein distance between samples `a` and `b` is larger than
-sampling noise alone would produce. The two samples are pooled and repeatedly
-re-split at random; the observed [`wasserstein`](@ref)`(a, b; p)` is then compared
-against this permutation distribution. A raw distance is meaningless without such
-a reference — otherwise ordinary sampling wiggle is mistaken for real drift.
-
-Returns a `NamedTuple` `(; distance, threshold, pvalue, significant)`:
-
-- `distance`  — the observed `wasserstein(a, b; p)`
-- `threshold` — the `level` quantile of the permuted distances (the noise floor)
-- `pvalue`    — fraction of permuted distances ≥ `distance` (add-one smoothed)
-- `significant` — `distance > threshold` (equivalently, `pvalue < 1 - level` up to
-  add-one smoothing and ties)
-
-!!! warning "Reproducibility for decisions of record"
-    The permutation floor is stochastic. With the default
-    `rng = Random.default_rng()` the `pvalue`, `threshold`, and — for a borderline
-    move — the `significant` flag will differ from run to run on identical data.
-    For any governance/reporting decision, pass an explicitly seeded `rng` (e.g.
-    `rng = MersenneTwister(seed)`) so the result is auditable and reproducible.
-
-## Example
-
-```julia-repl
-julia> using Random
-
-julia> a = randn(MersenneTwister(1), 2_000); b = randn(MersenneTwister(2), 2_000) .+ 1;
-
-julia> ds = driftsignificance(a, b; nperm=500, rng=MersenneTwister(42));
-
-julia> ds.significant   # a full-σ shift clears the noise floor
-true
-```
-"""
-function driftsignificance(a::AbstractVector{<:Real}, b::AbstractVector{<:Real};
-    p::Real=1, nperm::Integer=1000, level::Real=0.9, rng=Random.default_rng())
-    obs = wasserstein(a, b; p)
-    pool = vcat(collect(a), collect(b))
-    na = length(a)
-    idx = collect(eachindex(pool))
-    perm = map(1:nperm) do _
-        Random.shuffle!(rng, idx)
-        wasserstein(pool[idx[1:na]], pool[idx[na+1:end]]; p)
-    end
-    threshold = Statistics.quantile(perm, level)
-    pvalue = (count(>=(obs), perm) + 1) / (nperm + 1)
-    return (; distance=obs, threshold, pvalue, significant=obs > threshold)
-end
 
 # the natural tail level of a risk measure, where one exists
 _taillevel(rm::CTE) = rm.α
