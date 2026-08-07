@@ -159,23 +159,4 @@
         @test_throws ArgumentError robustvalue(CTE(0.95), Float64[]; radius=100)
     end
 
-    @testset "driftsignificance" begin
-        # a clear one-σ shift clears the permutation noise floor
-        a = randn(MersenneTwister(1), 2_000)
-        b = randn(MersenneTwister(2), 2_000) .+ 1
-        ds = driftsignificance(a, b; nperm=400, rng=MersenneTwister(42))
-        @test ds.distance ≈ wasserstein(a, b)
-        @test ds.significant
-        @test ds.threshold ≥ 0
-        @test 0 < ds.pvalue ≤ 1
-        @test ds.pvalue < 0.05
-
-        # two same-law samples: the observed distance sits near the noise floor,
-        # so it should not be flagged as material drift
-        c = randn(MersenneTwister(3), 2_000)
-        d = randn(MersenneTwister(4), 2_000)
-        ds0 = driftsignificance(c, d; nperm=400, rng=MersenneTwister(7))
-        @test !ds0.significant
-    end
-
 end

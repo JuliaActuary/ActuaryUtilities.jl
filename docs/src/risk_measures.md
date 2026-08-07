@@ -284,20 +284,67 @@ measure as an argument it works for `VaR`, `WangTransform`, or any custom
     perturbation, prefer `CTE`; if you must report `VaR`, check the density near the
     quantile.
 
-### Is a change real? — [`driftsignificance`](@ref)
+### Is a change real? — a worked example (deliberately not API)
 
-A risk number that moved quarter-to-quarter may just be sampling noise.
-`driftsignificance` compares the observed `wasserstein` against the distances
-produced by *random* re-splits of the pooled data, so only moves that clear the
-noise floor are flagged:
+A risk number that moved quarter-to-quarter may just be sampling noise. Deciding
+whether the move is *real* is a modelling judgement — the test level, the prior,
+and the materiality threshold all belong in your hands, not baked into a library
+primitive — so this package ships the distance primitive ([`wasserstein`](@ref))
+and leaves the drift check as a few lines of user code. Both standard treatments
+fit in a screenful.
+
+**Frequentist screen (permutation test).** Pool the two samples and re-split them
+at random many times: the re-split distances are what "no drift" looks like at
+your sample size, and only an observed distance that clears that noise floor is
+worth escalating. Seed the `rng` — the floor is stochastic, and a figure of
+record must be reproducible:
 
 ```julia
+using Random, Statistics
+
 q1 = rand(LogNormal(log(1000) - 0.18, 0.60), 4_000)   # this quarter
 q2 = rand(LogNormal(log(1030) - 0.19, 0.62), 4_000)   # next quarter
 
-ds = driftsignificance(q1, q2)
-ds.distance, ds.threshold, ds.significant             # e.g. (≈50, ≈28, true)
+function drift_permutation(a, b; p=1, nperm=1000, level=0.9, rng=MersenneTwister(2026))
+    observed = wasserstein(a, b; p)
+    pool, na = vcat(a, b), length(a)
+    resplit = map(1:nperm) do _
+        s = shuffle(rng, pool)
+        wasserstein(view(s, 1:na), view(s, na+1:lastindex(s)); p)
+    end
+    (; observed,
+        threshold=quantile(resplit, level),                     # the noise floor
+        pvalue=(count(>=(observed), resplit) + 1) / (nperm + 1))
+end
+
+drift_permutation(q1, q2)   # e.g. (observed ≈ 50, threshold ≈ 28, pvalue ≈ 0.001)
 ```
+
+**Bayesian effect size (Bayesian bootstrap).** The committee question is usually
+not "is there *any* drift?" but "how big is it, and is it past materiality?" —
+an effect-size statement. Resample each period (multinomial resampling
+approximates the Dirichlet-weighted Bayesian bootstrap of Rubin, 1981) to get a
+posterior over the drift distance, then read off a credible interval and the
+probability the drift exceeds a materiality threshold:
+
+```julia
+function drift_posterior(a, b; p=1, ndraws=1000, rng=MersenneTwister(2026))
+    map(1:ndraws) do _
+        wasserstein(rand(rng, a, length(a)), rand(rng, b, length(b)); p)
+    end
+end
+
+post = drift_posterior(q1, q2)
+quantile(post, [0.05, 0.5, 0.95])   # credible band for the drift, in \$
+mean(post .> 40)                    # P(drift > \$40 materiality) — the governance question
+```
+
+The two answer different questions — "could this be noise?" versus "how big is
+it, with what uncertainty?" — and a governance process often wants the
+permutation screen first and the effect-size statement for anything that passes.
+One caveat shared by both: the plug-in Wasserstein distance is biased upward in
+finite samples (two samples of the *same* law have positive distance), so read
+the posterior against the permutation floor rather than against zero.
 
 !!! warning "Three cautions"
     (1) A distance or robustness number is only meaningful *with* its ground cost —
@@ -311,45 +358,40 @@ ds.distance, ds.threshold, ds.significant             # e.g. (≈50, ≈28, true
 
 ### Discussion: how to read these numbers, and what is deliberately left out
 
-Every verb above is *objective* — sorting and quantile arithmetic with no priors,
-no tuning knobs, and no solver. That is what keeps them auditable and exactly
-reproducible, and it is a deliberate scope choice. It also means each answers a
-narrower question than it might first appear, and [`driftsignificance`](@ref) is
-the one most worth thinking through before you lean on it.
+Every exported verb above is *objective* — sorting and quantile arithmetic with
+no priors, no tuning knobs, and no solver. That is what keeps them auditable and
+exactly reproducible, and it is a deliberate scope choice. The drift check is
+the place where judgement necessarily enters, which is exactly why it is a
+worked example rather than an export.
 
 **A permutation test is a calibration, not a probability that the book changed.**
-`driftsignificance` pools the two samples, re-splits them at random many times, and
-asks how large the observed [`wasserstein`](@ref) distance is relative to the
-distances those random re-splits produce. Its implied null hypothesis is that the
-two periods are drawn from *exactly the same* law. In practice that null is never
-literally true — books always drift a little — so a "significant" result really
-tells you the samples were large enough to detect *some* change, not that the
-change is *material*. The `pvalue` is `P(distance this large | no drift)`, which is
-easy to misread as `P(drift is real | data)`; they are not the same number, and in
-a governance setting the misread is the default. The noise floor exists for a
+The permutation screen's implied null hypothesis is that the two periods are
+drawn from *exactly the same* law. In practice that null is never literally true
+— books always drift a little — so a "significant" result really tells you the
+samples were large enough to detect *some* change, not that the change is
+*material*. The `pvalue` is `P(distance this large | no drift)`, which is easy to
+misread as `P(drift is real | data)`; they are not the same number, and in a
+governance setting the misread is the default. The noise floor exists for a
 concrete reason: the plug-in Wasserstein distance is biased upward in finite
 samples — `wasserstein(x, y)` between two samples of the *same* law is positive,
 not zero — so the permutation floor is best understood as a bias correction for
 that estimator rather than as a hypothesis-testing ritual.
 
-**What a subjective (Bayesian) treatment would add — and why it is future work.**
-The question a capital or experience committee usually wants answered is not "is
-there any drift?" but "how big is the drift, with what uncertainty, and is it past
-a materiality threshold?" — a statement about *effect size*, not a point-null
-rejection. A Bayesian approach targets that directly: place a model (or a
-nonparametric Bayesian bootstrap — Dirichlet weights on the observations, for which
-the weighted one-dimensional Wasserstein distance is still closed form) over each
-period and report a *posterior* over the drift distance, from which a credible
-interval and `P(distance > materiality)` follow immediately. It would also let you
-borrow information across a history of quarters and handle the many-blocks,
-many-quarters multiplicity that makes any fixed-threshold flag trip on a
-predictable fraction of stable books. These methods are intentionally **not** part
-of the current release: they introduce priors and modelling choices that belong in
-a user's hands rather than baked into a library primitive, and the permutation test
-and a Bayesian posterior answer genuinely different questions (a calibration
-reference versus effect-size uncertainty). Treat the boolean `significant` flag as
-a screen, and — as the docstring warns — pin a seeded `rng` for any figure of
-record.
+**What the subjective (Bayesian) view adds.** The question a capital or
+experience committee usually wants answered is not "is there any drift?" but "how
+big is the drift, with what uncertainty, and is it past a materiality threshold?"
+— a statement about *effect size*, not a point-null rejection. The bootstrap
+posterior above targets that directly, and a fuller treatment can go further:
+exact Dirichlet weights (the weighted one-dimensional Wasserstein distance is
+still closed form), borrowing information across a history of quarters, and
+handling the many-blocks, many-quarters multiplicity that makes any
+fixed-threshold flag trip on a predictable fraction of stable books. None of
+this is exported API on purpose: the test level, the prior, and the materiality
+threshold are modelling choices that belong in the user's hands, and the
+permutation screen and a Bayesian posterior answer genuinely different questions
+(a calibration reference versus effect-size uncertainty). Treat any boolean
+"significant" flag as a screen, not a conclusion, and pin a seeded `rng` for any
+figure of record.
 
 **Multivariate risks need a solver.** Everything here is one-dimensional, where
 optimal transport is closed form (transport *is* rank matching). Genuinely joint
