@@ -320,31 +320,62 @@ end
 drift_permutation(q1, q2)   # e.g. (observed ≈ 50, threshold ≈ 28, pvalue ≈ 0.001)
 ```
 
-**Bayesian effect size (Bayesian bootstrap).** The committee question is usually
-not "is there *any* drift?" but "how big is it, and is it past materiality?" —
-an effect-size statement. Resample each period (multinomial resampling
-approximates the Dirichlet-weighted Bayesian bootstrap of Rubin, 1981) to get a
-posterior over the drift distance, then read off a credible interval and the
-probability the drift exceeds a materiality threshold:
+**Generative effect size (a Turing model).** The committee question is usually
+not "is there *any* drift?" but "how big is it, *why*, and is it past
+materiality?" — an effect-size statement about the *laws*, not the samples.
+Write a generative model of the two periods (here lognormal severities with a
+location drift `δ` and per-period dispersions — the priors and the likelihood
+are exactly the judgement calls that belong to you), then push the joint
+posterior through the same [`wasserstein`](@ref) primitive, now *between fitted
+laws*:
 
 ```julia
-function drift_posterior(a, b; p=1, ndraws=1000, rng=MersenneTwister(2026))
-    map(1:ndraws) do _
-        wasserstein(rand(rng, a, length(a)), rand(rng, b, length(b)); p)
-    end
+using Turing
+
+@model function severity_drift(x1, x2)
+    μ  ~ Normal(log(1000), 1)                  # baseline log-severity location
+    δ  ~ Normal(0, 0.25)                       # location drift (≈ % severity trend)
+    σ1 ~ truncated(Normal(0.6, 0.3); lower=0)  # baseline dispersion
+    σ2 ~ truncated(Normal(0.6, 0.3); lower=0)  # next-quarter dispersion
+    x1 ~ filldist(LogNormal(μ, σ1), length(x1))
+    x2 ~ filldist(LogNormal(μ + δ, σ2), length(x2))
 end
 
-post = drift_posterior(q1, q2)
-quantile(post, [0.05, 0.5, 0.95])   # credible band for the drift, in \$
-mean(post .> 40)                    # P(drift > \$40 materiality) — the governance question
+chain = sample(severity_drift(q1, q2), NUTS(), 500)
+μs  = vec(collect(chain[@varname(μ)]))
+δs  = vec(collect(chain[@varname(δ)]))
+σ1s = vec(collect(chain[@varname(σ1)]))
+σ2s = vec(collect(chain[@varname(σ2)]))
+
+# posterior over the drift distance between LAWS — the same wasserstein verb:
+Wpost = [wasserstein(LogNormal(μ, σ1), LogNormal(μ + δ, σ2))
+         for (μ, δ, σ1, σ2) in zip(μs, δs, σ1s, σ2s)]
+
+quantile(Wpost, [0.05, 0.5, 0.95])   # credible band for the drift, in \$
+mean(Wpost .> 40)                    # P(drift > \$40 materiality) — the governance question
 ```
 
-The two answer different questions — "could this be noise?" versus "how big is
-it, with what uncertainty?" — and a governance process often wants the
-permutation screen first and the effect-size statement for anything that passes.
-One caveat shared by both: the plug-in Wasserstein distance is biased upward in
-finite samples (two samples of the *same* law have positive distance), so read
-the posterior against the permutation floor rather than against zero.
+This buys three things a distance between raw samples cannot. The sampling
+noise is integrated out rather than carried along — the plug-in distance
+between two finite samples of the *same* law is strictly positive, so a
+sample-based posterior is biased upward, while the model's posterior centers on
+the drift between the laws themselves. The parameters decompose the *why*: a
+`δ` posterior straddling zero alongside a `σ2 - σ1` posterior that excludes it
+reads "severity isn't trending — the distribution is widening," which points at
+volatility or mix rather than inflation, and different causes demand different
+actions. And every tail statement becomes a statement about a law with honest
+parameter uncertainty — `CTE(0.995)(LogNormal(μ + δ, σ2))` per draw —
+extrapolated through the fitted form instead of read off the worst handful of
+observations. The price is symmetric: those answers are conditional on the
+model, so before trusting them, check the fit (simulate from the priors before
+fitting; after fitting, compare posterior-predictive draws against the
+empirical tail quantiles). A misspecified likelihood will confidently describe
+a book that doesn't exist.
+
+The two recipes answer different questions — "could this be noise?" versus "how
+big is it, why, and with what uncertainty?" — and a governance process often
+wants the permutation screen first and the generative effect-size statement for
+anything that passes.
 
 !!! warning "Three cautions"
     (1) A distance or robustness number is only meaningful *with* its ground cost —
@@ -377,21 +408,21 @@ samples — `wasserstein(x, y)` between two samples of the *same* law is positiv
 not zero — so the permutation floor is best understood as a bias correction for
 that estimator rather than as a hypothesis-testing ritual.
 
-**What the subjective (Bayesian) view adds.** The question a capital or
+**What the generative (Bayesian) view adds.** The question a capital or
 experience committee usually wants answered is not "is there any drift?" but "how
-big is the drift, with what uncertainty, and is it past a materiality threshold?"
-— a statement about *effect size*, not a point-null rejection. The bootstrap
-posterior above targets that directly, and a fuller treatment can go further:
-exact Dirichlet weights (the weighted one-dimensional Wasserstein distance is
-still closed form), borrowing information across a history of quarters, and
+big is the drift, why, with what uncertainty, and is it past a materiality
+threshold?" — a statement about *effect size and mechanism*, not a point-null
+rejection. The Turing model above targets that directly, and a fuller treatment
+can go further: hierarchical structure borrowing information across a history of
+quarters and blocks, covariates and censoring/truncation in the likelihood, and
 handling the many-blocks, many-quarters multiplicity that makes any
 fixed-threshold flag trip on a predictable fraction of stable books. None of
-this is exported API on purpose: the test level, the prior, and the materiality
-threshold are modelling choices that belong in the user's hands, and the
-permutation screen and a Bayesian posterior answer genuinely different questions
-(a calibration reference versus effect-size uncertainty). Treat any boolean
-"significant" flag as a screen, not a conclusion, and pin a seeded `rng` for any
-figure of record.
+this is exported API on purpose: the test level, the priors, the likelihood, and
+the materiality threshold are modelling choices that belong in the user's hands,
+and the permutation screen and a generative posterior answer genuinely different
+questions (a calibration reference versus effect-size uncertainty conditional on
+a model you must check). Treat any boolean "significant" flag as a screen, not a
+conclusion, and pin a seeded `rng` for any figure of record.
 
 **Multivariate risks need a solver.** Everything here is one-dimensional, where
 optimal transport is closed form (transport *is* rank matching). Genuinely joint
