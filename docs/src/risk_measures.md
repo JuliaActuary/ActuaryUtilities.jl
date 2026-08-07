@@ -299,13 +299,14 @@ your sample size, and only an observed distance that clears that noise floor is
 worth escalating. Seed the `rng` — the floor is stochastic, and a figure of
 record must be reproducible:
 
-```julia
-using Random, Statistics
+```@example drift
+using ActuaryUtilities, Distributions, Random, Statistics
 
-q1 = rand(LogNormal(log(1000) - 0.18, 0.60), 4_000)   # this quarter
-q2 = rand(LogNormal(log(1030) - 0.19, 0.62), 4_000)   # next quarter
+rng = Xoshiro(2026)
+q1 = rand(rng, LogNormal(log(1000) - 0.18, 0.60), 4_000)   # this quarter
+q2 = rand(rng, LogNormal(log(1030) - 0.19, 0.62), 4_000)   # next quarter
 
-function drift_permutation(a, b; p=1, nperm=1000, level=0.9, rng=MersenneTwister(2026))
+function drift_permutation(a, b; p=1, nperm=1000, level=0.9, rng=Xoshiro(2026))
     observed = wasserstein(a, b; p)
     pool, na = vcat(a, b), length(a)
     resplit = map(1:nperm) do _
@@ -314,11 +315,18 @@ function drift_permutation(a, b; p=1, nperm=1000, level=0.9, rng=MersenneTwister
     end
     (; observed,
         threshold=quantile(resplit, level),                     # the noise floor
-        pvalue=(count(>=(observed), resplit) + 1) / (nperm + 1))
+        pvalue=(count(>=(observed), resplit) + 1) / (nperm + 1),
+        resplit)                                                # the null draws, for plotting
 end
 
-drift_permutation(q1, q2)   # e.g. (observed ≈ 50, threshold ≈ 28, pvalue ≈ 0.001)
+res = drift_permutation(q1, q2)
+(; res.observed, res.threshold, res.pvalue)
 ```
+
+The returned `resplit` vector *is* the null distribution — the first thing to do
+with a borderline result is plot it against `observed`, so the recipe hands it
+back rather than making you re-run the permutations. And the default
+`level=0.9` is a screening threshold; raise it for anything feeding a decision.
 
 **Generative effect size (a Turing model).** The committee question is usually
 not "is there *any* drift?" but "how big is it, *why*, and is it past
@@ -341,7 +349,7 @@ using Turing
     x2 ~ filldist(LogNormal(μ + δ, σ2), length(x2))
 end
 
-chain = sample(severity_drift(q1, q2), NUTS(), 500)
+chain = sample(Xoshiro(2026), severity_drift(q1, q2), NUTS(), 1_000)
 μs  = vec(collect(chain[@varname(μ)]))
 δs  = vec(collect(chain[@varname(δ)]))
 σ1s = vec(collect(chain[@varname(σ1)]))
@@ -358,8 +366,12 @@ mean(Wpost .> 40)                    # P(drift > \$40 materiality) — the gover
 This buys three things a distance between raw samples cannot. The sampling
 noise is integrated out rather than carried along — the plug-in distance
 between two finite samples of the *same* law is strictly positive, so a
-sample-based posterior is biased upward, while the model's posterior centers on
-the drift between the laws themselves. The parameters decompose the *why*: a
+sample-based posterior is biased upward, while the model's posterior is a
+statement about the laws themselves. (One behavior to expect even so: a
+distance is nonnegative, so on a *stable* book the posterior of `Wpost` does
+not collapse to zero — parameter wiggle folds into a materially positive
+median. Read the signed `δ` and `σ2 - σ1` posteriors and the materiality
+probability, not the distance median alone.) The parameters decompose the *why*: a
 `δ` posterior straddling zero alongside a `σ2 - σ1` posterior that excludes it
 reads "severity isn't trending — the distribution is widening," which points at
 volatility or mix rather than inflation, and different causes demand different
