@@ -1,5 +1,45 @@
 # Version Upgrade Guide
 
+## v5.11.1 to v5.11.2
+
+This release fixes a class of bugs where risk measures returned believable but wrong finite numbers. Two behavior changes matter for existing code.
+
+### VaR now uses the standard lower quantile
+
+The old implementation selected the upper quantile at exact atom boundaries. The new `VaR(α)` is the standard generalized inverse, $\inf\{x : F(x) \ge \alpha\}$, everywhere: distributions, arrays, and discrete laws. Values can decrease by a whole atom at exact boundaries. This is an intentional correctness fix, not a numerical drift:
+
+```julia
+VaR(0.5)(Bernoulli(0.5))       # old: 1, new: 0
+VaR(0.95)(collect(1.0:1000.0)) # old: 951, new: 950
+```
+
+Related details:
+
+- `CTE` semantics are unchanged. It still averages exactly the worst `1-α` of probability mass, with fractional weight on the boundary atom.
+- `VaR` on a distribution now returns `Distributions.quantile(risk, α)` and keeps its type — for example an `Int` for a count distribution.
+- `VaR(0)` is the essential infimum. For a distribution with support unbounded below it returns `-Inf`; previously it returned an unconverged quadrature number.
+- `robustvalue`'s adverse scenario for `VaR` now shifts the rank VaR itself selects. Previously, at an exact boundary the shifted set could exclude that rank, and the reported "robust" value equaled the base value.
+
+### Divergent risks return honest values or throw
+
+The old implementation integrated distorted distribution functions with unchecked quadrature and subtracted the two halves. Divergent integrals produced plausible finite numbers:
+
+```julia
+Expectation()(Cauchy())        # old: 0.0,      new: NaN  (mean does not exist)
+Expectation()(Pareto(0.5, 1))  # old: ≈2.9e8,   new: Inf  (mean diverges)
+CTE(0.95)(Cauchy())            # old: ≈215.14,  new: Inf  (tail mean diverges)
+WangTransform(0.9)(Cauchy())   # old: a finite number, new: throws ErrorException
+```
+
+The policy: results that are provably divergent from the distribution's `mean` semantics return `NaN`/`±Inf`; a quadrature result that cannot be verified throws instead of returning a number.
+
+Related details:
+
+- `Expectation`, `VaR`, and `CTE` on distributions are now analytic or exact where possible. Values move within the old quadrature tolerance.
+- All distortion measures on arrays and on discrete distributions (`DiscreteNonParametric`, `Binomial`, `Poisson`, …) now evaluate as exact or checked weighted sums instead of quadrature over step functions.
+- `DualPower` and the internal complementary distortions now use numerically stable forms (`expm1`/`log1p`). The old algebra could silently lose the quadrature error certificate in far tails.
+- Empty arrays now throw an `ArgumentError` for every risk measure.
+
 ## v5.8 to v5.9
 
 Non-breaking unless you relied on the specific edge-case behaviors noted below.

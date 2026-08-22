@@ -1,3 +1,16 @@
+# Test scaffolding for dispatch tests. Structs cannot be defined inside a
+# @testset, so these live at the top level.
+
+# A distribution whose own `mean` method throws. The error must propagate; the
+# implementation must not silently reroute to quadrature.
+struct BrokenMeanDist <: ContinuousUnivariateDistribution end
+Distributions.mean(::BrokenMeanDist) = sum(nothing)
+
+# A risk type whose cdf is NaN everywhere. Checked quadrature must throw, not
+# return a silent number.
+struct NaNCDFRisk end
+ActuaryUtilities.RiskMeasures.cdf_func(::NaNCDFRisk) = x -> NaN
+
 @testset "Risk Measures" begin
 
     @test_throws AssertionError VaR(-0.5)
@@ -85,8 +98,9 @@
     end
 
     # Hardy, "An Introduction to Risk Measures for Actuarial Applications
-    # note the difference for VaR where our VaR is L(Nα+1), as opposed to L(Nα) 
-    # or the smoothed empirical estimate
+    # note the difference for VaR: our VaR is L(⌈Nα⌉), the smallest k with
+    # k/N ≥ α (the lower empirical quantile), as opposed to the smoothed
+    # empirical estimate
 
     # Also, confusingly the examples for VaR don't use the same Table 1 (L) as CTE
     L = append!(vec([
@@ -102,11 +116,130 @@
             287.9 298.7 301.6 305.0 313.0 323.8 334.5 343.5 350.3 359.4
         ]), zeros(900)) |> sort
 
-    @test VaR(0.950)(L) ≈ L[951] atol = 1e-2
+    @test VaR(0.950)(L) ≈ L[950] atol = 1e-2
     @test VaR(0.9505)(L) ≈ L[951] atol = 1e-2
-    @test VaR(0.951)(L) ≈ L[952] atol = 1e-2
-    @test VaR(0.95)(L) ≈ L[951] atol = 1e-2
+    @test VaR(0.951)(L) ≈ L[951] atol = 1e-2
+    @test VaR(0.95)(L) ≈ L[950] atol = 1e-2
     @test CTE(0.95)(L) ≈ 260.68 atol = 1e-1
     @test CTE(0.99)(L) ≈ 321.8 atol = 1e-1
+
+    @testset "lower-quantile VaR" begin
+        @test VaR(0.5)(Bernoulli(0.5)) == 0
+        @test VaR(0.95)(collect(1.0:1000.0)) == 950
+        @test VaR(0.8)([1.0, 1.0, 1.0, 1.0, 2.0]) == 1
+        @test VaR(prevfloat(0.95))(collect(1.0:1000.0)) == 950
+        @test VaR(nextfloat(0.95))(collect(1.0:1000.0)) == 951
+        # parity: named discrete law ≡ equal-weight atomic representation ≡ quantile
+        b = Binomial(10, 0.3)
+        bdnp = DiscreteNonParametric(collect(support(b)), pdf.(b, support(b)))
+        for α in (0.0, 0.2, 0.65, 0.99)
+            @test VaR(α)(b) == VaR(α)(bdnp) == quantile(b, α)
+        end
+        # exact atom boundaries use F ≥ α (the lower quantile). A one-ulp step
+        # above the boundary is not assertable for named laws: Distributions'
+        # `quantile` is only cdf-consistent to within a ulp, so probe the
+        # midpoint of the cdf gap instead.
+        F3 = cdf(b, 3)
+        @test VaR(F3)(b) == 3
+        @test VaR(prevfloat(F3))(b) == 3
+        @test VaR((F3 + cdf(b, 4)) / 2)(b) == 4
+        @test VaR(0.6)(A) == 0.0            # cdf(A, 0) == 0.6 exactly
+        @test VaR(nextfloat(0.6))(A) == 1.0
+        @test VaR(0.95)(A) == 1.0
+        # VaR(0) is the essential infimum
+        @test VaR(0.0)(Normal()) == -Inf
+        @test VaR(0.0)(Pareto(1.5, 1)) == 1.0
+        @test VaR(0.0)([3.0, 1.0, 2.0]) == 1.0
+    end
+
+    @testset "divergent / heavy-tailed risks" begin
+        @test isnan(RiskMeasures.Expectation()(Cauchy()))
+        @test RiskMeasures.Expectation()(Pareto(0.5, 1.0)) == Inf
+        @test isnan(CTE(0.0)(Cauchy()))     # α = 0 runs before any divergence shortcut
+        @test CTE(0.95)(Cauchy()) == Inf
+        @test CTE(0.5)(Pareto(0.5, 1.0)) == Inf
+        @test CTE(0.95)(Pareto(1.0, 1.0)) == Inf
+        # mean == -Inf is not a divergence shortcut: the upper tail is finite here
+        @test CTE(0.001)(-1 * Pareto(0.5, 1.0)) ≈ -1000
+        @test VaR(0.95)(Cauchy()) == quantile(Cauchy(), 0.95)
+        # a distorted expectation that cannot be verified throws instead of
+        # returning a plausible finite number
+        @test_throws ErrorException WangTransform(0.9)(Cauchy())
+        @test_throws ErrorException ProportionalHazard(2)(Pareto(0.5, 1.0))
+        @test_throws ErrorException DualPower(2)(Pareto(0.5, 1.0))
+    end
+
+    @testset "stable distortions and certified quadrature" begin
+        # the naive 1-(1-x)^v distortion returns ≈4.4999861 here while its
+        # quadrature error certificate claims ≈7e-8 — the stable form keeps the
+        # certificate honest
+        @test DualPower(2)(Pareto(1.5, 1)) ≈ 4.5 rtol = 1e-6
+        @test WangTransform(0.9)(Normal(0, 1)) ≈ quantile(Normal(), 0.9) rtol = 1e-6
+        # two nearly equal one-sided integrals cancel to ~0; the acceptance rule
+        # certifies at the components' scale instead of throwing
+        @test abs(WangTransform(0.5)(Normal(0, 1))) < 1e-8
+        # gbar is the stable complement of g
+        for rm in (WangTransform(0.9), DualPower(2), ProportionalHazard(2), CTE(0.9), VaR(0.9))
+            for F in (0.2, 0.5, 0.9)
+                @test RiskMeasures.gbar(rm, F) ≈ 1 - RiskMeasures.g(rm, 1 - F) atol = 1e-15
+            end
+        end
+    end
+
+    @testset "atomic robustness" begin
+        # Distributions accepts probability vectors off by ~1e-8; survival values
+        # must be normalized and clamped or Φ⁻¹(1 + ε) throws a DomainError
+        sloppy = DiscreteNonParametric([1.0, 2.0, 3.0], [0.1, 0.2, 0.7000000001])
+        @test isfinite(WangTransform(0.95)(sloppy))
+        # zero-probability atoms at ±Inf must not poison the sum through Inf * 0
+        @test VaR(0.5)(DiscreteNonParametric([0.0, Inf], [0.9, 0.1])) == 0
+        @test RiskMeasures.Expectation()(DiscreteNonParametric([1.0, Inf], [1.0, 0.0])) == 1.0
+        # an equal-weight sample and its atomic representation agree for a
+        # distortion with no dedicated fast path
+        xs = [0.0, 1.0, 5.0]
+        @test WangTransform(0.9)(xs) ≈ WangTransform(0.9)(DiscreteNonParametric(xs, fill(1 / 3, 3)))
+        # finite-support named laws ≡ their atomic representations
+        for d in (Binomial(10, 0.3), DiscreteUniform(1, 6), Bernoulli(0.3), Dirac(2.5))
+            atoms = collect(support(d))
+            dnp = DiscreteNonParametric(atoms, pdf.(d, atoms))
+            @test WangTransform(0.9)(d) ≈ WangTransform(0.9)(dnp)
+            @test CTE(0.9)(d) ≈ CTE(0.9)(dnp)
+        end
+        # infinite-support discrete laws: checked tail summation, cross-checked
+        # against an explicit truncation (tail mass beyond 60 is ~1e-40)
+        @test WangTransform(0.9)(Poisson(10)) ≈ 14.2936912334644 rtol = 1e-8
+        p10 = Poisson(10)
+        p10dnp = DiscreteNonParametric(collect(0:60), pdf.(p10, 0:60))
+        @test CTE(cdf(p10, 12))(p10) ≈ CTE(cdf(p10, 12))(p10dnp) rtol = 1e-10
+        @test isfinite(CTE(0.9)(Geometric(0.2)))
+    end
+
+    @testset "mean fallback and dispatch" begin
+        # generic truncated wrappers have no `mean` method; Expectation falls
+        # back to checked quadrature
+        tr = truncated(Gamma(2, 3), 1, 5)
+        @test RiskMeasures.Expectation()(tr) ≈ QuadGK.quadgk(x -> x * pdf(tr, x), 1, 5)[1] rtol = 1e-6
+        @test CTE(0.0)(tr) ≈ RiskMeasures.Expectation()(tr)
+        @test VaR(0.9)(tr) <= CTE(0.9)(tr) <= 5
+        # censored distributions have a real `mean` method; it is used directly
+        @test RiskMeasures.Expectation()(censored(Normal(), -1, 1)) == 0.0
+        # an error inside a distribution's own `mean` must propagate
+        @test_throws MethodError RiskMeasures.Expectation()(BrokenMeanDist())
+        # a NaN cdf must surface as an error, not a silent number
+        @test_throws Exception WangTransform(0.9)(NaNCDFRisk())
+        # analytic exactness on distributions
+        @test RiskMeasures.Expectation()(Normal(3, 1)) == 3.0
+        @test VaR(0.95)(LogNormal(0, 1)) == quantile(LogNormal(0, 1), 0.95)
+    end
+
+    @testset "numeric types and accumulation" begin
+        @test RiskMeasures.Expectation()([1e308, 1e308]) == 1e308
+        @test RiskMeasures.Expectation()(fill(typemax(Int), 4)) ≈ 9.223372036854776e18
+        @test RiskMeasures.Expectation()(Float32[1, 2, 3]) ≈ 2
+        @test CTE(0.5)(BigFloat[1, 2, 3, 4]) ≈ big"3.5"
+        for rm in (VaR(0.5), CTE(0.5), RiskMeasures.Expectation(), WangTransform(0.5))
+            @test_throws ArgumentError rm(Float64[])
+        end
+    end
 
 end

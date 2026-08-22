@@ -149,6 +149,31 @@
             @test s0 == s1
         end
 
+        # VaR's adverse scenario shifts the rank VaR itself selects. At an exact
+        # atom boundary (n=10, tail=0.5) the strict rule would shift only ranks
+        # 6:10 and leave VaR at rank 5 unmoved — zero loading.
+        let sm = collect(1.0:10.0)
+            @test VaR(0.5)(sm) == 5.0                 # rank 5 under the ≥ rule
+            rv = robustvalue(VaR(0.5), sm; radius=1.0, p=2)
+            @test rv > VaR(0.5)(sm)                   # loading is strictly positive
+            # selected rank k=5, so m=6 and Δ = 1·(6/10)^(-1/2)
+            @test rv ≈ 5.0 + 1.0 * (6 / 10)^(-1 / 2)
+            # the constructed scenario spends exactly the W_p budget
+            sc = [sm[1:4]; sm[5:10] .+ 1.0 * (6 / 10)^(-1 / 2)]
+            @test wasserstein(sc, sm; p=2) ≈ 1.0 rtol = 1e-12
+            # non-VaR measures keep the strict boundary: k=6, m=5
+            scw = [sm[1:5]; sm[6:10] .+ 1.0 * (5 / 10)^(-1 / 2)]
+            @test robustvalue(WangTransform(0.5), sm; radius=1.0, p=2, tail=0.5) ≈
+                  WangTransform(0.5)(scw)
+        end
+
+        # ties at the boundary: the shifted set still contains VaR's selected atom
+        let st = [1.0, 1.0, 1.0, 1.0, 2.0]            # VaR(0.8) selects rank 4 (value 1.0)
+            rv = robustvalue(VaR(0.8), st; radius=0.5, p=1)
+            @test rv > VaR(0.8)(st)
+            @test rv ≈ 1.0 + 0.5 * (2 / 5)^(-1)       # k=4, m=2, Δ = 0.5·(5/2)
+        end
+
         # composes with any risk measure; a measure without a natural tail needs `tail`.
         # (WangTransform has no fast array method, so use a small sample here.)
         @test robustvalue(VaR(0.95), s; radius=100) ≥ VaR(0.95)(s)

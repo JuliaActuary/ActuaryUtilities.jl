@@ -97,7 +97,8 @@ end
 
 @testset "risk measure exact empirical estimators" begin
     L = collect(1.0:1000.0)
-    @test VaR(0.95)(L) == 951.0
+    # VaR is the lower empirical quantile: the smallest k with k/n ≥ α
+    @test VaR(0.95)(L) == 950.0
     @test VaR(0.0)(L) == 1.0
     @test CTE(0.0)(L) ≈ sum(L) / 1000
     # CTE Choquet weights: crossing atom gets (k/n - α), the rest 1/n, all / (1-α)
@@ -109,12 +110,12 @@ end
     # duplicates / plateaus are handled exactly (quadrature used to wobble here)
     dup = [1.0, 1.0, 1.0, 1.0, 2.0]
     @test VaR(0.5)(dup) == 1.0
-    @test VaR(0.8)(dup) == 2.0
+    @test VaR(0.8)(dup) == 1.0   # k = 4 satisfies 4/5 ≥ 0.8, so the tied atom is selected
     @test CTE(0.8)(dup) ≈ 2.0
 
     # unsorted input
     shuffled = shuffle(Xoshiro(1), L)
-    @test VaR(0.95)(shuffled) == 951.0
+    @test VaR(0.95)(shuffled) == 950.0
     @test CTE(0.95)(shuffled) ≈ expected
 
     # the exact estimator agrees with the (quadrature) Choquet definition it replaces
