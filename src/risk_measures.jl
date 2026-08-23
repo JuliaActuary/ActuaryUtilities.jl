@@ -397,13 +397,14 @@ end
 # above (Poisson, Geometric, …). Integers outside the support carry zero
 # probability, so their distortion weight is zero and they are skipped; the sum
 # is therefore correct for any integer-valued law. The truncation point doubles
-# until two successive doublings agree within `rtol`; a distorted tail whose
-# sum does not stabilize within the atom budget throws.
+# until (a) the un-scanned distorted tail is provably negligible and (b) two
+# successive doublings agree within `rtol`. A distorted tail whose sum does not
+# stabilize within the atom budget throws.
 function _distorted_tail_sum(rm::RiskMeasure, d, lo::Integer; rtol=sqrt(eps(Float64)), maxatoms=2^24)
     acc = 0.0
     consumed = 0
     N = 32
-    previous = Inf
+    previous = NaN   # NaN comparisons are false: the first pass never counts as stable
     stable = 0
     while N <= maxatoms
         for i in (consumed + 1):N
@@ -415,7 +416,18 @@ function _distorted_tail_sum(rm::RiskMeasure, d, lo::Integer; rtol=sqrt(eps(Floa
         end
         consumed = N
         isfinite(acc) || break
-        if abs(acc - previous) <= rtol * max(abs(acc), abs(previous))
+        # The un-scanned atoms carry total distorted weight g(S(x_N)) at values
+        # at or beyond x_N, so `tailguard` bounds their smallest possible
+        # contribution. Stability alone is not enough: an all-zero prefix
+        # (Poisson(1000) under Wang has ccdf == 1.0 for its first hundreds of
+        # atoms) produces identical truncations long before any mass is seen.
+        # A divergent distorted tail needs g(S(x)) ≳ 1/x infinitely often,
+        # which keeps x·g(S(x)) away from zero — so divergence can never pass
+        # this guard, and the budget-exhaustion throw below fires instead.
+        xN = lo + (N - 1)
+        wrem = abs(g(rm, clamp(Distributions.ccdf(d, xN), 0.0, 1.0)))
+        tolerance = rtol * max(1.0, abs(acc))
+        if wrem * max(1.0, abs(xN)) <= tolerance && abs(acc - previous) <= tolerance
             stable += 1
             stable >= 2 && return acc
         else

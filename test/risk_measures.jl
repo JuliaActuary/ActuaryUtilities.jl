@@ -11,6 +11,15 @@ Distributions.mean(::BrokenMeanDist) = sum(nothing)
 struct NaNCDFRisk end
 ActuaryUtilities.RiskMeasures.cdf_func(::NaNCDFRisk) = x -> NaN
 
+# An integer law with a long zero-mass prefix: all mass sits at 100 but the
+# reported minimum is 0. The checked tail summation must scan past the gap
+# instead of accepting an early all-zero truncation.
+struct DelayedDirac <: DiscreteUnivariateDistribution end
+Distributions.minimum(::DelayedDirac) = 0
+Distributions.maximum(::DelayedDirac) = Inf
+Distributions.cdf(::DelayedDirac, x::Real) = x < 100 ? 0.0 : 1.0
+Distributions.ccdf(::DelayedDirac, x::Real) = x < 100 ? 1.0 : 0.0
+
 @testset "Risk Measures" begin
 
     @test_throws AssertionError VaR(-0.5)
@@ -212,6 +221,15 @@ ActuaryUtilities.RiskMeasures.cdf_func(::NaNCDFRisk) = x -> NaN
         p10dnp = DiscreteNonParametric(collect(0:60), pdf.(p10, 0:60))
         @test CTE(cdf(p10, 12))(p10) ≈ CTE(cdf(p10, 12))(p10dnp) rtol = 1e-10
         @test isfinite(CTE(0.9)(Geometric(0.2)))
+        # zero-mass prefixes must not read as convergence: Poisson(1000) has
+        # ccdf == 1.0 for its first hundreds of atoms (all distorted weights 0),
+        # and DelayedDirac concentrates all mass at 100 with minimum 0
+        p1k = Poisson(1000)
+        p1kdnp = DiscreteNonParametric(collect(600:1400), pdf.(p1k, 600:1400))
+        @test WangTransform(0.9)(p1k) ≈ WangTransform(0.9)(p1kdnp) rtol = 1e-8
+        @test WangTransform(0.9)(DelayedDirac()) ≈ 100.0
+        @test CTE(0.5)(DelayedDirac()) ≈ 100.0
+        @test ProportionalHazard(2)(DelayedDirac()) ≈ 100.0
     end
 
     @testset "mean fallback and dispatch" begin
