@@ -317,12 +317,15 @@ loss. What is returned depends on the measure:
 
 - For any other risk measure the result is `rm` evaluated on a concrete adverse
   scenario *inside* the ball: the tail order statistics ``x_{(k)}, \\dots,
-  x_{(n)}`` — the same tail boundary ``k`` that [`VaR`](@ref) and [`CTE`](@ref)
-  use on a sample — are shifted outward by `radius * (m/n)^(-1/p)`, where `m/n`
-  is the fraction of observations shifted, so the scenario costs exactly
-  `radius` in ``W_p``. This is a **lower bound** on the true worst case over the
-  ball, not the supremum itself — treat it as a principled adverse scenario, not
-  a proven maximum.
+  x_{(n)}`` are shifted outward by `radius * (m/n)^(-1/p)`, where `m/n` is the
+  fraction of observations shifted, so the scenario costs exactly `radius` in
+  ``W_p``. The starting rank ``k`` depends on the measure. For [`VaR`](@ref),
+  ``k`` is the rank VaR itself selects: the smallest ``k`` with ``k/n \\ge``
+  `tail`. For every other measure, ``k`` is the first rank with strictly
+  positive [`CTE`](@ref) tail weight: the smallest ``k`` with ``k/n >`` `tail`.
+  The two rules differ exactly at atom boundaries. This is a **lower bound** on
+  the true worst case over the ball, not the supremum itself — treat it as a
+  principled adverse scenario, not a proven maximum.
 
 Because the exact CTE branch applies only when `tail == rm.α`, changing `tail`
 across that equality switches between the atom-splitting exact bound and the
@@ -357,13 +360,17 @@ function robustvalue(rm::RiskMeasure, sample::AbstractVector{<:Real};
     # n*α is not an integer.
     rm isa CTE && tail == rm.α && return rm(sample) + radius * (1 - tail)^(-1 / p)
     # Otherwise evaluate `rm` on a budget-exact adverse scenario: shift the tail
-    # order statistics x_(k)…x_(n) — the SAME boundary `k` that VaR/CTE use on a
-    # sample, so the shifted set matches the measure's own tail even under ties —
-    # outward by Δ sized to the mass m/n actually moved, so the scenario costs
-    # exactly `radius` in W_p and stays inside the ball.
+    # order statistics x_(k)…x_(n) outward by Δ sized to the mass m/n actually
+    # moved, so the scenario costs exactly `radius` in W_p and stays inside the
+    # ball. VaR's scenario must move the rank VaR itself selects (first k with
+    # k/n ≥ tail, the lower quantile); other measures shift the strict tail
+    # (first rank with positive CTE tail weight, k/n > tail). The two rules
+    # differ exactly at atom boundaries: with n=10 and tail=0.5, shifting only
+    # ranks 6:10 would leave VaR at rank 5 unmoved and buy zero loading.
     xs = sort!(float.(sample))                 # promote: Int samples cannot hold x + Δ
     n = length(xs)
-    k = RiskMeasures._first_index_above(n, tail)
+    k = rm isa VaR ? RiskMeasures._first_index_at_or_above(n, tail) :
+        RiskMeasures._first_index_above(n, tail)
     m = n - k + 1
     Δ = radius * (m / n)^(-1 / p)
     @views xs[k:n] .+= Δ

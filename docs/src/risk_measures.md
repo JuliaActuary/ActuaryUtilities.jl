@@ -100,21 +100,33 @@ Adapting Wang (2002), there are two key components:
 
 This remaps values in the [0,1] range to another value in the [0,1] range, and in $H$ below, operates on the survival function $S$ and $F=1-S$.
 
-Let $g:[0,1]\to[0,1]$ be an increasing function with $g(0)=0$ and $g(1)=1$. The transform $F^*(x)=g(F(x))$ defines a distorted probability distribution, where "$g$" is called a distortion function.
+Let $g:[0,1]\to[0,1]$ be an increasing function with $g(0)=0$ and $g(1)=1$. Applied to the survival function, the transform $S^*(x)=g(S(x))$ defines a distorted probability distribution with $F^*(x) = 1 - g(S(x)) = \bar{g}(F(x))$, where "$g$" is called a distortion function and $\bar{g}(u) = 1 - g(1-u)$ is its complement.
 
 Note that $F^*$ and $F$ are equivalent probability measures if and only if $g:[0,1]\to[0,1]$ is continuous and one-to-one.
-Definition 4.2. We define a family of distortion risk-measures using the mean-value under the distorted probability $F^*(x)=g(F(x))$:
+Definition 4.2. We define a family of distortion risk-measures using the mean-value under the distorted probability:
 
 ### Risk Measure Integration
 
-To calculate a risk measure $H$, we integrate the distorted $F$ across all possible values in the risk distribution (i.e. $x \in X$):
+To calculate a risk measure $H$, we integrate the distorted probabilities across all possible values in the risk distribution (i.e. $x \in X$). Two distortions appear. The survival distortion $g$ acts on the survival function $S(x) = 1 - F(x)$. The complementary distortion $\bar{g}(u) = 1 - g(1-u)$ acts on the distribution function $F$. The risk measure is the Choquet integral
 
-$$H(X) = E^*(X) = - \int_{-\infty}^0 g(F(x))dx + \int_0^{+\infty}[1-g(F(x))]dx$$
+$$H(X) = E^*(X) = \int_0^{+\infty} g(S(x))\,dx - \int_{-\infty}^0 \bar{g}(F(x))\,dx$$
 
 That is, the risk measure ($H$) is equal to the expected value of the distortion of the risk distribution ($E^*(X)$).
 
+Two definitions are fixed by this framework and by this package:
+
+- `VaR(α)` is the lower generalized inverse: $\mathrm{VaR}_\alpha(X) = \inf\{x : F_X(x) \ge \alpha\}$. At an atom, the lower quantile applies: `VaR(0.5)(Bernoulli(0.5)) == 0`.
+- `CTE(α)` is the expected shortfall (average Value at Risk): the mean of exactly the worst $1-\alpha$ of probability mass. When the $\alpha$ boundary falls inside an atom, that atom contributes fractional weight. CTE's atom handling does not depend on the VaR boundary convention.
+
 !!! note "How the computation is performed"
-    When `risk` is a continuous `Distributions.jl` distribution, this integral is evaluated by numerical quadrature of the distorted distribution function. When `risk` is an array of outcomes, the same Choquet integral reduces to a finite weighted sum of the sample's order statistics, and `VaR`, `CTE`, and `Expectation` evaluate that sum exactly (no quadrature or approximation error); the other distortion measures integrate the distorted empirical CDF numerically.
+    The implementation picks the most exact path available, in this order:
+
+    1. **Analytic.** `Expectation` on a distribution uses `Distributions.mean`. Its conventions pass through: `NaN` when the mean does not exist (`Cauchy`), `±Inf` when it diverges (`Pareto` with tail index ≤ 1). `VaR` on a distribution uses `Distributions.quantile`. `CTE` returns `+Inf` when the upper tail expectation diverges.
+    2. **Exact finite sums.** Arrays and finite-support discrete distributions reduce every distortion measure to a finite weighted sum over atoms. There is no quadrature and no approximation error.
+    3. **Checked tail summation.** Integer-valued distributions bounded below with infinite support (`Poisson`, `Geometric`, …) sum atoms with a doubling truncation until successive truncations agree within tolerance.
+    4. **Checked quadrature.** All other cases integrate the distorted distribution with `QuadGK` and enforce the returned error estimate. Quadrature runs at `Float64` precision.
+
+    A checked path throws an `ErrorException` when the reported error cannot be verified against the requested tolerance. That check certifies that the quadrature error estimate met the tolerance; it does not prove the integral exists. Custom distortions should also specialize `ActuaryUtilities.RiskMeasures.gbar` when the generic complement `1 - g(1 - F)` can lose precision.
 
 ## Examples
 
