@@ -1589,5 +1589,13 @@ end
 
 using Aqua
 @testset "Aqua.jl" begin
-    Aqua.test_all(ActuaryUtilities)
+    Aqua.test_all(
+        ActuaryUtilities;
+        # The persistent_tasks probe spawns a subprocess that precompiles the
+        # package; with a heavy dep tree (FinanceModels, Distributions) it
+        # flakily fails within the CI runner's limits ("done.log was not
+        # created"). ActuaryUtilities spawns no background tasks, so the check
+        # is disabled rather than left flaky — same rationale as FinanceModels.
+        persistent_tasks = false,
+    )
 end
