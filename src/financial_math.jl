@@ -201,9 +201,9 @@ sensitivities(KeyRates(tenors), curve, cfs, times)       # value + durations + c
 
 See also: [`DV01`](@ref), [`IR01`](@ref), [`CS01`](@ref)
 """
-struct KeyRates{T<:AbstractVector{<:Real}} <: Duration
+struct KeyRates{T <: AbstractVector{<:Real}} <: Duration
     tenors::T
-    function KeyRates(tenors::T) where {T<:AbstractVector{<:Real}}
+    function KeyRates(tenors::T) where {T <: AbstractVector{<:Real}}
         isempty(tenors)   && throw(ArgumentError("KeyRates tenors must be non-empty"))
         issorted(tenors)  || throw(ArgumentError("KeyRates tenors must be sorted ascending"))
         allunique(tenors) || throw(ArgumentError("KeyRates tenors must be distinct"))
@@ -844,8 +844,8 @@ function _hat_bump(tenors, bumps, t)
     t <= first(tenors) && return first(bumps)
     t >= last(tenors)  && return last(bumps)
     i = searchsortedlast(tenors, t)
-    w = (t - tenors[i]) / (tenors[i+1] - tenors[i])
-    return (one(w) - w) * bumps[i] + w * bumps[i+1]
+    w = (t - tenors[i]) / (tenors[i + 1] - tenors[i])
+    return (one(w) - w) * bumps[i] + w * bumps[i + 1]
 end
 
 # Layer a hat-function zero-rate bump over `curve` lazily.
@@ -869,15 +869,15 @@ end
 function _keyrate_ad(base::AYM, credit::AYM, tenors::AbstractVector, valuation_fn; order = 1)
     n = length(tenors)
     function f(combined)
-        base_shift   = _bumped(base,   tenors, @view combined[1:n])
-        credit_shift = _bumped(credit, tenors, @view combined[(n+1):(2n)])
-        valuation_fn(base_shift, credit_shift)
+        base_shift = _bumped(base, tenors, @view combined[1:n])
+        credit_shift = _bumped(credit, tenors, @view combined[(n + 1):(2n)])
+        return valuation_fn(base_shift, credit_shift)
     end
     z = zeros(2n)
     v = f(z)
     grad = ForwardDiff.gradient(f, z)
     base_grad = grad[1:n]
-    credit_grad = grad[(n+1):(2n)]
+    credit_grad = grad[(n + 1):(2n)]
     if order >= 2
         hess = ForwardDiff.hessian(f, z)
         return (;
@@ -885,8 +885,8 @@ function _keyrate_ad(base::AYM, credit::AYM, tenors::AbstractVector, valuation_f
             base_gradient = base_grad,
             credit_gradient = credit_grad,
             base_hessian = hess[1:n, 1:n],
-            credit_hessian = hess[(n+1):(2n), (n+1):(2n)],
-            cross_hessian = hess[1:n, (n+1):(2n)],
+            credit_hessian = hess[(n + 1):(2n), (n + 1):(2n)],
+            cross_hessian = hess[1:n, (n + 1):(2n)],
         )
     end
     return (; value = v, base_gradient = base_grad, credit_gradient = credit_grad)
@@ -916,7 +916,7 @@ end
     else
         i = searchsortedlast(tenors, t)
         w_right = (t - tenors[i]) / (tenors[i + 1] - tenors[i])
-        w_left  = one(w_right) - w_right
+        w_left = one(w_right) - w_right
         return i, w_left, i + 1, w_right
     end
 end
@@ -932,14 +932,20 @@ end
 _keyrate_analytic(curve::AYM, tenors::AbstractVector, cfs::AbstractVector, times; order = 1) =
     _ncurve_analytic((; curve), tenors, cfs, times; order)
 
-function _keyrate_analytic(base::AYM, credit::AYM, tenors::AbstractVector,
-                           cfs::AbstractVector, times; order = 1)
+function _keyrate_analytic(
+        base::AYM, credit::AYM, tenors::AbstractVector,
+        cfs::AbstractVector, times; order = 1
+    )
     an = _ncurve_analytic((; base, credit), tenors, cfs, times; order)
-    order >= 2 || return (; value = an.value,
-                            base_gradient = an.gradient, credit_gradient = an.gradient)
-    return (; value = an.value,
-              base_gradient = an.gradient, credit_gradient = an.gradient,
-              base_hessian  = an.hessian,  credit_hessian = an.hessian, cross_hessian = an.hessian)
+    order >= 2 || return (;
+        value = an.value,
+        base_gradient = an.gradient, credit_gradient = an.gradient,
+    )
+    return (;
+        value = an.value,
+        base_gradient = an.gradient, credit_gradient = an.gradient,
+        base_hessian = an.hessian, credit_hessian = an.hessian, cross_hessian = an.hessian,
+    )
 end
 
 # N-curve analytic. `curves::NamedTuple{roles}` of L curves with a shared tenor
@@ -950,8 +956,10 @@ end
 # shared gradient vector and a single shared Hessian matrix. The single-, two-,
 # and N-curve public wrappers all delegate here and alias these across their
 # role positions.
-function _ncurve_analytic(curves::NamedTuple, tenors::AbstractVector,
-                              cfs::AbstractVector, times; order = 1)
+function _ncurve_analytic(
+        curves::NamedTuple, tenors::AbstractVector,
+        cfs::AbstractVector, times; order = 1
+    )
     checkbounds(Bool, times, eachindex(cfs)) || throw(
         DimensionMismatch("times must contain at least one entry for each cashflow")
     )
@@ -998,9 +1006,11 @@ end
 # `(; base, credit, cross)` convexity NamedTuple. Each `./` allocates a fresh
 # array, so callers always receive distinct output buffers even when the
 # analytic inputs alias a single shared matrix.
-_conv_blocks(r) = (; base   = r.base_hessian   ./ r.value,
-                     credit = r.credit_hessian ./ r.value,
-                     cross  = r.cross_hessian  ./ r.value)
+_conv_blocks(r) = (;
+    base = r.base_hessian ./ r.value,
+    credit = r.credit_hessian ./ r.value,
+    cross = r.cross_hessian ./ r.value,
+)
 
 ## AbstractYieldModel + KeyRates(tenors): KRD / IR01 / CS01 / convexity / sensitivities
 #
@@ -1168,13 +1178,13 @@ end
 duration(::CS01, kr::KeyRates, base::AYM, credit::AYM, cfs::AbstractVector{<:FinanceCore.Cashflow}) = duration(CS01(), kr, base, credit, _extract_cfs_times(cfs)...)
 
 # Do-block-first forwarders (support `f(args...) do x; ...; end` syntax)
-duration(vf::Function, kr::KeyRates, curve::AYM)                          = duration(kr,          vf, curve)
-duration(vf::Function, ::DV01,       curve::AYM, tenors)                  = duration(DV01(),      vf, curve, tenors)
-duration(vf::Function, ::DV01, kr::KeyRates, curve::AYM)                  = duration(DV01(),      kr, vf, curve)
-duration(vf::Function, ::IR01, base::AYM, credit::AYM, tenors)            = duration(IR01(),      vf, base, credit, tenors)
-duration(vf::Function, ::IR01, kr::KeyRates, base::AYM, credit::AYM)      = duration(IR01(),      kr, vf, base, credit)
-duration(vf::Function, ::CS01, base::AYM, credit::AYM, tenors)            = duration(CS01(),      vf, base, credit, tenors)
-duration(vf::Function, ::CS01, kr::KeyRates, base::AYM, credit::AYM)      = duration(CS01(),      kr, vf, base, credit)
+duration(vf::Function, kr::KeyRates, curve::AYM) = duration(kr, vf, curve)
+duration(vf::Function, ::DV01, curve::AYM, tenors) = duration(DV01(), vf, curve, tenors)
+duration(vf::Function, ::DV01, kr::KeyRates, curve::AYM) = duration(DV01(), kr, vf, curve)
+duration(vf::Function, ::IR01, base::AYM, credit::AYM, tenors) = duration(IR01(), vf, base, credit, tenors)
+duration(vf::Function, ::IR01, kr::KeyRates, base::AYM, credit::AYM) = duration(IR01(), kr, vf, base, credit)
+duration(vf::Function, ::CS01, base::AYM, credit::AYM, tenors) = duration(CS01(), vf, base, credit, tenors)
+duration(vf::Function, ::CS01, kr::KeyRates, base::AYM, credit::AYM) = duration(CS01(), kr, vf, base, credit)
 
 """
     convexity(valuation_fn, curve::AbstractYieldModel, tenors) -> scalar
@@ -1274,8 +1284,8 @@ convexity(kr::KeyRates, curves::NamedTuple, cfs::AbstractVector{<:FinanceCore.Ca
     convexity(kr, curves, _extract_cfs_times(cfs)...)
 
 # Do-block-first forwarders (support `f(args...) do x; ...; end` syntax)
-convexity(vf::Function, kr::KeyRates, curve::AYM)                 = convexity(kr, vf, curve)
-convexity(vf::Function, kr::KeyRates, base::AYM, credit::AYM)     = convexity(kr, vf, base, credit)
+convexity(vf::Function, kr::KeyRates, curve::AYM) = convexity(kr, vf, curve)
+convexity(vf::Function, kr::KeyRates, base::AYM, credit::AYM) = convexity(kr, vf, base, credit)
 
 """
     sensitivities(kr::KeyRates, valuation_fn, curve::AbstractYieldModel) -> NamedTuple
@@ -1299,8 +1309,8 @@ end
 function sensitivities(kr::KeyRates, curve::AYM, cfs, times)
     an = _keyrate_analytic(curve, kr.tenors, cfs, times; order = 2)
     return (;
-        value       = an.value,
-        durations   = -an.gradient ./ an.value,
+        value = an.value,
+        durations = -an.gradient ./ an.value,
         convexities = an.hessian ./ an.value,
     )
 end
@@ -1317,8 +1327,8 @@ end
 function sensitivities(::DV01, kr::KeyRates, curve::AYM, cfs, times)
     an = _keyrate_analytic(curve, kr.tenors, cfs, times; order = 2)
     return (;
-        value       = an.value,
-        dv01s       = -an.gradient ./ 10_000,
+        value = an.value,
+        dv01s = -an.gradient ./ 10_000,
         convexities = an.hessian ./ an.value,
     )
 end
@@ -1336,10 +1346,10 @@ end
 function sensitivities(kr::KeyRates, base::AYM, credit::AYM, cfs, times)
     an = _keyrate_analytic(base, credit, kr.tenors, cfs, times; order = 2)
     return (;
-        value             = an.value,
-        base_durations    = -an.base_gradient   ./ an.value,
-        credit_durations  = -an.credit_gradient ./ an.value,
-        convexities       = _conv_blocks(an),
+        value = an.value,
+        base_durations = -an.base_gradient ./ an.value,
+        credit_durations = -an.credit_gradient ./ an.value,
+        convexities = _conv_blocks(an),
     )
 end
 sensitivities(kr::KeyRates, base::AYM, credit::AYM, cfs::AbstractVector{<:FinanceCore.Cashflow}) = sensitivities(kr, base, credit, _extract_cfs_times(cfs)...)
@@ -1352,9 +1362,9 @@ function sensitivities(kr::KeyRates, curves::NamedTuple, cfs, times)
     an = _ncurve_analytic(curves, kr.tenors, cfs, times; order = 2)
     roles = keys(curves)
     L = length(roles)
-    dur_normalized  = -an.gradient ./ an.value
-    conv_normalized =  an.hessian  ./ an.value
-    durations   = NamedTuple{roles}(ntuple(_ -> dur_normalized, L))
+    dur_normalized = -an.gradient ./ an.value
+    conv_normalized = an.hessian ./ an.value
+    durations = NamedTuple{roles}(ntuple(_ -> dur_normalized, L))
     convexities = NamedTuple{roles}(ntuple(_ -> NamedTuple{roles}(ntuple(_ -> conv_normalized, L)), L))
     return (; value = an.value, durations, convexities)
 end
@@ -1373,18 +1383,18 @@ end
 function sensitivities(::DV01, kr::KeyRates, base::AYM, credit::AYM, cfs, times)
     an = _keyrate_analytic(base, credit, kr.tenors, cfs, times; order = 2)
     return (;
-        value        = an.value,
-        base_dv01s   = -an.base_gradient   ./ 10_000,
+        value = an.value,
+        base_dv01s = -an.base_gradient ./ 10_000,
         credit_dv01s = -an.credit_gradient ./ 10_000,
-        convexities  = _conv_blocks(an),
+        convexities = _conv_blocks(an),
     )
 end
 sensitivities(::DV01, kr::KeyRates, base::AYM, credit::AYM, cfs::AbstractVector{<:FinanceCore.Cashflow}) = sensitivities(DV01(), kr, base, credit, _extract_cfs_times(cfs)...)
 
 # Do-block-first forwarders (support `f(args...) do x; ...; end` syntax)
-sensitivities(vf::Function, kr::KeyRates, curve::AYM)                    = sensitivities(kr, vf, curve)
-sensitivities(vf::Function, ::DV01, kr::KeyRates, curve::AYM)            = sensitivities(DV01(), kr, vf, curve)
-sensitivities(vf::Function, kr::KeyRates, base::AYM, credit::AYM)        = sensitivities(kr, vf, base, credit)
+sensitivities(vf::Function, kr::KeyRates, curve::AYM) = sensitivities(kr, vf, curve)
+sensitivities(vf::Function, ::DV01, kr::KeyRates, curve::AYM) = sensitivities(DV01(), kr, vf, curve)
+sensitivities(vf::Function, kr::KeyRates, base::AYM, credit::AYM) = sensitivities(kr, vf, base, credit)
 sensitivities(vf::Function, ::DV01, kr::KeyRates, base::AYM, credit::AYM) = sensitivities(DV01(), kr, vf, base, credit)
 
 ## ── Contract / portfolio-aware, re-projecting duration & sensitivities ────────
@@ -1397,9 +1407,9 @@ sensitivities(vf::Function, ::DV01, kr::KeyRates, base::AYM, credit::AYM) = sens
 # `KeyRates`; units are the verb (`duration` yrs / `dv01` $ / `convexity`).
 
 _contract_keys(c::FinanceModels.Bond.Floating) = (c.key,)
-_contract_keys(c::FinanceCore.Composite)        = (_contract_keys(c.a)..., _contract_keys(c.b)...)
-_contract_keys(c::FinanceModels.Forward)        = _contract_keys(c.instrument)
-_contract_keys(::FinanceCore.AbstractContract)  = ()
+_contract_keys(c::FinanceCore.Composite) = (_contract_keys(c.a)..., _contract_keys(c.b)...)
+_contract_keys(c::FinanceModels.Forward) = _contract_keys(c.instrument)
+_contract_keys(::FinanceCore.AbstractContract) = ()
 
 const _Contractish = Union{FinanceCore.AbstractContract, AbstractVector{<:FinanceCore.AbstractContract}}
 
@@ -1448,10 +1458,12 @@ function sensitivities(target::_Contractish, forward::AYM, credit::AYM, tenors)
     eff = s.base_durations .+ s.credit_durations
     spr = s.credit_durations
     fwd = s.base_durations
-    return (; value = v,
+    return (;
+        value = v,
         effective_duration = sum(eff), effective_dv01 = sum(eff) * v / 10_000, effective_key_rate = eff,
-        spread_duration    = sum(spr), spread_dv01    = sum(spr) * v / 10_000, spread_key_rate    = spr,
-        forward_duration   = sum(fwd), forward_dv01   = sum(fwd) * v / 10_000, forward_key_rate   = fwd)
+        spread_duration = sum(spr), spread_dv01 = sum(spr) * v / 10_000, spread_key_rate = spr,
+        forward_duration = sum(fwd), forward_dv01 = sum(fwd) * v / 10_000, forward_key_rate = fwd,
+    )
 end
 sensitivities(target::_Contractish, curve::AYM, tenors) = sensitivities(target, curve, curve, tenors)
 
@@ -1467,10 +1479,10 @@ See [`sensitivities`](@ref) for the full one-pass bundle.
 """
 duration(::Effective, target::_Contractish, forward::AYM, credit::AYM, tenors) = sensitivities(target, forward, credit, tenors).effective_duration
 duration(::Effective, target::_Contractish, curve::AYM, tenors) = duration(Effective(), target, curve, curve, tenors)
-duration(::Spread,    target::_Contractish, forward::AYM, credit::AYM, tenors) = sensitivities(target, forward, credit, tenors).spread_duration
-duration(::Spread,    target::_Contractish, curve::AYM, tenors) = duration(Spread(), target, curve, curve, tenors)
+duration(::Spread, target::_Contractish, forward::AYM, credit::AYM, tenors) = sensitivities(target, forward, credit, tenors).spread_duration
+duration(::Spread, target::_Contractish, curve::AYM, tenors) = duration(Spread(), target, curve, curve, tenors)
 duration(::Effective, kr::KeyRates, target::_Contractish, curve::AYM) = sensitivities(target, curve, kr.tenors).effective_key_rate
-duration(::Spread,    kr::KeyRates, target::_Contractish, curve::AYM) = sensitivities(target, curve, kr.tenors).spread_key_rate
+duration(::Spread, kr::KeyRates, target::_Contractish, curve::AYM) = sensitivities(target, curve, kr.tenors).spread_key_rate
 # default (no marker) on a contract/portfolio = effective
 duration(target::_Contractish, curve::AYM, tenors) = duration(Effective(), target, curve, tenors)
 duration(kr::KeyRates, target::_Contractish, curve::AYM) = duration(Effective(), kr, target, curve)
@@ -1492,18 +1504,18 @@ giving the floating-rate dollar durations (years × value ÷ 10⁴).
 """
 dv01(::Effective, target::_Contractish, forward::AYM, credit::AYM, tenors) = sensitivities(target, forward, credit, tenors).effective_dv01
 dv01(::Effective, target::_Contractish, curve::AYM, tenors) = dv01(Effective(), target, curve, curve, tenors)
-dv01(::Spread,    target::_Contractish, forward::AYM, credit::AYM, tenors) = sensitivities(target, forward, credit, tenors).spread_dv01
-dv01(::Spread,    target::_Contractish, curve::AYM, tenors) = dv01(Spread(), target, curve, curve, tenors)
+dv01(::Spread, target::_Contractish, forward::AYM, credit::AYM, tenors) = sensitivities(target, forward, credit, tenors).spread_dv01
+dv01(::Spread, target::_Contractish, curve::AYM, tenors) = dv01(Spread(), target, curve, curve, tenors)
 dv01(args...; kwargs...) = duration(DV01(), args...; kwargs...)
 
 # ── Multi-curve: N named curves, per-role sensitivities in one AD pass ─────────
 function _ncurve_ad(valuation, curves::NamedTuple, tenors)
     roles = keys(curves); k = length(roles); n = length(tenors)
-    f(B) = valuation(NamedTuple{roles}(ntuple(i -> _bumped(curves[i], tenors, view(B, (i-1)*n+1:i*n)), k)))
+    f(B) = valuation(NamedTuple{roles}(ntuple(i -> _bumped(curves[i], tenors, view(B, ((i - 1) * n + 1):(i * n))), k)))
     z = zeros(k * n)
     v = f(z)
     g = ForwardDiff.gradient(f, z)
-    return v, NamedTuple{roles}(ntuple(i -> g[(i-1)*n+1:i*n], k))
+    return v, NamedTuple{roles}(ntuple(i -> g[((i - 1) * n + 1):(i * n)], k))
 end
 
 """
@@ -1520,10 +1532,12 @@ matching-adjustment / basis are just additional named curves.
 function sensitivities(valuation, curves::NamedTuple; tenors)
     v, grads = _ncurve_ad(valuation, curves, tenors)
     roles = keys(curves)
-    return (; value = v,
+    return (;
+        value = v,
         duration = NamedTuple{roles}(map(g -> -sum(g) / v, values(grads))),
-        dv01     = NamedTuple{roles}(map(g -> -sum(g) / 10_000, values(grads))),
-        key_rate = NamedTuple{roles}(map(g -> -g ./ v, values(grads))))
+        dv01 = NamedTuple{roles}(map(g -> -sum(g) / 10_000, values(grads))),
+        key_rate = NamedTuple{roles}(map(g -> -g ./ v, values(grads))),
+    )
 end
 sensitivities(curves::NamedTuple, valuation::Function; tenors) = sensitivities(valuation, curves; tenors)  # do-block form
 function sensitivities(target::_Contractish, tenors::AbstractVector; discount::NamedTuple, index)
@@ -1540,7 +1554,7 @@ Constant continuously-compounded spread `s` on the `credit` (discount) curve suc
 the model price equals `market_price`, with coupons estimated on `forward` (held fixed).
 Returns the spread and its sensitivity (\\\$/1bp parallel move of `credit + s`). Newton + AD.
 """
-function zspread(contract::FinanceCore.AbstractContract, credit::AYM, market_price; forward::AYM = credit, s0 = 0.0, tol = 1e-12, maxiter = 100)
+function zspread(contract::FinanceCore.AbstractContract, credit::AYM, market_price; forward::AYM = credit, s0 = 0.0, tol = 1.0e-12, maxiter = 100)
     ks = _contract_keys(contract)
     pvs(s) = let disc = credit + ((z, t) -> z + FinanceCore.Continuous(s))
         isempty(ks) ? FinanceCore.present_value(disc, contract) :
@@ -1584,8 +1598,10 @@ function locked_floater(fl::FinanceModels.Bond.Floating, current_coupon, next_re
         )
     )
     stub = FinanceCore.Cashflow(current_coupon, next_reset)
-    rest = FinanceModels.Forward(next_reset,
-        FinanceModels.Bond.Floating(fl.coupon_rate, fl.frequency, fl.maturity - next_reset, fl.key))
+    rest = FinanceModels.Forward(
+        next_reset,
+        FinanceModels.Bond.Floating(fl.coupon_rate, fl.frequency, fl.maturity - next_reset, fl.key)
+    )
     return FinanceCore.Composite(stub, rest)
 end
 
@@ -1610,43 +1626,51 @@ end
 # times for value, gradient chunks, and Hessian chunks). Snapshot a UInt64 from
 # the user's rng once per call and rebuild a fresh `Xoshiro(seed)` inside the
 # closure so every AD step draws the same scenarios.
-function sensitivities(kr::KeyRates, valuation_fn::Function, hw::HW;
-                       n_scenarios=1000, timestep=1/12, horizon=30.0,
-                       rng=Random.default_rng())
+function sensitivities(
+        kr::KeyRates, valuation_fn::Function, hw::HW;
+        n_scenarios = 1000, timestep = 1 / 12, horizon = 30.0,
+        rng = Random.default_rng()
+    )
     seed = rand(rng, UInt64)
-    sensitivities(kr, hw.curve) do curve
-        valuation_fn(_hw_paths(hw, curve; n_scenarios, timestep, horizon, rng=Random.Xoshiro(seed)))
+    return sensitivities(kr, hw.curve) do curve
+        valuation_fn(_hw_paths(hw, curve; n_scenarios, timestep, horizon, rng = Random.Xoshiro(seed)))
     end
 end
 
-function sensitivities(::DV01, kr::KeyRates, valuation_fn::Function, hw::HW;
-                       n_scenarios=1000, timestep=1/12, horizon=30.0,
-                       rng=Random.default_rng())
+function sensitivities(
+        ::DV01, kr::KeyRates, valuation_fn::Function, hw::HW;
+        n_scenarios = 1000, timestep = 1 / 12, horizon = 30.0,
+        rng = Random.default_rng()
+    )
     seed = rand(rng, UInt64)
-    sensitivities(DV01(), kr, hw.curve) do curve
-        valuation_fn(_hw_paths(hw, curve; n_scenarios, timestep, horizon, rng=Random.Xoshiro(seed)))
+    return sensitivities(DV01(), kr, hw.curve) do curve
+        valuation_fn(_hw_paths(hw, curve; n_scenarios, timestep, horizon, rng = Random.Xoshiro(seed)))
     end
 end
 
 # Do-block-first forwarders (support `f(args...) do x; ...; end` syntax)
-sensitivities(vf::Function, kr::KeyRates, hw::HW; kw...)         = sensitivities(kr, vf, hw; kw...)
+sensitivities(vf::Function, kr::KeyRates, hw::HW; kw...) = sensitivities(kr, vf, hw; kw...)
 sensitivities(vf::Function, ::DV01, kr::KeyRates, hw::HW; kw...) = sensitivities(DV01(), kr, vf, hw; kw...)
 
 # Cashflow-form wrappers that delegate to the do-block forms above
-function sensitivities(kr::KeyRates, hw::HW, cfs::AbstractVector, times;
-                       n_scenarios=1000, timestep=1/12, horizon=nothing,
-                       rng=Random.default_rng())
+function sensitivities(
+        kr::KeyRates, hw::HW, cfs::AbstractVector, times;
+        n_scenarios = 1000, timestep = 1 / 12, horizon = nothing,
+        rng = Random.default_rng()
+    )
     h = horizon === nothing ? maximum(times) + 1.0 : Float64(horizon)
-    sensitivities(kr, hw; n_scenarios, timestep, horizon=h, rng) do scenarios
+    return sensitivities(kr, hw; n_scenarios, timestep, horizon = h, rng) do scenarios
         sum(FinanceCore.pv(sc, cfs, times) for sc in scenarios) / n_scenarios
     end
 end
 
-function sensitivities(::DV01, kr::KeyRates, hw::HW, cfs::AbstractVector, times;
-                       n_scenarios=1000, timestep=1/12, horizon=nothing,
-                       rng=Random.default_rng())
+function sensitivities(
+        ::DV01, kr::KeyRates, hw::HW, cfs::AbstractVector, times;
+        n_scenarios = 1000, timestep = 1 / 12, horizon = nothing,
+        rng = Random.default_rng()
+    )
     h = horizon === nothing ? maximum(times) + 1.0 : Float64(horizon)
-    sensitivities(DV01(), kr, hw; n_scenarios, timestep, horizon=h, rng) do scenarios
+    return sensitivities(DV01(), kr, hw; n_scenarios, timestep, horizon = h, rng) do scenarios
         sum(FinanceCore.pv(sc, cfs, times) for sc in scenarios) / n_scenarios
     end
 end

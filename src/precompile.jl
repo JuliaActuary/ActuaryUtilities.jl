@@ -1,4 +1,3 @@
-
 # created with the help of SnoopCompile.jl
 @setup_workload begin
     # Putting some things in `setup` can reduce the size of the
@@ -6,7 +5,7 @@
     cfs = Float64[10 for i in 1:10]
 
     # 2021-03-31 rates from Treasury.gov
-    rates = [0.01, 0.01, 0.03, 0.05, 0.07, 0.16, 0.35, 0.92, 1.40, 1.74, 2.31, 2.41] ./ 100
+    rates = [0.01, 0.01, 0.03, 0.05, 0.07, 0.16, 0.35, 0.92, 1.4, 1.74, 2.31, 2.41] ./ 100
     mats = [1 / 12, 2 / 12, 3 / 12, 6 / 12, 1, 2, 3, 5, 7, 10, 20, 30]
 
     y = FinanceModels.fit(FinanceModels.Spline.Linear(), FinanceModels.CMTYield.(rates, mats), FinanceModels.Fit.Bootstrap())
@@ -32,7 +31,6 @@
 
         end
         spread(y, y + 0.01, cfs)
-
 
 
         years_between(Dates.Date(2018, 9, 30), Dates.Date(2018, 9, 30))

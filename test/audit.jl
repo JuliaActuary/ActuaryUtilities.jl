@@ -67,7 +67,7 @@
 end
 
 @testset "present_values" begin
-    @test present_values(0.00, [1, 1, 1]) ≈ [3.0, 2.0, 1.0]
+    @test present_values(0.0, [1, 1, 1]) ≈ [3.0, 2.0, 1.0]
     # pvs[k] is the value at times[k-1] (time zero for k = 1) of flows k..n
     v = present_values(0.1, [10, 20], [0, 1])
     @test v ≈ [10 + 20 / 1.1, 20 / 1.1]
@@ -154,7 +154,7 @@ end
     dn = [100.0, -52.0]
     sdn = spread(0.04, 0.05, dn)
     @test FC.pv(0.04 + sdn, dn) ≈ FC.pv(0.05, dn) atol = 1.0e-10
-    rates = [0.01, 0.01, 0.03, 0.05, 0.07, 0.16, 0.35, 0.92, 1.40, 1.74, 2.31, 2.41] ./ 100
+    rates = [0.01, 0.01, 0.03, 0.05, 0.07, 0.16, 0.35, 0.92, 1.4, 1.74, 2.31, 2.41] ./ 100
     mats = [1 / 12, 2 / 12, 3 / 12, 6 / 12, 1, 2, 3, 5, 7, 10, 20, 30]
     y = FM.fit(FM.Spline.Linear(), FM.CMTYield.(rates, mats), FM.Fit.Bootstrap())
     s2 = spread(y, y + 0.01, cfs)
@@ -195,7 +195,7 @@ end
     @test_throws DimensionMismatch sensitivities(kr, curve, [1.0, 2.0, 3.0], [1.0, 2.0])
     # Extra time positions represent zero cashflows and are intentionally harmless.
     @test sensitivities(kr, curve, [1.0, 2.0], [1.0, 2.0, 3.0]) ==
-          sensitivities(kr, curve, [1.0, 2.0], [1.0, 2.0])
+        sensitivities(kr, curve, [1.0, 2.0], [1.0, 2.0])
 end
 
 @testset "locked_floater requires whole coupon periods on the forward leg" begin

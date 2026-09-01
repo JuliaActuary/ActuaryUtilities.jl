@@ -86,14 +86,16 @@ growth heuristics.
 - "Optimal Transport for Actuarial Science", Arthur Charpentier, 2026.
   [⟨hal-05684645⟩](https://hal.science/hal-05684645)
 """
-function wasserstein(a, b; p::Real=1, rtol::Real=1.0e-6,
-                     atol::Real=0, maxevals::Union{Nothing,Integer}=nothing)
+function wasserstein(
+        a, b; p::Real = 1, rtol::Real = 1.0e-6,
+        atol::Real = 0, maxevals::Union{Nothing, Integer} = nothing
+    )
     (p >= 1 && (isfinite(p) || p == Inf)) ||
         throw(ArgumentError("p must be finite and ≥ 1, or Inf; got $p"))
     (isfinite(rtol) && rtol >= 0) || throw(ArgumentError("rtol must be finite and nonnegative"))
     (isfinite(atol) && atol >= 0) || throw(ArgumentError("atol must be finite and nonnegative"))
     (isnothing(maxevals) || maxevals > 0) || throw(ArgumentError("maxevals must be positive"))
-    _wasserstein(a, b, p; rtol, atol, maxevals)
+    return _wasserstein(a, b, p; rtol, atol, maxevals)
 end
 
 # both samples: exact in both cases. Equal sizes reduce to sorted point-by-point
@@ -132,7 +134,7 @@ function _divergent_quantile_tail(f)
         width = ε / 2
         width * (f(3ε / 4) + f(1 - 3ε / 4))
     end
-    tail = @view shells[end-4:end]
+    tail = @view shells[(end - 4):end]
     return all(isfinite, tail) && minimum(tail) > 0 && minimum(tail) / maximum(tail) > 0.98
 end
 
@@ -147,7 +149,7 @@ function _wasserstein_finite(a, b, p; rtol, atol, maxevals)
     # distribution quantile rather than repeatedly rediscovering every rank.
     points = sort!(unique!([0.0; 0.5; _quantile_breaks(a); _quantile_breaks(b); 1.0]))
     budget = isnothing(maxevals) ? max(100_000, 30 * (length(points) - 1)) : maxevals
-    integral, err = QuadGK.quadgk(f, points; rtol, atol, maxevals=budget)
+    integral, err = QuadGK.quadgk(f, points; rtol, atol, maxevals = budget)
     tolerance = max(atol, rtol * abs(integral))
     if !isfinite(integral)
         return Inf
@@ -172,15 +174,15 @@ function _support_proves_infinite(a, b)
 end
 
 function _wasserstein_infinity(a::Distributions.Normal, b::Distributions.Normal; kwargs...)
-    a.σ == b.σ ? abs(a.μ - b.μ) : Inf
+    return a.σ == b.σ ? abs(a.μ - b.μ) : Inf
 end
 
 function _wasserstein_infinity(a::Distributions.LogNormal, b::Distributions.LogNormal; kwargs...)
-    Distributions.params(a) == Distributions.params(b) ? 0.0 : Inf
+    return Distributions.params(a) == Distributions.params(b) ? 0.0 : Inf
 end
 
 function _wasserstein_infinity(a::Distributions.Cauchy, b::Distributions.Cauchy; kwargs...)
-    a.σ == b.σ ? abs(a.μ - b.μ) : Inf
+    return a.σ == b.σ ? abs(a.μ - b.μ) : Inf
 end
 
 function _wasserstein_infinity(a, b; rtol, atol, maxevals)
@@ -219,7 +221,7 @@ end
 
 # At least one argument is a distribution: use verified adaptive computation.
 function _wasserstein(a, b, p; rtol, atol, maxevals)
-    isinf(p) ? _wasserstein_infinity(a, b; rtol, atol, maxevals) :
+    return isinf(p) ? _wasserstein_infinity(a, b; rtol, atol, maxevals) :
         _wasserstein_finite(a, b, p; rtol, atol, maxevals)
 end
 
@@ -347,8 +349,10 @@ julia> CTE(0.95)(s), robustvalue(CTE(0.95), s; radius=250)   # ≈ (2980, 4100)
 `VaR`, `WangTransform`, or any custom `RiskMeasure` (supply `tail` for measures
 without a natural tail level).
 """
-function robustvalue(rm::RiskMeasure, sample::AbstractVector{<:Real};
-    radius::Real, p::Real=2, tail::Real=_taillevel(rm))
+function robustvalue(
+        rm::RiskMeasure, sample::AbstractVector{<:Real};
+        radius::Real, p::Real = 2, tail::Real = _taillevel(rm)
+    )
     radius >= 0 || throw(ArgumentError("radius must be ≥ 0, got $radius"))
     0 <= tail < 1 || throw(ArgumentError("tail must be in [0, 1), got $tail"))
     p >= 1 || throw(ArgumentError("p must be ≥ 1, got $p"))
