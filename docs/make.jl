@@ -2,15 +2,15 @@ using Documenter, ActuaryUtilities, FinanceCore
 
 # Setup for doctests embedded in docstrings.
 # DayCounts comes from docs/Project.toml (a runtime Pkg.add here was fragile).
-DocMeta.setdocmeta!(ActuaryUtilities, :DocTestSetup, :(using ActuaryUtilities, Dates, DayCounts), recursive=true)
+DocMeta.setdocmeta!(ActuaryUtilities, :DocTestSetup, :(using ActuaryUtilities, Dates, DayCounts), recursive = true)
 
 makedocs(;
-    modules=[ActuaryUtilities, FinanceCore],
-    format=Documenter.HTML(;
-        prettyurls=get(ENV, "CI", "false") == "true",
-        canonical="https://docs.juliaactuary.org/ActuaryUtilities",
+    modules = [ActuaryUtilities, FinanceCore],
+    format = Documenter.HTML(;
+        prettyurls = get(ENV, "CI", "false") == "true",
+        canonical = "https://docs.juliaactuary.org/ActuaryUtilities",
     ),
-    pages=[
+    pages = [
         "Overview" => "index.md",
         "Financial Math" => "financial_math.md",
         "Key Rate Sensitivities" => "sensitivities.md",
@@ -22,11 +22,11 @@ makedocs(;
         ],
         "Upgrade from Prior Versions" => "upgrade.md",
     ],
-    repo=Remotes.GitHub("JuliaActuary", "ActuaryUtilities.jl"),
-    sitename="ActuaryUtilities.jl",
-    authors="Alec Loudenback"
+    repo = Remotes.GitHub("JuliaActuary", "ActuaryUtilities.jl"),
+    sitename = "ActuaryUtilities.jl",
+    authors = "Alec Loudenback"
 )
 
 deploydocs(;
-    repo="github.com/JuliaActuary/ActuaryUtilities.jl"
+    repo = "github.com/JuliaActuary/ActuaryUtilities.jl"
 )

@@ -32,7 +32,7 @@ julia> years_between(d1,d2) # using default `true` overlap
 1 
 ```
 """
-function years_between(d1::Dates.Date, d2::Dates.Date, overlap=true)
+function years_between(d1::Dates.Date, d2::Dates.Date, overlap = true)
     iy, im, id = Dates.year(d1), Dates.month(d1), Dates.day(d1)
     vy, vm, vd = Dates.year(d2), Dates.month(d2), Dates.day(d2)
     dur = vy - iy
@@ -124,11 +124,11 @@ julia> accum_offset(1:5,op=+)
 ```
 
 """
-function accum_offset(x; op=*, init=1.0)
+function accum_offset(x; op = *, init = 1.0)
     xnew = similar(x)
     xnew[1] = init
     for i in 2:length(x)
-        xnew[i] = op(xnew[i-1], x[i-1])
+        xnew[i] = op(xnew[i - 1], x[i - 1])
     end
     return xnew
 end

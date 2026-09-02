@@ -107,7 +107,7 @@ julia> rm(rand(1000))
 0.9597070153670079
 ```
 """
-struct VaR{T<:Real} <: RiskMeasure
+struct VaR{T <: Real} <: RiskMeasure
     α::T
 
     function VaR(α::T) where {T}
@@ -169,7 +169,7 @@ julia> rm(rand(1000))
 0.9739835010268733
 ```
 """
-struct CTE{T<:Real} <: RiskMeasure
+struct CTE{T <: Real} <: RiskMeasure
     α::T
 
     function CTE(α::T) where {T}
@@ -228,11 +228,11 @@ struct WangTransform{T} <: RiskMeasure
 end
 function g(rm::WangTransform, x)
     Φ_inv(x) = Distributions.quantile(Distributions.Normal(), x)
-    Distributions.cdf(Distributions.Normal(), Φ_inv(x) + Φ_inv(rm.α))
+    return Distributions.cdf(Distributions.Normal(), Φ_inv(x) + Φ_inv(rm.α))
 end
 function gbar(rm::WangTransform, F)
     Φ_inv(x) = Distributions.quantile(Distributions.Normal(), x)
-    Distributions.cdf(Distributions.Normal(), Φ_inv(F) - Φ_inv(rm.α))
+    return Distributions.cdf(Distributions.Normal(), Φ_inv(F) - Φ_inv(rm.α))
 end
 
 """
@@ -325,7 +325,7 @@ end
 _finite_atoms(d::Distributions.DiscreteUnivariateDistribution) =
     d isa Distributions.DiscreteNonParametric || Distributions.hasfinitesupport(d)
 
-function _choquet(rm::RiskMeasure, risk; rtol=sqrt(eps(Float64)), atol=0.0, maxevals=10^7)
+function _choquet(rm::RiskMeasure, risk; rtol = sqrt(eps(Float64)), atol = 0.0, maxevals = 10^7)
     (isfinite(rtol) && rtol >= 0) || throw(ArgumentError("rtol must be finite and nonnegative"))
     (isfinite(atol) && atol >= 0) || throw(ArgumentError("atol must be finite and nonnegative"))
     maxevals > 0 || throw(ArgumentError("maxevals must be positive"))
@@ -334,8 +334,8 @@ function _choquet(rm::RiskMeasure, risk; rtol=sqrt(eps(Float64)), atol=0.0, maxe
     # Each side runs at half the requested tolerance. The two certificates then
     # add up to at most the requested tolerance at the components' scale, so the
     # final acceptance check below cannot fail on converged components.
-    upper, uerr = QuadGK.quadgk(x -> g(rm, G(x)), 0, Inf; rtol=rtol / 2, atol=atol / 2, maxevals)
-    lower, lerr = QuadGK.quadgk(x -> gbar(rm, F(x)), -Inf, 0; rtol=rtol / 2, atol=atol / 2, maxevals)
+    upper, uerr = QuadGK.quadgk(x -> g(rm, G(x)), 0, Inf; rtol = rtol / 2, atol = atol / 2, maxevals)
+    lower, lerr = QuadGK.quadgk(x -> gbar(rm, F(x)), -Inf, 0; rtol = rtol / 2, atol = atol / 2, maxevals)
     _check_component(upper, uerr, rtol / 2, atol / 2)
     _check_component(lower, lerr, rtol / 2, atol / 2)
     result = upper - lower
@@ -345,8 +345,11 @@ function _choquet(rm::RiskMeasure, risk; rtol=sqrt(eps(Float64)), atol=0.0, maxe
     # met the requested tolerance; it does not prove the integral exists.
     err_total = uerr + lerr
     tolerance = max(atol, rtol * abs(result), rtol * max(upper, lower))
-    err_total <= tolerance || throw(ErrorException(
-        "distortion risk measure quadrature could not verify the result: combined error estimate $err_total exceeds tolerance $tolerance"))
+    err_total <= tolerance || throw(
+        ErrorException(
+            "distortion risk measure quadrature could not verify the result: combined error estimate $err_total exceeds tolerance $tolerance"
+        )
+    )
     return result
 end
 
@@ -355,9 +358,12 @@ end
 # are false, so `isfinite(err)` must be checked explicitly.
 function _check_component(I, err, rtol, atol)
     (isfinite(I) && isfinite(err) && err >= 0 && err <= max(atol, rtol * abs(I))) ||
-        throw(ErrorException(
+        throw(
+        ErrorException(
             "distortion risk measure quadrature did not converge (integral ≈ $I, estimated error $err): " *
-            "the distorted expectation may not exist for this risk (e.g. heavy tails such as Cauchy, or Pareto with tail index ≤ 1)"))
+                "the distorted expectation may not exist for this risk (e.g. heavy tails such as Cauchy, or Pareto with tail index ≤ 1)"
+        )
+    )
     return nothing
 end
 
@@ -400,7 +406,7 @@ end
 # until (a) the un-scanned distorted tail is provably negligible and (b) two
 # successive doublings agree within `rtol`. A distorted tail whose sum does not
 # stabilize within the atom budget throws.
-function _distorted_tail_sum(rm::RiskMeasure, d, lo::Integer; rtol=sqrt(eps(Float64)), maxatoms=2^24)
+function _distorted_tail_sum(rm::RiskMeasure, d, lo::Integer; rtol = sqrt(eps(Float64)), maxatoms = 2^24)
     acc = 0.0
     consumed = 0
     N = 32
@@ -436,8 +442,11 @@ function _distorted_tail_sum(rm::RiskMeasure, d, lo::Integer; rtol=sqrt(eps(Floa
         previous = acc
         N *= 2
     end
-    throw(ErrorException(
-        "distortion risk measure tail sum did not converge within $maxatoms atoms: the distorted expectation may not exist for this risk"))
+    throw(
+        ErrorException(
+            "distortion risk measure tail sum did not converge within $maxatoms atoms: the distorted expectation may not exist for this risk"
+        )
+    )
 end
 
 # ── Exact empirical specializations ─────────────────────────────────────────
@@ -512,7 +521,7 @@ function (rm::CTE)(risk::AbstractArray{<:Real})
     tail = partialsort(vec(risk), k:n)
     T = float(promote_type(eltype(risk), typeof(α)))
     partial = (T(k) / n - α) * first(tail)
-    rest = sum(x -> T(x) / n, @view(tail[2:end]); init=zero(T))
+    rest = sum(x -> T(x) / n, @view(tail[2:end]); init = zero(T))
     return (partial + rest) / (1 - α)
 end
 
@@ -575,8 +584,11 @@ function (rm::CTE)(risk::Distributions.UnivariateDistribution)
     rtol, atol, maxevals = sqrt(eps(Float64)), 0.0, 10^7
     I, err = QuadGK.quadgk(u -> Distributions.quantile(risk, u), α, 1; rtol, atol, maxevals)
     (isfinite(I) && isfinite(err) && err >= 0 && err <= max(atol * (1 - α), rtol * abs(I))) ||
-        throw(ErrorException(
-            "CTE quantile integral did not converge (integral ≈ $I, estimated error $err): E[X⁺] may be infinite for this risk"))
+        throw(
+        ErrorException(
+            "CTE quantile integral did not converge (integral ≈ $I, estimated error $err): E[X⁺] may be infinite for this risk"
+        )
+    )
     return I / (1 - α)
 end
 

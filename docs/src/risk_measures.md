@@ -84,11 +84,11 @@ Adaptive risk measures are exhaustive but the converse is not true.
 
 | Measure      | Coherent | Complete | Exhaustive | Adaptable | Condition 2 |
 |--------------|----------|----------|------------|-----------|-------------|
-| [VaR](@ref)        | No       | No       | No         | No        | No          |
-| [CTE](@ref)       | Yes      | No       | No         | No        | No          |
-| [DualPower](@ref) $(y > 1)$   | Yes      | Yes      | Yes        | No        | Yes         |
-| [ProportionalHazard](@ref) $(γ > 1)$   | Yes      | Yes      | Yes        | No        | Yes         |
-| [WangTransform](@ref)           | Yes      | Yes      | Yes        | Yes       | Yes         |
+| [VaR](@ref ActuaryUtilities.RiskMeasures.VaR)        | No       | No       | No         | No        | No          |
+| [CTE](@ref ActuaryUtilities.RiskMeasures.CTE)       | Yes      | No       | No         | No        | No          |
+| [DualPower](@ref ActuaryUtilities.RiskMeasures.DualPower) $(y > 1)$   | Yes      | Yes      | Yes        | No        | Yes         |
+| [ProportionalHazard](@ref ActuaryUtilities.RiskMeasures.ProportionalHazard) $(γ > 1)$   | Yes      | Yes      | Yes        | No        | Yes         |
+| [WangTransform](@ref ActuaryUtilities.RiskMeasures.WangTransform)           | Yes      | Yes      | Yes        | Yes       | Yes         |
 
 ## Distortion Risk Measures
 
