@@ -549,15 +549,31 @@ end
         times = [1.0, 2.0, 3.0, 4.0, 5.0]
 
         scalar_form = convexity(zrc, tenors, cfs, times)
+        no_tenor_form = convexity(zrc, cfs, times)
         matrix_sum = sum(convexity(KeyRates(tenors), zrc, cfs, times))
+        @test no_tenor_form ≈ scalar_form atol = 1.0e-12
         @test scalar_form ≈ matrix_sum atol = 1.0e-8
 
+        # Independent central-difference oracle: curve inputs are bumped in
+        # continuously compounded zero-rate space in both directions.
+        value(c) = sum(cf * FC.discount(c, t) for (cf, t) in zip(cfs, times))
+        Δ = 1.0e-4
+        up = zrc + FC.Continuous(+Δ)
+        down = zrc + FC.Continuous(-Δ)
+        finite_difference = (value(up) + value(down) - 2value(zrc)) / (value(zrc) * Δ^2)
+        @test no_tenor_form ≈ finite_difference atol = 1.0e-6
+
         vf_scalar = convexity(c -> sum(cf * FC.discount(c, t) for (cf, t) in zip(cfs, times)), zrc, tenors)
+        vf_no_tenor = convexity(zrc) do c
+            sum(cf * FC.discount(c, t) for (cf, t) in zip(cfs, times))
+        end
         vf_matrix = sum(convexity(KeyRates(tenors), c -> sum(cf * FC.discount(c, t) for (cf, t) in zip(cfs, times)), zrc))
+        @test vf_no_tenor ≈ vf_scalar atol = 1.0e-12
         @test vf_scalar ≈ vf_matrix atol = 1.0e-8
 
         # Cashflow-vector form
         cashflows = [FC.Cashflow(cfs[k], times[k]) for k in eachindex(cfs)]
+        @test convexity(zrc, cashflows) ≈ scalar_form atol = 1.0e-12
         @test convexity(zrc, tenors, cashflows) ≈ matrix_sum atol = 1.0e-8
     end
 
@@ -624,6 +640,8 @@ end
         # scalar ZRC duration ≈ scalar yield duration for flat curve
         # ZRC uses continuous compounding, so compare with Continuous rate
         @test scalar_dur ≈ duration(FC.Continuous(0.04), cfs, tenors) atol = 1.0e-4
+        @test convexity(zrc, cfs, tenors) ≈
+            convexity(FC.Continuous(0.04), cfs, tenors) atol = 1.0e-8
     end
 
     @testset "scalar return: two-curve duration and convexity" begin
@@ -1157,16 +1175,12 @@ end
         price(i, cfs, times)
     end
     @test cv ≈ convexity(c, cfs, times)
+    @test cv ≈ convexity(FC.Continuous(log1p(0.04)), cfs, times)
 end
 
-@testset "Scalar do-block on ZRC falls through to generic FD path" begin
-    # Previously a ZRC-specific dispatch routed `duration(fn, zrc)` /
-    # `convexity(fn, zrc)` through the AD KRD path. With the unified API,
-    # those 2-arg calls fall through to the generic `duration(yield, vf)`
-    # FD-based scalar path — which adds a parallel shift via Periodic
-    # compounding, not Continuous, so the numerical values are not bitwise
-    # comparable to `sum(KRDs)` (which differentiates w.r.t. continuous zero
-    # rates). We just verify the calls execute and return a Real scalar.
+@testset "Scalar do-block on ZRC uses continuous curve shocks" begin
+    # No-tenor do-block calls use the same continuous-zero parallel shift as
+    # the tenor-aware and key-rate APIs.
     rates = [0.04, 0.04, 0.04, 0.04, 0.04]
     tenors = [1.0, 2.0, 3.0, 4.0, 5.0]
     zrc = FM.ZeroRateCurve(rates, tenors, FM.Spline.Linear())
@@ -1177,11 +1191,13 @@ end
         sum(cf * curve(t) for (cf, t) in zip(cfs, times))
     end
     @test vf_dur isa Real
+    @test vf_dur ≈ duration(zrc, tenors, cfs, times) atol = 1.0e-12
 
     vf_conv = convexity(zrc) do curve
         sum(cf * curve(t) for (cf, t) in zip(cfs, times))
     end
     @test vf_conv isa Real
+    @test vf_conv ≈ convexity(zrc, tenors, cfs, times) atol = 1.0e-12
 end
 
 # Custom AbstractYieldModel: a composite of two flat curves, multiplicative in
@@ -1475,12 +1491,13 @@ end
         # chain rule. The optimized `convexity(::Effective, …)` computes that
         # scalar directly via TenorShift, in O(1) rather than O(N²) AD work.
         # Locks the numerical equivalence in for future refactors of either
-        # path. Note: `convexity(curve, cfs)` uses a *periodic* shock and is
-        # NOT equivalent here — see `_parallel_continuous_convexity` for why.
+        # path. The no-tenor curve form uses the same continuous-zero shock.
         cfs = collect(FM.Projection(fb, curve, FM.CashflowProjection()))
         amts = FC.amount.(cfs); times = FC.timepoint.(cfs)
         @test convexity(Effective(), fb, curve, tenors) ≈
             sum(convexity(KeyRates(tenors), curve, amts, times)) atol = 1.0e-8
+        @test convexity(curve, cfs) ≈
+            convexity(Effective(), fb, curve, tenors) atol = 1.0e-8
     end
 
     @testset "default duration & dv01 verb" begin

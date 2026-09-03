@@ -110,7 +110,12 @@ The Nelson-Siegel parameters stay fixed; only the layered zero-rate bumps move u
 
 ## Scalar vs Key-Rate Decomposition
 
-By default, `duration` and `convexity` (without `KeyRates`) return **scalars** — the total modified duration, DV01, or convexity. This is consistent with the yield-based API (`duration(0.03, cfs, times)`).
+By default, `duration` and `convexity` (without `KeyRates`) return **scalars** — the total modified duration, DV01, or convexity. This mirrors the scalar-return shape of the yield-based API (`duration(0.03, cfs, times)`).
+
+For an `AbstractYieldModel`, scalar duration and convexity use an additive
+parallel shift in continuously compounded zero-rate space. This is the same
+shock coordinate used by the tenor-aware and key-rate forms. Plain scalar and
+explicit `Rate` inputs continue to use their own compounding conventions.
 
 To obtain the per-tenor decomposition, pass `KeyRates(tenors)` as the first argument:
 
@@ -132,17 +137,22 @@ The scalar value equals the sum of the key-rate decomposition:
 
 ```@example sensitivities
 duration(zrc, tenors, cfs, tenors) ≈ sum(duration(KeyRates(tenors), zrc, cfs, tenors))
+convexity(zrc, cfs, tenors) ≈ convexity(zrc, tenors, cfs, tenors)
+convexity(zrc, tenors, cfs, tenors) ≈ sum(convexity(KeyRates(tenors), zrc, cfs, tenors))
 ```
 
-For a flat curve, the scalar modified duration matches the yield-based API:
+For a flat curve, the scalar measures match an explicitly continuous rate at
+the same zero-rate level:
 
 ```@example sensitivities
 flat_cfs    = [5.0, 5.0, 5.0, 5.0, 105.0]
 flat_tenors = [1.0, 2.0, 3.0, 4.0, 5.0]
 flat_zrc    = ZeroRateCurve(fill(0.03, 5), flat_tenors)
 
-(zrc_dur     = duration(flat_zrc, flat_tenors, flat_cfs, flat_tenors),
- yield_dur   = duration(0.03, flat_cfs, flat_tenors))
+(zrc_dur   = duration(flat_zrc, flat_cfs, flat_tenors),
+ rate_dur  = duration(Continuous(0.03), flat_cfs, flat_tenors),
+ zrc_conv  = convexity(flat_zrc, flat_cfs, flat_tenors),
+ rate_conv = convexity(Continuous(0.03), flat_cfs, flat_tenors))
 ```
 
 For Macaulay duration, use the scalar yield API directly — there is no `ZeroRateCurve` dispatch:

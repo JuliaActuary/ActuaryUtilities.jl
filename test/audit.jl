@@ -1,10 +1,14 @@
 # Regression and equivalence tests from the 2026-06 ecosystem audit
 @testset "analytic fast paths match the generic AD path" begin
-    # the generic scalar path: nested ForwardDiff through `i + yield`
+    # The generic scalar path uses the input's own compounding convention for
+    # rates and a continuous-zero shift for yield models.
     generic_duration(yield, cfs, times) = duration(yield, i -> ActuaryUtilities.FinancialMath.price(i, cfs, times))
+    parallel_bump(yield, x) = yield + x
+    parallel_bump(yield::FM.Yield.AbstractYieldModel, x) =
+        FM.Yield.TenorShift(yield, (z, t) -> z + FC.Continuous(x))
     function generic_convexity(yield, cfs, times)
         vf = i -> ActuaryUtilities.FinancialMath.price(i, cfs, times)
-        v(x) = abs(vf(yield + x))
+        v(x) = abs(vf(parallel_bump(yield, x)))
         ForwardDiff.derivative(y -> ForwardDiff.derivative(v, y), 0.0) / v(0.0)
     end
 

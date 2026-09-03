@@ -111,16 +111,18 @@ FRTB = [0.25, 0.5, 1, 2, 3, 5, 10, 15, 20, 30]
 duration(KeyRates(FRTB), pv, fitted_curve)
 ```
 
-**Non-breaking — scalar duration / convexity / DV01 calls** fall through to the generic finite-difference scalar path and continue to work without `tenors`:
+**Scalar duration / convexity / DV01 calls** continue to work without `tenors`. Yield-model inputs use an additive continuous-zero-rate parallel shock:
 
 ```julia
-duration(zrc, cfs, times)              # still works (FD scalar)
-duration(DV01(), zrc, cfs, times)      # still works (FD scalar)
-convexity(zrc, cfs, times)             # still works (FD scalar)
-duration(zrc) do c; pv(c); end         # still works (FD scalar)
+duration(zrc, cfs, times)              # continuous-zero scalar AD
+duration(DV01(), zrc, cfs, times)      # continuous-zero scalar AD
+convexity(zrc, cfs, times)             # same shock as the tenor-aware form
+duration(zrc) do c; pv(c); end         # continuous-zero scalar AD
 ```
 
-Numerical values agree with the v5.6 AD-based scalars to FD precision (~1e-6).
+The no-tenor curve convexity therefore equals the tenor-aware parallel
+convexity and the sum of the key-rate convexity matrix. Plain scalar and
+explicit `Rate` inputs retain their own compounding conventions.
 
 **Per-knot KRDs may shift slightly for non-Linear-spline `ZeroRateCurve` inputs.** The new AD path uses triangular-hat bumps; the old path propagated AD through the curve's spline. For `Spline.Linear()` ZRCs the answers are bitwise identical. For `Spline.MonotoneConvex()` (the default), `PCHIP`, `Cubic`, etc., per-knot KRDs differ by sub-bp on discount factors at typical knot spacing. **Sum of KRDs, scalar modified duration, and parallel-shift sensitivity are all invariant.** The new convention matches the textbook KRD definition and is independent of the curve's interpolator choice.
 

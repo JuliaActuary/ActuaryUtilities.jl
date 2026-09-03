@@ -287,7 +287,7 @@ When not given `Modified()` or `Macaulay()` as an argument, will default to `Mod
 The Modified duration returned depends on the space in which the parallel rate shock is applied, and this differs between plain rates and yield *models*:
 
 - A scalar (e.g. `0.04`) or a `Rate` is shocked in its own compounding space. A scalar is treated as `Periodic(0.04, 1)`, so Modified = Macaulay / (1 + 0.04); in general a `Periodic(y, m)` rate gives Modified = Macaulay / (1 + y/m), and a `Continuous(y)` rate gives Modified = Macaulay.
-- A yield model (e.g. `Yield.Constant(0.04)` from FinanceModels) composes the shock in continuous-zero space, so Modified = Macaulay under the curve's own discounting, regardless of the compounding convention stored in the model.
+- A yield model (e.g. `Yield.Constant(0.04)` from FinanceModels) is shocked additively in continuous-zero space, so Modified = Macaulay under the curve's own discounting, regardless of the compounding convention stored in the model. Curve convexity uses the same coordinate, giving `t²` rather than `t(t+1)` weights.
 
 The same inputs therefore produce two different numbers by design:
 
@@ -356,17 +356,17 @@ end
 #
 # Each method below is exactly equal to the generic AD path (locked by
 # equality tests vs `duration(yield, i -> price(i, cfs, times))`); the only
-# difference between yield types is the space in which the parallel shock `i`
-# is applied by `i + yield`:
+# difference between yield types is the space in which the parallel shock is
+# applied:
 #
 # * `Real` y: nominal `Periodic(1)` space → V(i) = Σ cf·(1+y+i)^(-t),
 #   so Modified = Macaulay / (1 + y).
 # * `Rate{Periodic(m)}`: the rate's own nominal space →
 #   Modified = Macaulay / (1 + y/m).
 # * `Rate{Continuous}`: the continuous rate itself → Modified = Macaulay.
-# * `Yield.Constant`: model arithmetic composes in continuous-zero space
-#   (`Constant(i) + Constant(y)` adds continuous rates), so Modified = Macaulay
-#   under the curve's own discounting, regardless of the stored compounding.
+# * `Yield.Constant`: as an `AbstractYieldModel`, it is shocked explicitly in
+#   continuous-zero space, so Modified = Macaulay under the curve's own
+#   discounting, regardless of the stored compounding.
 #
 # Macaulay here is the signed cashflow-weighted time Σ t·cf·d / Σ cf·d, which
 # matches the generic path's d/di log|V| for any sign of V.
@@ -396,6 +396,28 @@ function duration(yield, valuation_function::T) where {T <: Function}
     # negative-valued (liability) valuation function is a valid input
     D(i) = log(abs(valuation_function(i + yield)))
     return δV = -ForwardDiff.derivative(D, 0.0)
+end
+
+# Yield models use one canonical risk coordinate: an additive shift to their
+# continuously compounded zero rates. Wrapping the ForwardDiff variable in a
+# `Continuous` rate avoids the nonlinear `Real -> Periodic(1) -> Continuous`
+# conversion, whose first derivative agrees at zero but whose second derivative
+# does not.
+function _parallel_continuous_bump(
+        yield::FinanceModels.Yield.AbstractYieldModel, shift
+    )
+    return FinanceModels.Yield.TenorShift(
+        yield,
+        (z, t) -> z + FinanceCore.Continuous(shift),
+    )
+end
+
+function duration(
+        yield::FinanceModels.Yield.AbstractYieldModel,
+        valuation_function::T,
+    ) where {T <: Function}
+    D(i) = log(abs(valuation_function(_parallel_continuous_bump(yield, i))))
+    return -ForwardDiff.derivative(D, 0.0)
 end
 
 # Element access for cashflow vectors that may be either numeric or
@@ -498,6 +520,11 @@ Calculates the convexity.
     - `yield` should be a fixed effective yield (e.g. `0.05`).
     - `times` may be omitted and it will assume `cfs` are evenly spaced beginning at the end of the first period.
 
+A scalar or `Rate` input is shocked in its own compounding space. An
+`AbstractYieldModel` input is instead shocked additively in continuously
+compounded zero-rate space, consistently across the no-tenor, tenor-aware,
+and key-rate APIs.
+
 # Examples
 
 Using vectors of cashflows and times
@@ -541,14 +568,14 @@ end
 #
 # Exactly equal to the generic nested-AD path (locked by equality tests vs
 # `convexity(yield, i -> price(i, cfs, times))`). As with the Modified-duration
-# fast paths above, the weight and divisor follow from where `yield + x`
-# applies the shock:
+# fast paths above, the weight and divisor follow from the selected shock
+# coordinate:
 #
 # * `Real` y: V(x) = Σ cf·(1+y+x)^(-t) → Σ cf·d·t(t+1) / V / (1+y)²
 # * `Rate{Periodic(m)}`: V(x) = Σ cf·(1+(y+x)/m)^(-mt) → Σ cf·d·t(t+1/m) / V / (1+y/m)²
 # * `Rate{Continuous}`: V(x) = Σ cf·e^(-(y+x)t) → Σ cf·d·t² / V
-# * `Yield.Constant`: shock composes in continuous-zero space as log(1+x), so
-#   V(x) = Σ cf·d·(1+x)^(-t) → Σ cf·d·t(t+1) / V (no divisor).
+# * `Yield.Constant`: as a yield model it is shocked in continuous-zero space,
+#   so V(x) = Σ cf·d·exp(-xt) → Σ cf·d·t² / V.
 #
 # The ratio uses the signed V, matching the generic path's |V|-normalized
 # second derivative for any sign of V (signs cancel).
@@ -584,7 +611,7 @@ function convexity(yield::FinanceCore.Rate{<:Real, FinanceCore.Continuous}, cfs:
     return _weighted_ratio(yield, t -> t * t, cfs, times)
 end
 function convexity(yield::FinanceModels.Yield.Constant{<:FinanceCore.Rate}, cfs::AbstractVector, times)
-    return _weighted_ratio(yield.rate, t -> t * (t + 1), cfs, times)
+    return _weighted_ratio(yield.rate, t -> t * t, cfs, times)
 end
 # disambiguation vs `convexity(curve::AYM, tenors, cfs::AbstractVector{<:Cashflow})`:
 # a Cashflow vector in the third position means (tenors, cashflows), not (cfs, times)
@@ -819,7 +846,7 @@ end
 ## Scalar do-block forwarding for AbstractYieldModel
 #
 # Forwards `duration(vf, curve)` and `convexity(vf, curve)` (no tenors) to the
-# generic finite-difference scalar path that works on any yield-like input.
+# scalar continuous-zero-shock paths for yield models.
 
 function duration(valuation_fn::Function, yield::FinanceModels.Yield.AbstractYieldModel)
     return duration(yield, valuation_fn)
@@ -1222,11 +1249,14 @@ the value, gradient, and Hessian from one AD pass at the same cost.
 # `TenorShift`-bumped curve, matching the matrix-sum form exactly while
 # avoiding the per-pillar Hessian.
 function _parallel_continuous_convexity(curve::AYM, valuation_fn)
-    bumped(s) = FinanceModels.Yield.TenorShift(curve, (z, t) -> z + FinanceCore.Continuous(s))
+    bumped(s) = _parallel_continuous_bump(curve, s)
     v(s) = abs(valuation_fn(bumped(s)))
     ∂²V = ForwardDiff.derivative(s2 -> ForwardDiff.derivative(v, s2), 0.0)
     return ∂²V / v(0.0)
 end
+
+convexity(curve::AYM, valuation_fn::Function) =
+    _parallel_continuous_convexity(curve, valuation_fn)
 
 convexity(valuation_fn::Function, curve::AYM, _tenors) =
     _parallel_continuous_convexity(curve, valuation_fn)
