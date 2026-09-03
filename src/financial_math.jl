@@ -278,9 +278,9 @@ When not given `Modified()` or `Macaulay()` as an argument, will default to `Mod
 
 - Modified duration: the relative change per point of yield change.
 - Macaulay: the cashflow-weighted average time.
-- DV01: the absolute change per basis point (hundredth of a percentage point).
-- IR01: the absolute change per basis point shift in the risk-free (base) curve, holding credit spread constant.
-- CS01: the absolute change per basis point shift in the credit spread, holding the risk-free (base) curve constant.
+- DV01: the signed dollar change per basis point (hundredth of a percentage point), defined as `-∂V/∂r / 10000`.
+- IR01: the signed dollar change per basis point shift in the risk-free (base) curve, holding credit spread constant.
+- CS01: the signed dollar change per basis point shift in the credit spread, holding the risk-free (base) curve constant.
 
 # Periodicity convention
 
@@ -416,7 +416,8 @@ function duration(yield, cfs)
 end
 
 function duration(::DV01, yield, cfs, times)
-    return duration(DV01(), yield, i -> price(i, vec(cfs), times))
+    cfs = vec(cfs)
+    return duration(DV01(), yield, i -> FinanceCore.present_value(i, cfs, times))
 end
 function duration(d::Duration, yield, cfs)
     times = FinanceCore.timepoint.(cfs, 1:length(cfs))

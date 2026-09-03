@@ -477,6 +477,28 @@ end
         @test all(dv01s .> 0)
     end
 
+    @testset "DV01 preserves position sign across scalar and curve paths" begin
+        times = [1.0, 2.0, 3.0]
+        asset_cfs = [5.0, 5.0, 105.0]
+        liability_cfs = -asset_cfs
+        rate = FC.Continuous(0.03)
+        curve = FM.Yield.Constant(rate)
+
+        asset_scalar = duration(DV01(), rate, asset_cfs, times)
+        liability_scalar = duration(DV01(), rate, liability_cfs, times)
+        liability_curve = duration(DV01(), curve, times, liability_cfs, times)
+        liability_key_rates = duration(DV01(), KeyRates(times), curve, liability_cfs, times)
+        liability_do_block = duration(DV01(), curve, times) do c
+            FC.present_value(c, liability_cfs, times)
+        end
+
+        @test liability_scalar < 0
+        @test liability_scalar ≈ -asset_scalar atol = 1.0e-12
+        @test liability_scalar ≈ liability_curve atol = 1.0e-12
+        @test liability_curve ≈ sum(liability_key_rates) atol = 1.0e-12
+        @test liability_do_block ≈ liability_curve atol = 1.0e-12
+    end
+
     @testset "do-block custom valuation (callable bond)" begin
         rates = [0.05, 0.05, 0.05, 0.05, 0.05]
         tenors = [1.0, 2.0, 3.0, 4.0, 5.0]
