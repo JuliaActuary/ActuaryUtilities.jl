@@ -153,6 +153,7 @@ end
 include("duration.jl")
 include("key_rate_durations.jl")
 include("sensitivities.jl")
+include("analytic_types.jl")
 include("stochastic_sensitivities.jl")
 include("contract_sensitivities.jl")
 

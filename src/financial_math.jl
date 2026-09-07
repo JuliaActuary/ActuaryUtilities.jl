@@ -961,12 +961,21 @@ function _ncurve_analytic(
     checkbounds(Bool, times, eachindex(cfs)) || throw(
         DimensionMismatch("times must contain at least one entry for each cashflow")
     )
-    L = length(curves)
+    isempty(cfs) && throw(ArgumentError("analytic key-rate sensitivities require at least one cashflow"))
     n = length(tenors)
-    T = float(promote_type(eltype(cfs), eltype(times)))
+    # Seed from a valuation term so curve parameters participate in promotion
+    # (including differentiation through the analytic sensitivities themselves).
+    k0 = firstindex(cfs)
+    t0 = times[k0]
+    cfd0 = cfs[k0] * prod(c -> FinanceCore.discount(c, t0), values(curves))
+    _, w0, _, _ = _active_hats(tenors, t0)
+    T = promote_type(typeof(cfd0), typeof(t0 * cfd0 * w0), eltype(tenors))
+    if order >= 2
+        T = promote_type(T, typeof(t0 * t0 * cfd0 * w0 * w0))
+    end
     grad_shared = zeros(T, n)
     hess_shared = order >= 2 ? zeros(T, n, n) : nothing
-    V = zero(T)
+    V = zero(cfd0)
     @inbounds for k in eachindex(cfs)
         t = times[k]
         # `prod` over the curve tuple is unrolled and type-stable even when the
