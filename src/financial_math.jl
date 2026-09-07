@@ -473,7 +473,8 @@ true
 ```
 """
 function duration(::IR01, base_curve, credit_spread, cfs, times)
-    return duration(DV01(), base_curve, i -> price(i + credit_spread, vec(cfs), times))
+    cfs = vec(cfs)
+    return duration(DV01(), base_curve, i -> FinanceCore.present_value(i + credit_spread, cfs, times))
 end
 
 function duration(::IR01, base_curve, credit_spread, cfs)
@@ -504,7 +505,8 @@ true
 ```
 """
 function duration(::CS01, base_curve, credit_spread, cfs, times)
-    return duration(DV01(), credit_spread, s -> price(base_curve + s, vec(cfs), times))
+    cfs = vec(cfs)
+    return duration(DV01(), credit_spread, s -> FinanceCore.present_value(base_curve + s, cfs, times))
 end
 
 function duration(::CS01, base_curve, credit_spread, cfs)

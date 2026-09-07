@@ -499,6 +499,23 @@ end
         @test liability_do_block ≈ liability_curve atol = 1.0e-12
     end
 
+    @testset "Scalar IR01 and CS01 preserve position sign" begin
+        base, spread = 0.03, 0.02
+        times = [1.0, 2.0, 3.0]
+        asset_cfs = [5.0, 5.0, 105.0]
+        # Independent derivative of the annual-compounded present value.
+        expected = sum(t * cf / (1 + base + spread)^(t + 1) for (cf, t) in zip(asset_cfs, times)) / 10000
+
+        for measure in (IR01(), CS01()), sign in (-1, 1)
+            cfs = sign * asset_cfs
+            cashflows = FC.Cashflow.(cfs, times)
+            @test duration(measure, base, spread, cfs, times) ≈ sign * expected
+            @test duration(measure, base, spread, cfs) ≈ sign * expected
+            @test duration(measure, base, spread, cashflows) ≈ sign * expected
+            @test duration(measure, base, spread, cfs, times) ≈ duration(DV01(), base + spread, cfs, times)
+        end
+    end
+
     @testset "do-block custom valuation (callable bond)" begin
         rates = [0.05, 0.05, 0.05, 0.05, 0.05]
         tenors = [1.0, 2.0, 3.0, 4.0, 5.0]
