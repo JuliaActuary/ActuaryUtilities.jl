@@ -4,6 +4,7 @@ import ..FinanceCore
 import ..FinanceCore: irr, internal_rate_of_return, pv, present_value
 import ..FinanceModels
 import ..ForwardDiff
+import DiffResults
 import ..ActuaryUtilities: duration
 import Random
 

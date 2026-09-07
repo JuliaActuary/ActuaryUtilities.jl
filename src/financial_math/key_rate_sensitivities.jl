@@ -25,34 +25,51 @@ _bumped(curve, tenors, bumps) = FinanceModels.Yield.TenorShift(
     (z, t) -> z + FinanceCore.Continuous(_hat_bump(tenors, bumps, t)),
 )
 
+function _ad_derivatives(f::F, z, order) where {F}
+    # The valuation can return BigFloat or an outer AD Dual even when bumps are
+    # Float64. Establish its type before allocating the Hessian result buffers.
+    value = f(z)
+    g = zeros(typeof(value), length(z))
+    if order == 1
+        ForwardDiff.gradient!(g, f, z)
+        return (; value, gradient = g)
+    end
+    result = DiffResults.DiffResult(value, g, similar(g, length(z), length(z)))
+    result = ForwardDiff.hessian!(result, f, z)
+    return (; value = DiffResults.value(result), gradient = g, hessian = DiffResults.hessian(result))
+end
+
 # One derivative engine over named curve roles. All adapters share the same
 # validated grid, bump layout, derivative order, and named result structure.
-function _ncurve_ad(valuation, curves::NamedTuple, tenors; order = 1)
+function _ncurve_ad(valuation::F, curves::NamedTuple{roles}, tenors; order = 1) where {F, roles}
     order in (1, 2) || throw(ArgumentError("derivative order must be 1 or 2"))
     grid = KeyRates(tenors).tenors
     isempty(curves) && throw(ArgumentError("at least one curve role is required"))
     all(c -> c isa AYM, curves) || throw(ArgumentError("every curve role must be an AbstractYieldModel"))
-    roles = keys(curves)
     n, k = length(grid), length(curves)
     indices(i) = ((i - 1) * n + 1):(i * n)
-    f(b) = valuation(NamedTuple{roles}(ntuple(i -> _bumped(curves[i], grid, view(b, indices(i))), k)))
+    slice(b, i) = length(curves) == 1 ? b : view(b, indices(i))
+    # Derive the count from the typed tuple inside the AD callback so its
+    # return type remains inferable across the derivative function barrier.
+    f(b) = valuation(NamedTuple{roles}(ntuple(i -> _bumped(curves[i], grid, slice(b, i)), length(curves))))
     z = zeros(k * n)
-    value = f(z)
-    g = ForwardDiff.gradient(f, z)
-    gradient = NamedTuple{roles}(ntuple(i -> g[indices(i)], k))
+    result = _ad_derivatives(f, z, order)
+    value, g = result.value, result.gradient
+    gradient = NamedTuple{roles}(ntuple(i -> slice(g, i), k))
     order == 1 && return (; value, gradient)
-    h = ForwardDiff.hessian(f, z)
-    hessian = NamedTuple{roles}(ntuple(i -> NamedTuple{roles}(ntuple(j -> h[indices(i), indices(j)], k)), k))
+    h = result.hessian
+    block(i, j) = k == 1 ? h : view(h, indices(i), indices(j))
+    hessian = NamedTuple{roles}(ntuple(i -> NamedTuple{roles}(ntuple(j -> block(i, j), k)), k))
     return (; value, gradient, hessian)
 end
 
 # Compatibility adapters for the public single- and two-curve return shapes.
-function _keyrate_ad(curve::AYM, tenors::AbstractVector, valuation_fn; order = 1)
+function _keyrate_ad(curve::AYM, tenors::AbstractVector, valuation_fn::F; order = 1) where {F}
     r = _ncurve_ad(c -> valuation_fn(c.curve), (; curve), tenors; order)
     result = (; value = r.value, gradient = r.gradient.curve)
     return order == 1 ? result : merge(result, (; hessian = r.hessian.curve.curve))
 end
-function _keyrate_ad(base::AYM, credit::AYM, tenors::AbstractVector, valuation_fn; order = 1)
+function _keyrate_ad(base::AYM, credit::AYM, tenors::AbstractVector, valuation_fn::F; order = 1) where {F}
     r = _ncurve_ad(c -> valuation_fn(c.base, c.credit), (; base, credit), tenors; order)
     result = (; value = r.value, base_gradient = r.gradient.base, credit_gradient = r.gradient.credit)
     return order == 1 ? result : merge(

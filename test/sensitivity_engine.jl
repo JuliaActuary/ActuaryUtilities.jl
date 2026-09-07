@@ -65,3 +65,53 @@ end
     grid.tenors[2] = grid.tenors[1]
     @test_throws ArgumentError duration(grid, v, base)
 end
+
+@testset "Derivative bundles reuse AD results and preserve numeric types" begin
+    engine = ActuaryUtilities.FinancialMath._ncurve_ad
+    tenors = [1.0, 3.0, 7.0]
+    curve(r) = FM.Yield.Constant(FC.Continuous(r))
+    depths = Int[]
+    tracked(c) = begin
+        value = FC.discount(c.base, 2.0)
+        push!(depths, _dual_depth(typeof(value)))
+        value
+    end
+    result = engine(tracked, (; base = curve(0.04)), tenors; order = 2)
+    @test count(iszero, depths) == 1 # establish the valuation's buffer type
+    @test maximum(depths) == 2
+    @test 1 ∉ depths # no standalone gradient pass before computing the Hessian
+    @test sum(result.gradient.base) ≈ -2result.value
+    @test sum(result.hessian.base.base) ≈ 4result.value
+
+    for order in (1, 2)
+        result = engine(c -> FC.discount(c.base, 2.0), (; base = curve(big"0.04")), tenors; order)
+        @test result.value isa BigFloat
+        @test eltype(result.gradient.base) == BigFloat
+        @test sum(result.gradient.base) ≈ -2result.value
+        if order == 2
+            @test eltype(result.hessian.base.base) == BigFloat
+            @test sum(result.hessian.base.base) ≈ 4result.value
+        end
+        # Output types belong to the valuation, not just the supplied curves.
+        constant = engine(_ -> big"3.0", (; base = curve(0.04)), tenors; order)
+        @test constant.value isa BigFloat
+        @test constant.value == big"3.0"
+        @test all(iszero, constant.gradient.base)
+        if order == 2
+            @test all(iszero, constant.hessian.base.base)
+        end
+        first_order(r) = sum(engine(c -> FC.discount(c.base, 2.0), (; base = curve(r)), tenors; order).gradient.base)
+        @test ForwardDiff.derivative(first_order, 0.04) ≈ 4exp(-0.08)
+        @test ForwardDiff.derivative(r -> ForwardDiff.derivative(first_order, r), 0.04) ≈ -8exp(-0.08)
+    end
+    second_order(r) = sum(engine(c -> FC.discount(c.base, 2.0), (; base = curve(r)), tenors; order = 2).hessian.base.base)
+    @test ForwardDiff.derivative(second_order, 0.04) ≈ -8exp(-0.08)
+
+    # Internal views must not make the public normalized blocks alias each other.
+    bundle = sensitivities(KeyRates(tenors), (b, c) -> FC.discount(b, 2.0) * FC.discount(c, 2.0), curve(0.03), curve(0.01))
+    credit_block = copy(bundle.convexities.credit)
+    cross_block = copy(bundle.convexities.cross)
+    fill!(bundle.convexities.base, NaN)
+    @test bundle.convexities.credit == credit_block
+    @test bundle.convexities.cross == cross_block
+end

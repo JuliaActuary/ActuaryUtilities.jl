@@ -190,9 +190,12 @@ struct KeyRates{T <: AbstractVector{<:Real}} <: Duration
     tenors::T
     function KeyRates(tenors::T) where {T <: AbstractVector{<:Real}}
         isempty(tenors)   && throw(ArgumentError("KeyRates tenors must be non-empty"))
-        issorted(tenors)  || throw(ArgumentError("KeyRates tenors must be sorted ascending"))
-        allunique(tenors) || throw(ArgumentError("KeyRates tenors must be distinct"))
-        all(t -> isfinite(t) && t > 0, tenors) || throw(ArgumentError("KeyRates tenors must be finite and strictly positive"))
+        # Strict increase establishes sortedness and uniqueness in one pass.
+        previous = zero(first(tenors))
+        for t in tenors
+            isfinite(t) && t > previous || throw(ArgumentError("KeyRates tenors must be finite, strictly positive, and strictly increasing"))
+            previous = t
+        end
         return new{T}(tenors)
     end
 end
