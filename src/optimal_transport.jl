@@ -5,7 +5,7 @@ import ..StatsBase
 import ..RiskMeasures
 import ..RiskMeasures: RiskMeasure, CTE, VaR
 import ..QuadGK
-import Statistics
+import ..AtomicMeasures: FiniteAtoms, finite_atoms, probability_breaks
 
 export wasserstein, transportmap, pushforward, robustvalue
 
@@ -28,9 +28,6 @@ function _quantile_fn(x::AbstractVector{<:Real})
     n = length(xs)
     return u -> xs[clamp(ceil(Int, u * n), 1, n)]
 end
-
-_pnorm(diffs, p) = isinf(p) ? maximum(abs, diffs) :
-    (Statistics.mean(abs.(diffs) .^ p))^(1 / p)
 
 """
     wasserstein(a, b; p=1, rtol=1e-6, atol=0, maxevals=nothing)
@@ -70,13 +67,16 @@ julia> wasserstein(Normal(0, 1), Normal(0, 2); p=2) # same mean, |σ₁-σ₂|
 
 See also [`transportmap`](@ref), [`robustvalue`](@ref).
 
-For risks involving a distribution, the quantile integral is evaluated adaptively.
+Finite discrete laws and empirical samples share an exact cumulative-mass sweep,
+including `p=Inf`. For a finite atomic law against a continuous distribution,
+`p=Inf` uses the limits of each atomic quantile interval. Other distribution pairs
+use numerical quantile integration or supremum search.
 `rtol`, `atol`, and `maxevals` control that calculation. By default the
 evaluation budget scales with the number of empirical quantile segments; an
-explicit `maxevals` is a hard cap. If the requested tolerance cannot be verified,
-`wasserstein` throws rather than returning an unconverged approximation.
-For distributional `p=Inf`, this includes empirical-versus-bounded-distribution
-cases whose supremum is not certified within the evaluation budget. Infinite
+explicit `maxevals` is a hard cap for the numerical calculation. Finite-`p`
+quadrature throws if its error estimate exceeds the requested tolerance.
+For general distributional `p=Inf`, stable grid maxima are a numerical
+approximation, not a supremum certificate. Infinite
 distance is returned only when proved by support bounds or a supported analytic
 family; unresolved same-side-unbounded pairs throw rather than relying on tail
 growth heuristics.
@@ -94,29 +94,31 @@ function wasserstein(
     (isfinite(rtol) && rtol >= 0) || throw(ArgumentError("rtol must be finite and nonnegative"))
     (isfinite(atol) && atol >= 0) || throw(ArgumentError("atol must be finite and nonnegative"))
     (isnothing(maxevals) || maxevals > 0) || throw(ArgumentError("maxevals must be positive"))
-    return _wasserstein(a, b, p; rtol, atol, maxevals)
+    aa, bb = finite_atoms(a), finite_atoms(b)
+    return _wasserstein(isnothing(aa) ? a : aa, isnothing(bb) ? b : bb, p; rtol, atol, maxevals)
 end
 
-# both samples: exact in both cases. Equal sizes reduce to sorted point-by-point
-# matching; unequal sizes integrate |Qa - Qb|^p exactly by merging the breakpoints
-# {i/na} ∪ {j/nb} of the two inverse-ECDF step functions. A fixed evaluation grid
-# (or an interpolated quantile) computes a different number — e.g. the true
-# W₂([0], [0,2]) is √2, while a size-2 midpoint grid through `Statistics.quantile`
-# gives √1.25.
-function _wasserstein(a::AbstractVector{<:Real}, b::AbstractVector{<:Real}, p; kwargs...)
-    na, nb = length(a), length(b)
-    as, bs = sort(collect(a)), sort(collect(b))
-    na == nb && return _pnorm(as .- bs, p)
+# Merge cumulative probability boundaries: each overlap contributes its exact
+# mass times the quantile gap. The same sweep covers samples and discrete laws.
+function _wasserstein(a::FiniteAtoms, b::FiniteAtoms, p; kwargs...)
+    as, bs = a.values, b.values
+    ac, bc = probability_breaks(a), probability_breaks(b)
     i = j = 1
-    prev = 0.0
-    acc = 0.0
-    while i <= na && j <= nb
-        u = min(i / na, j / nb)
-        gap = abs(as[i] - bs[j])
-        acc = isinf(p) ? max(acc, gap) : acc + (u - prev) * gap^p
+    prev = zero(promote_type(eltype(ac), eltype(bc)))
+    acc = zero(float(promote_type(eltype(as), eltype(bs), typeof(prev))))
+    while i <= length(as) && j <= length(bs)
+        # Decide which indices advance before combining numeric types: `min`
+        # can round a rational rank down when paired with a floating mass.
+        advance_a = ac[i] <= bc[j]
+        advance_b = bc[j] <= ac[i]
+        u = advance_a ? ac[i] : bc[j]
+        if u > prev
+            gap = as[i] == bs[j] ? zero(acc) : abs(as[i] - bs[j])
+            acc = isinf(p) ? max(acc, gap) : acc + (u - prev) * gap^p
+        end
         prev = u
-        i / na <= u && (i += 1)
-        j / nb <= u && (j += 1)
+        advance_a && (i += 1)
+        advance_b && (j += 1)
     end
     return isinf(p) ? acc : acc^(1 / p)
 end
@@ -136,7 +138,11 @@ function _divergent_quantile_tail(f)
 end
 
 _quantile_breaks(::Distributions.UnivariateDistribution) = Float64[]
-_quantile_breaks(x::AbstractVector) = collect((1:(length(x) - 1)) ./ length(x))
+_quantile_breaks(a::FiniteAtoms) = probability_breaks(a)[1:(end - 1)]
+function _quantile_fn(a::FiniteAtoms)
+    breaks = probability_breaks(a)
+    return u -> a.values[clamp(searchsortedfirst(breaks, u), 1, length(breaks))]
+end
 
 function _wasserstein_finite(a, b, p; rtol, atol, maxevals)
     Qa, Qb = _quantile_fn(a), _quantile_fn(b)
@@ -162,7 +168,23 @@ end
 # doubling, so their maxima are monotone lower bounds. A finite answer is returned
 # only after several refinements agree; unresolved tails fail loudly.
 _support_bounds(d::Distributions.UnivariateDistribution) = (minimum(d), maximum(d))
-_support_bounds(x::AbstractVector) = extrema(x)
+_support_bounds(a::FiniteAtoms) = (first(a.values), last(a.values))
+
+# On each atomic quantile interval the continuous quantile is monotone, so
+# the largest gap to the constant atom occurs at one of the interval limits.
+function _wasserstein_infinity(a::FiniteAtoms, b::Distributions.ContinuousUnivariateDistribution; kwargs...)
+    previous = zero(eltype(a.probabilities))
+    acc = zero(float(promote_type(eltype(a.values), eltype(a.probabilities))))
+    for (x, u) in zip(a.values, probability_breaks(a))
+        if u > previous
+            acc = max(acc, abs(x - Distributions.quantile(b, previous)), abs(x - Distributions.quantile(b, u)))
+        end
+        previous = u
+    end
+    return acc
+end
+_wasserstein_infinity(a::Distributions.ContinuousUnivariateDistribution, b::FiniteAtoms; kwargs...) =
+    _wasserstein_infinity(b, a; kwargs...)
 
 function _support_proves_infinite(a, b)
     alo, ahi = _support_bounds(a)
@@ -216,7 +238,7 @@ function _wasserstein_infinity(a, b; rtol, atol, maxevals)
     throw(ErrorException("wasserstein W∞ supremum search did not converge within maxevals=$budget"))
 end
 
-# At least one argument is a distribution: use verified adaptive computation.
+# At least one argument lacks a finite atom representation.
 function _wasserstein(a, b, p; rtol, atol, maxevals)
     return isinf(p) ? _wasserstein_infinity(a, b; rtol, atol, maxevals) :
         _wasserstein_finite(a, b, p; rtol, atol, maxevals)

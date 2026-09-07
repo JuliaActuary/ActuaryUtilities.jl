@@ -18,6 +18,7 @@ import Distributions
 function duration end
 
 include("financial_math.jl")
+include("atomic_measures.jl")
 include("risk_measures.jl")
 include("optimal_transport.jl")
 include("utilities.jl")
