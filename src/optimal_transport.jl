@@ -24,7 +24,6 @@ export wasserstein, transportmap, pushforward, robustvalue
 # of [10,20] for target [10,20]).
 _quantile_fn(d::Distributions.UnivariateDistribution) = u -> Distributions.quantile(d, u)
 function _quantile_fn(x::AbstractVector{<:Real})
-    isempty(x) && throw(ArgumentError("empty sample: a Wasserstein/quantile needs at least one observation"))
     xs = sort(collect(x))
     n = length(xs)
     return u -> xs[clamp(ceil(Int, u * n), 1, n)]
@@ -105,8 +104,6 @@ end
 # W₂([0], [0,2]) is √2, while a size-2 midpoint grid through `Statistics.quantile`
 # gives √1.25.
 function _wasserstein(a::AbstractVector{<:Real}, b::AbstractVector{<:Real}, p; kwargs...)
-    (isempty(a) || isempty(b)) &&
-        throw(ArgumentError("empty sample: wasserstein needs at least one observation in each of `a`, `b`"))
     na, nb = length(a), length(b)
     as, bs = sort(collect(a)), sort(collect(b))
     na == nb && return _pnorm(as .- bs, p)
@@ -270,7 +267,6 @@ end
 # Use midpoint plotting positions instead: the k-th of n order statistics maps to
 # rank (k - 0.5)/n, keeping every transported value finite.
 function transportmap(source::AbstractVector{<:Real}, target)
-    isempty(source) && throw(ArgumentError("empty `source` sample: transportmap needs at least one observation"))
     xs = sort(collect(source))
     n = length(xs)
     Qt = _quantile_fn(target)                  # sorts a sample `target` once, not per call
@@ -356,7 +352,6 @@ function robustvalue(
     radius >= 0 || throw(ArgumentError("radius must be ≥ 0, got $radius"))
     0 <= tail < 1 || throw(ArgumentError("tail must be in [0, 1), got $tail"))
     p >= 1 || throw(ArgumentError("p must be ≥ 1, got $p"))
-    isempty(sample) && throw(ArgumentError("empty `sample`: robustvalue needs at least one observation"))
     # CTE at its own tail level has a closed-form worst case. Its maximizer moves
     # exactly mass 1-α, splitting the atom the tail boundary cuts through — a
     # fractional weight an equally weighted sample cannot represent: any whole-atom
