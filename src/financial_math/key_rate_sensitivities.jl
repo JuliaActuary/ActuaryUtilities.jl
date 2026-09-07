@@ -599,7 +599,7 @@ the contract's coupons on `index` — e.g. `discount = (; rf, credit, ilp)` give
 (≈ IR01), `.credit` (≈ CS01), `.ilp` ("ILP01"), and `.index` (the reset sensitivity). ILP /
 matching-adjustment / basis are just additional named curves.
 """
-function sensitivities(valuation, curves::NamedTuple; tenors)
+function sensitivities(valuation::F, curves::NamedTuple; tenors) where {F}
     r = _ncurve_ad(valuation, curves, tenors; order = 1)
     v, grads = r.value, r.gradient
     roles = keys(curves)
