@@ -101,16 +101,16 @@ duration(::Spread, target::_Contractish, curve::AYM, tenors) = duration(Spread()
 duration(::Effective, kr::KeyRates, target::_Contractish, curve::AYM) = sensitivities(target, curve, kr.tenors).effective_key_rate
 duration(::Spread, kr::KeyRates, target::_Contractish, curve::AYM) = sensitivities(target, curve, kr.tenors).spread_key_rate
 # default (no marker) on a contract/portfolio = effective
-duration(target::_Contractish, curve::AYM, tenors) = duration(Effective(), target, curve, tenors)
+duration(target::_Contractish, curve::AYM, tenors::AbstractVector) = duration(Effective(), target, curve, tenors)
 duration(kr::KeyRates, target::_Contractish, curve::AYM) = duration(Effective(), kr, target, curve)
 
 # Effective convexity: parallel-shift second derivative of the contract's
 # present value under a continuous-rate shock. Routes through the O(1) scalar
-# helper above (`_parallel_continuous_convexity`), which is numerically
+# callback path, which is numerically
 # equivalent to the prior `sum(convexity(KeyRates(tenors), …))` matrix-sum form
 # under partition of unity but avoids the O(N²) Hessian.
 convexity(::Effective, target::_Contractish, curve::AYM, _tenors) =
-    _parallel_continuous_convexity(curve, c -> _cvalue(target, c))
+    convexity(curve, c -> _cvalue(target, c))
 
 """
     dv01(args...)

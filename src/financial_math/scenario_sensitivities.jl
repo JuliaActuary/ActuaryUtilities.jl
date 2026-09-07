@@ -20,10 +20,10 @@ end
 # the user's rng once per call and rebuild a fresh `Xoshiro(seed)` inside the
 # closure so every AD step draws the same scenarios.
 function sensitivities(
-        kr::KeyRates, valuation_fn::Function, hw::HW;
+        kr::KeyRates, valuation_fn::F, hw::HW;
         n_scenarios = 1000, timestep = 1 / 12, horizon = 30.0,
         rng = Random.default_rng()
-    )
+    ) where {F}
     seed = rand(rng, UInt64)
     return sensitivities(kr, hw.curve) do curve
         valuation_fn(_hw_paths(hw, curve; n_scenarios, timestep, horizon, rng = Random.Xoshiro(seed)))
@@ -31,10 +31,10 @@ function sensitivities(
 end
 
 function sensitivities(
-        ::DV01, kr::KeyRates, valuation_fn::Function, hw::HW;
+        ::DV01, kr::KeyRates, valuation_fn::F, hw::HW;
         n_scenarios = 1000, timestep = 1 / 12, horizon = 30.0,
         rng = Random.default_rng()
-    )
+    ) where {F}
     seed = rand(rng, UInt64)
     return sensitivities(DV01(), kr, hw.curve) do curve
         valuation_fn(_hw_paths(hw, curve; n_scenarios, timestep, horizon, rng = Random.Xoshiro(seed)))

@@ -154,6 +154,7 @@ include("duration.jl")
 include("key_rate_durations.jl")
 include("sensitivities.jl")
 include("sensitivity_engine.jl")
+include("callable_valuations.jl")
 include("stochastic_sensitivities.jl")
 include("contract_sensitivities.jl")
 

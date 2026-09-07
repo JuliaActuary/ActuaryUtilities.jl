@@ -249,6 +249,11 @@ A convenience constructor for [`KeyRateZero`](@ref).
 """
 const KeyRate = KeyRateZero
 
+# Cashflow routes accept the yield inputs supported by present_value; this
+# distinguishes them from metric-first and callable-valuation signatures.
+const _YieldInput = Union{Real, FinanceCore.Rate, FinanceModels.Yield.AbstractYieldModel}
+const _CashflowCollection = Union{AbstractArray, Tuple, Base.Generator}
+
 """
     duration(Macaulay(),interest_rate,cfs,times)
     duration(Modified(),interest_rate,cfs,times)
@@ -266,16 +271,16 @@ When not given `Modified()` or `Macaulay()` as an argument, will default to `Mod
 
 - Modified duration: the relative change per point of yield change.
 - Macaulay: the cashflow-weighted average time.
-- DV01: the absolute change per basis point (hundredth of a percentage point).
-- IR01: the absolute change per basis point shift in the risk-free (base) curve, holding credit spread constant.
-- CS01: the absolute change per basis point shift in the credit spread, holding the risk-free (base) curve constant.
+- DV01: the signed dollar change per basis point (hundredth of a percentage point), defined as `-∂V/∂r / 10000`.
+- IR01: the signed dollar change per basis point shift in the risk-free (base) curve, holding credit spread constant.
+- CS01: the signed dollar change per basis point shift in the credit spread, holding the risk-free (base) curve constant.
 
 # Periodicity convention
 
 The Modified duration returned depends on the space in which the parallel rate shock is applied, and this differs between plain rates and yield *models*:
 
 - A scalar (e.g. `0.04`) or a `Rate` is shocked in its own compounding space. A scalar is treated as `Periodic(0.04, 1)`, so Modified = Macaulay / (1 + 0.04); in general a `Periodic(y, m)` rate gives Modified = Macaulay / (1 + y/m), and a `Continuous(y)` rate gives Modified = Macaulay.
-- A yield model (e.g. `Yield.Constant(0.04)` from FinanceModels) composes the shock in continuous-zero space, so Modified = Macaulay under the curve's own discounting, regardless of the compounding convention stored in the model.
+- A yield model (e.g. `Yield.Constant(0.04)` from FinanceModels) is shocked additively in continuous-zero space, so Modified = Macaulay under the curve's own discounting, regardless of the compounding convention stored in the model. Curve convexity uses the same coordinate, giving `t²` rather than `t(t+1)` weights.
 
 The same inputs therefore produce two different numbers by design:
 
@@ -329,11 +334,11 @@ julia> convexity(0.03,my_lump_sum_value)
 
 ```
 """
-function duration(::Macaulay, yield, cfs, times)
+function duration(::Macaulay, yield::_YieldInput, cfs::AbstractArray, times)
     return _macaulay_ratio(yield, vec(cfs), times)
 end
 
-function duration(::Modified, yield, cfs, times)
+function duration(::Modified, yield::_YieldInput, cfs::_CashflowCollection, times)
     D(i) = price(i, cfs, times)
     return duration(yield, D)
 end
@@ -342,17 +347,17 @@ end
 #
 # Each method below is exactly equal to the generic AD path (locked by
 # equality tests vs `duration(yield, i -> price(i, cfs, times))`); the only
-# difference between yield types is the space in which the parallel shock `i`
-# is applied by `i + yield`:
+# difference between yield types is the space in which the parallel shock is
+# applied:
 #
 # * `Real` y: nominal `Periodic(1)` space → V(i) = Σ cf·(1+y+i)^(-t),
 #   so Modified = Macaulay / (1 + y).
 # * `Rate{Periodic(m)}`: the rate's own nominal space →
 #   Modified = Macaulay / (1 + y/m).
 # * `Rate{Continuous}`: the continuous rate itself → Modified = Macaulay.
-# * `Yield.Constant`: model arithmetic composes in continuous-zero space
-#   (`Constant(i) + Constant(y)` adds continuous rates), so Modified = Macaulay
-#   under the curve's own discounting, regardless of the stored compounding.
+# * `Yield.Constant`: as an `AbstractYieldModel`, it is shocked explicitly in
+#   continuous-zero space, so Modified = Macaulay under the curve's own
+#   discounting, regardless of the stored compounding.
 #
 # Macaulay here is the signed cashflow-weighted time Σ t·cf·d / Σ cf·d, which
 # matches the generic path's d/di log|V| for any sign of V.
@@ -376,13 +381,30 @@ function duration(::Modified, yield::FinanceModels.Yield.Constant{<:FinanceCore.
     return _macaulay_ratio(yield.rate, cfs, times)
 end
 
-function duration(yield, valuation_function::T) where {T <: Function}
+function duration(yield, valuation_function::T) where {T}
     # `abs`: duration is defined on the magnitude of value, consistent with
     # `price` (used by the cashflow forms) and the `convexity` sibling — a
     # negative-valued (liability) valuation function is a valid input
-    D(i) = log(abs(valuation_function(i + yield)))
+    D(i) = log(abs(valuation_function(_parallel_bumped(yield, i))))
     return δV = -ForwardDiff.derivative(D, 0.0)
 end
+
+# Yield models use one canonical risk coordinate: an additive shift to their
+# continuously compounded zero rates. Wrapping the ForwardDiff variable in a
+# `Continuous` rate avoids the nonlinear `Real -> Periodic(1) -> Continuous`
+# conversion, whose first derivative agrees at zero but whose second derivative
+# does not.
+_parallel_bumped(yield, shift) = yield + shift
+
+function _parallel_bumped(
+        yield::FinanceModels.Yield.AbstractYieldModel, shift
+    )
+    return FinanceModels.Yield.TenorShift(
+        yield,
+        (z, t) -> z + FinanceCore.Continuous(shift),
+    )
+end
+
 
 # Element access for cashflow vectors that may be either numeric or
 # wrapped `FinanceCore.Cashflow` values. The scalar duration / convexity
@@ -390,26 +412,31 @@ end
 @inline _cf_value(c::FinanceCore.Cashflow) = FinanceCore.amount(c)
 @inline _cf_value(c) = c
 
-function duration(yield, cfs, times)
+function duration(yield::_YieldInput, cfs::AbstractArray, times)
     return duration(Modified(), yield, vec(cfs), times)
 end
 
 # timepoints are used to make the function more generic
 # with respect to allowing Cashflow objects
-function duration(yield, cfs)
+function duration(yield::_YieldInput, cfs::_CashflowCollection)
     times = FinanceCore.timepoint.(cfs, 1:length(cfs))
     return duration(Modified(), yield, cfs, times)
 end
 
-function duration(::DV01, yield, cfs, times)
-    return duration(DV01(), yield, i -> price(i, vec(cfs), times))
+function duration(::DV01, yield::_YieldInput, cfs::AbstractArray, times)
+    cfs = vec(cfs)
+    return duration(DV01(), yield, i -> FinanceCore.present_value(i, cfs, times))
 end
-function duration(d::Duration, yield, cfs)
+function duration(d::Duration, yield::_YieldInput, cfs::AbstractArray)
     times = FinanceCore.timepoint.(cfs, 1:length(cfs))
     return duration(d, yield, vec(cfs), times)
 end
 
-function duration(::DV01, yield, valuation_function::Y) where {Y <: Function}
+# Prefer cashflows over the generic DV01 callback when the input is an array.
+duration(d::DV01, yield::_YieldInput, cfs::AbstractArray) =
+    invoke(duration, Tuple{Duration, _YieldInput, AbstractArray}, d, yield, cfs)
+
+function duration(::DV01, yield, valuation_function::Y) where {Y}
     return duration(yield, valuation_function) * valuation_function(yield) / 10000
 end
 
@@ -435,11 +462,12 @@ julia> duration(IR01(), 0.03, 0.02, cfs, times) ≈ duration(DV01(), 0.05, cfs, 
 true
 ```
 """
-function duration(::IR01, base_curve, credit_spread, cfs, times)
-    return duration(DV01(), base_curve, i -> price(i + credit_spread, vec(cfs), times))
+function duration(::IR01, base_curve, credit_spread, cfs::AbstractArray, times)
+    cfs = vec(cfs)
+    return duration(DV01(), base_curve, i -> FinanceCore.present_value(i + credit_spread, cfs, times))
 end
 
-function duration(::IR01, base_curve, credit_spread, cfs)
+function duration(::IR01, base_curve, credit_spread, cfs::AbstractArray)
     times = FinanceCore.timepoint.(cfs, 1:length(cfs))
     return duration(IR01(), base_curve, credit_spread, vec(cfs), times)
 end
@@ -466,11 +494,12 @@ julia> duration(CS01(), 0.03, 0.02, cfs, times) ≈ duration(DV01(), 0.05, cfs, 
 true
 ```
 """
-function duration(::CS01, base_curve, credit_spread, cfs, times)
-    return duration(DV01(), credit_spread, s -> price(base_curve + s, vec(cfs), times))
+function duration(::CS01, base_curve, credit_spread, cfs::AbstractArray, times)
+    cfs = vec(cfs)
+    return duration(DV01(), credit_spread, s -> FinanceCore.present_value(base_curve + s, cfs, times))
 end
 
-function duration(::CS01, base_curve, credit_spread, cfs)
+function duration(::CS01, base_curve, credit_spread, cfs::AbstractArray)
     times = FinanceCore.timepoint.(cfs, 1:length(cfs))
     return duration(CS01(), base_curve, credit_spread, vec(cfs), times)
 end
@@ -482,6 +511,11 @@ end
 Calculates the convexity.
     - `yield` should be a fixed effective yield (e.g. `0.05`).
     - `times` may be omitted and it will assume `cfs` are evenly spaced beginning at the end of the first period.
+
+A scalar or `Rate` input is shocked in its own compounding space. An
+`AbstractYieldModel` input is instead shocked additively in continuously
+compounded zero-rate space, consistently across the no-tenor, tenor-aware,
+and key-rate APIs.
 
 # Examples
 
@@ -513,11 +547,11 @@ julia> convexity(0.03,my_lump_sum_value)
 ```
 
 """
-function convexity(yield, cfs, times)
+function convexity(yield::_YieldInput, cfs::_CashflowCollection, times)
     return convexity(yield, i -> price(i, cfs, times))
 end
 
-function convexity(yield, cfs)
+function convexity(yield::_YieldInput, cfs::_CashflowCollection)
     times = FinanceCore.timepoint.(cfs, 1:length(cfs))
     return convexity(yield, cfs, times)
 end
@@ -526,14 +560,14 @@ end
 #
 # Exactly equal to the generic nested-AD path (locked by equality tests vs
 # `convexity(yield, i -> price(i, cfs, times))`). As with the Modified-duration
-# fast paths above, the weight and divisor follow from where `yield + x`
-# applies the shock:
+# fast paths above, the weight and divisor follow from the selected shock
+# coordinate:
 #
 # * `Real` y: V(x) = Σ cf·(1+y+x)^(-t) → Σ cf·d·t(t+1) / V / (1+y)²
 # * `Rate{Periodic(m)}`: V(x) = Σ cf·(1+(y+x)/m)^(-mt) → Σ cf·d·t(t+1/m) / V / (1+y/m)²
 # * `Rate{Continuous}`: V(x) = Σ cf·e^(-(y+x)t) → Σ cf·d·t² / V
-# * `Yield.Constant`: shock composes in continuous-zero space as log(1+x), so
-#   V(x) = Σ cf·d·(1+x)^(-t) → Σ cf·d·t(t+1) / V (no divisor).
+# * `Yield.Constant`: as a yield model it is shocked in continuous-zero space,
+#   so V(x) = Σ cf·d·exp(-xt) → Σ cf·d·t² / V.
 #
 # The ratio uses the signed V, matching the generic path's |V|-normalized
 # second derivative for any sign of V (signs cancel).
@@ -569,7 +603,7 @@ function convexity(yield::FinanceCore.Rate{<:Real, FinanceCore.Continuous}, cfs:
     return _weighted_ratio(yield, t -> t * t, cfs, times)
 end
 function convexity(yield::FinanceModels.Yield.Constant{<:FinanceCore.Rate}, cfs::AbstractVector, times)
-    return _weighted_ratio(yield.rate, t -> t * (t + 1), cfs, times)
+    return _weighted_ratio(yield.rate, t -> t * t, cfs, times)
 end
 # disambiguation vs `convexity(curve::AYM, tenors, cfs::AbstractVector{<:Cashflow})`:
 # a Cashflow vector in the third position means (tenors, cashflows), not (cfs, times)
@@ -577,8 +611,8 @@ function convexity(yield::FinanceModels.Yield.Constant{<:FinanceCore.Rate}, teno
     return convexity(yield, tenors, _extract_cfs_times(cfs)...)
 end
 
-function convexity(yield, valuation_function::T) where {T <: Function}
-    v(x) = abs(valuation_function(yield + x))
+function convexity(yield, valuation_function::T) where {T}
+    v(x) = abs(valuation_function(_parallel_bumped(yield, x)))
     ∂²P = ForwardDiff.derivative(y -> ForwardDiff.derivative(v, y), 0.0)
     return ∂²P / v(0.0)
 end
@@ -627,7 +661,7 @@ References:
 - (Financial Exam Help 123](http://www.financialexamhelp123.com/key-rate-duration/)
 
 """
-function duration(keyrate::KeyRateDuration, curve, cashflows, timepoints, krd_points)
+function duration(keyrate::KeyRateDuration, curve, cashflows::AbstractArray, timepoints, krd_points)
     shift = keyrate.shift
     curve_up = _krd_new_curve(keyrate, curve, krd_points)
     curve_down = _krd_new_curve(opposite(keyrate), curve, krd_points)
@@ -708,11 +742,11 @@ function _default_krd_points(timepoints)
     return 1:mt
 end
 
-function duration(keyrate::KeyRateDuration, curve, cashflows, timepoints)
+function duration(keyrate::KeyRateDuration, curve, cashflows::AbstractArray, timepoints)
     return duration(keyrate, curve, cashflows, timepoints, _default_krd_points(timepoints))
 end
 
-function duration(keyrate::KeyRateDuration, curve, cashflows)
+function duration(keyrate::KeyRateDuration, curve::_YieldInput, cashflows::AbstractArray)
     # extract embedded Cashflow times where present; otherwise the index is the time
     timepoints = FinanceCore.timepoint.(cashflows, eachindex(cashflows))
     return duration(keyrate, curve, cashflows, timepoints, _default_krd_points(timepoints))
@@ -804,7 +838,7 @@ end
 ## Scalar do-block forwarding for AbstractYieldModel
 #
 # Forwards `duration(vf, curve)` and `convexity(vf, curve)` (no tenors) to the
-# generic finite-difference scalar path that works on any yield-like input.
+# scalar continuous-zero-shock paths for yield models.
 
 function duration(valuation_fn::Function, yield::FinanceModels.Yield.AbstractYieldModel)
     return duration(yield, valuation_fn)
