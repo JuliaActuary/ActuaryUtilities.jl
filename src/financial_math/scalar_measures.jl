@@ -40,7 +40,7 @@ end
 """
     price(...)
 
-The absolute value of the `present_value(...)`. 
+The absolute value of the `present_value(...)`.
 
 # Extended help
 
@@ -203,7 +203,7 @@ abstract type KeyRateDuration <: Duration end
 """
     KeyRatePar(timepoint,shift=0.001) <: KeyRateDuration
 
-Shift the par curve by the given amount at the given timepoint. Use in conjunction with `duration` to calculate the key rate duration. 
+Shift the par curve by the given amount at the given timepoint. Use in conjunction with `duration` to calculate the key rate duration.
 
 Unlike other duration statistics which are computed using analytic derivatives, `KeyRateDuration`s are computed via a shift-and-compute the yield curve approach.
 
@@ -234,7 +234,7 @@ end
 """
     KeyRate(timepoints,shift=0.001)
 
-A convenience constructor for [`KeyRateZero`](@ref). 
+A convenience constructor for [`KeyRateZero`](@ref).
 
 ## Extended Help
 [`KeyRateZero`](@ref) is chosen as the default constructor because it has more attractive properties than [`KeyRatePar`](@ref):
@@ -314,7 +314,7 @@ julia> convexity(0.03,cfs,times)
 
 ```
 
-Using any given value function: 
+Using any given value function:
 
 ```julia-repl
 julia> lump_sum_value(amount,years,i) = amount / (1 + i ) ^ years
@@ -497,7 +497,7 @@ julia> convexity(0.03,cfs,times)
 
 ```
 
-Using any given value function: 
+Using any given value function:
 
 ```julia-repl
 julia> lump_sum_value(amount,years,i) = amount / (1 + i ) ^ years
@@ -582,14 +582,14 @@ end
 
 
 """
-    duration(keyrate::KeyRateDuration,curve,cashflows)    
+    duration(keyrate::KeyRateDuration,curve,cashflows)
     duration(keyrate::KeyRateDuration,curve,cashflows,timepoints)
     duration(keyrate::KeyRateDuration,curve,cashflows,timepoints,krd_points)
 
 Calculate the key rate duration by shifting the **zero** (not par) curve by the kwarg `shift` at the timepoint specified by a KeyRateDuration(time).
 
-The approach is to carve up the curve into `krd_points` (default is the unit steps between `1` and  the last timepoint of the casfhlows). The 
-zero rate corresponding to the timepoint within the `KeyRateDuration` is shifted by `shift` (specified by the `KeyRateZero` or `KeyRatePar` constructors. A new curve is created from the shifted rates. This means that the 
+The approach is to carve up the curve into `krd_points` (default is the unit steps between `1` and  the last timepoint of the casfhlows). The
+zero rate corresponding to the timepoint within the `KeyRateDuration` is shifted by `shift` (specified by the `KeyRateZero` or `KeyRatePar` constructors. A new curve is created from the shifted rates. This means that the
 "width" of the shifted section is ± 1 time period, unless specific points are specified via `krd_points`.
 
 The `curve` may be any FinanceModels.jl curve (e.g. does not have to be a curve constructed via `FinanceModels.Zero(...)`).
@@ -616,10 +616,10 @@ julia> duration(KeyRate(1),rf_curve,cfs)
 
 # Extended Help
 
-Key Rate Duration is not a well specified topic in the literature and in practice. The reference below suggest that shocking the par curve is more common 
+Key Rate Duration is not a well specified topic in the literature and in practice. The reference below suggest that shocking the par curve is more common
 in practice, but that the zero curve produces more consistent results. Future versions may support shifting the par curve.
 
-References: 
+References:
 - [Quant Finance Stack Exchange: To compute key rate duration, shall I use par curve or zero curve?](https://quant.stackexchange.com/questions/33891/to-compute-key-rate-duration-shall-i-use-par-curve-or-zero-curve)
 - (Financial Exam Help 123](http://www.financialexamhelp123.com/key-rate-duration/)
 
@@ -715,7 +715,7 @@ function duration(keyrate::KeyRateDuration, curve, cashflows)
     return duration(keyrate, curve, cashflows, timepoints, _default_krd_points(timepoints))
 end
 
-""" 
+"""
     spread(curve1,curve2,cashflows)
 
 Return the solved-for constant spread to add to `curve1` in order to equate the discounted `cashflows` with `curve2`
