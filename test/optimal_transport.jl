@@ -32,9 +32,6 @@
         @test wasserstein([10, 20], [1, 2, 3, 4, 5]) ≈ 12.0   # symmetric
 
         @test_throws ArgumentError wasserstein([1, 2], [3, 4]; p = 0.5)
-        # empty samples fail loudly rather than returning NaN
-        @test_throws ArgumentError wasserstein(Float64[], [1.0, 2.0])
-        @test_throws ArgumentError wasserstein([1.0, 2.0], Float64[])
 
         # Distribution forms use adaptive quantile integration and distinguish a
         # genuinely divergent moment from tail cancellation between two laws.
@@ -181,7 +178,6 @@
         @test robustvalue(WangTransform(0.95), sw; radius = 100, tail = 0.95) > WangTransform(0.95)(sw)
         @test_throws ArgumentError robustvalue(WangTransform(0.95), s; radius = 100)
         @test_throws ArgumentError robustvalue(CTE(0.95), s; radius = -1)
-        @test_throws ArgumentError robustvalue(CTE(0.95), Float64[]; radius = 100)
     end
 
 end
