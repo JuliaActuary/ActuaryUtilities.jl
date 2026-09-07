@@ -155,6 +155,7 @@ include("key_rate_durations.jl")
 include("sensitivities.jl")
 include("stochastic_sensitivities.jl")
 include("contract_sensitivities.jl")
+include("projection_models.jl")
 
 using Aqua
 @testset "Aqua.jl" begin

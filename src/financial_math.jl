@@ -1399,28 +1399,28 @@ sensitivities(vf::Function, ::DV01, kr::KeyRates, base::AYM, credit::AYM) = sens
 #
 # A contract (or a vector of contracts = a portfolio) is a "target": it is valued
 # by RE-PROJECTING under a bumped curve, so a floater's coupons re-fix automatically
-# (its projection reads the model) while a fixed bond's do not. `_contract_keys`
-# (empty vs not) is the only discriminator — no `ValuationStyle` trait. The risk
+# (its projection reads the model) while a fixed bond's do not. FinanceModels
+# owns model requirements and projection of contract wrappers. The risk
 # factor stays the familiar vocabulary: `Effective` (rate) / `Spread` (credit) /
 # `KeyRates`; units are the verb (`duration` yrs / `dv01` $ / `convexity`).
-
-_contract_keys(c::FinanceModels.Bond.Floating) = (c.key,)
-_contract_keys(c::FinanceCore.Composite) = (_contract_keys(c.a)..., _contract_keys(c.b)...)
-_contract_keys(c::FinanceModels.Forward) = _contract_keys(c.instrument)
-_contract_keys(::FinanceCore.AbstractContract) = ()
 
 const _Contractish = Union{FinanceCore.AbstractContract, AbstractVector{<:FinanceCore.AbstractContract}}
 
 """
-    reproject(contract, index_curve)
+    reproject(contract, index_curve::AbstractYieldModel)
+    reproject(contract, models)
 
-Wrap `contract` so its coupons are estimated off `index_curve`: returns the contract
-itself if it reads no model, else a `Projection` mapping the contract's keys to
-`index_curve`. Lets a multi-curve valuation avoid hand-writing the model `Dict`.
+Return a `FinanceModels.Projection` with the models needed by `contract`.
+The single-index convenience delegates model requirements and wrapper traversal
+entirely to FinanceModels. All declared yield-model keys receive `index_curve`;
+incompatible requirements (such as an FX model) are rejected.
+
+Pass an explicit model store for distinct index curves, FX conversion, or custom
+contracts. For sensitivities with custom model wiring, use a valuation closure
+that builds this store from the bumped named curves.
 """
-reproject(c::FinanceCore.AbstractContract, index) =
-    isempty(_contract_keys(c)) ? c :
-    FinanceModels.Projection(c, Dict(k => index for k in _contract_keys(c)), FinanceModels.CashflowProjection())
+reproject(c, index::AYM) = FinanceModels.Projection(c; index)
+reproject(c, models) = FinanceModels.Projection(c, models)
 
 # value of a contract/portfolio under a single curve (coupons + discount = curve) …
 _cvalue(c::FinanceCore.AbstractContract, curve) = FinanceCore.present_value(curve, reproject(c, curve))
@@ -1553,11 +1553,8 @@ the model price equals `market_price`, with coupons estimated on `forward` (held
 Returns the spread and its sensitivity (\\\$/1bp parallel move of `credit + s`). Newton + AD.
 """
 function zspread(contract::FinanceCore.AbstractContract, credit::AYM, market_price; forward::AYM = credit, s0 = 0.0, tol = 1.0e-12, maxiter = 100)
-    ks = _contract_keys(contract)
-    pvs(s) = let disc = credit + ((z, t) -> z + FinanceCore.Continuous(s))
-        isempty(ks) ? FinanceCore.present_value(disc, contract) :
-            FinanceCore.present_value(disc, FinanceModels.Projection(contract, Dict(k => forward for k in ks), FinanceModels.CashflowProjection()))
-    end
+    projected = reproject(contract, forward)
+    pvs(s) = FinanceCore.present_value(credit + ((z, t) -> z + FinanceCore.Continuous(s)), projected)
     f(s) = pvs(s) - market_price
     s = float(s0)
     converged = false
