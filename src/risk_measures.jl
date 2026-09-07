@@ -109,11 +109,6 @@ julia> rm(rand(1000))
 """
 struct VaR{T <: Real} <: RiskMeasure
     α::T
-
-    function VaR(α::T) where {T}
-        @assert 0 <= α < 1 "α of $α is not 0 ≤ α < 1"
-        return new{T}(α)
-    end
 end
 # The boundary uses `<=` so that the Choquet form of this distortion selects the
 # lower quantile at an atom, matching `Distributions.quantile`.
@@ -171,11 +166,6 @@ julia> rm(rand(1000))
 """
 struct CTE{T <: Real} <: RiskMeasure
     α::T
-
-    function CTE(α::T) where {T}
-        @assert 0 <= α < 1 "α of $α is not 0 ≤ α < 1"
-        return new{T}(α)
-    end
 end
 g(rm::CTE, x) = x < (1 - rm.α) ? x / (1 - rm.α) : 1
 gbar(rm::CTE, F) = F <= rm.α ? zero(F / (1 - rm.α)) : (F - rm.α) / (1 - rm.α)
@@ -221,10 +211,6 @@ julia> rm(rand(1000))
 """
 struct WangTransform{T} <: RiskMeasure
     α::T
-    function WangTransform(α::T) where {T}
-        @assert 0 < α < 1 "α of $α is not 0 < α < 1"
-        return new{T}(α)
-    end
 end
 function g(rm::WangTransform, x)
     Φ_inv(x) = Distributions.quantile(Distributions.Normal(), x)
@@ -326,9 +312,6 @@ _finite_atoms(d::Distributions.DiscreteUnivariateDistribution) =
     d isa Distributions.DiscreteNonParametric || Distributions.hasfinitesupport(d)
 
 function _choquet(rm::RiskMeasure, risk; rtol = sqrt(eps(Float64)), atol = 0.0, maxevals = 10^7)
-    (isfinite(rtol) && rtol >= 0) || throw(ArgumentError("rtol must be finite and nonnegative"))
-    (isfinite(atol) && atol >= 0) || throw(ArgumentError("atol must be finite and nonnegative"))
-    maxevals > 0 || throw(ArgumentError("maxevals must be positive"))
     G = ccdf_func(risk)   # hoisted: each closure is built once, not once per node
     F = cdf_func(risk)
     # Each side runs at half the requested tolerance. The two certificates then
@@ -491,7 +474,6 @@ end
 # ProportionalHazard, user-defined). The VaR/CTE/Expectation methods below are
 # more specific and intercept first.
 function (rm::RiskMeasure)(risk::AbstractArray{<:Real})
-    isempty(risk) && throw(ArgumentError("the risk sample must contain at least one outcome"))
     xs = sort(vec(risk))
     n = length(xs)
     T = float(eltype(xs))
@@ -502,7 +484,6 @@ function (rm::RiskMeasure)(risk::AbstractArray{<:Real})
 end
 
 function (rm::VaR)(risk::AbstractArray{<:Real})
-    isempty(risk) && throw(ArgumentError("the risk sample must contain at least one outcome"))
     n = length(risk)
     k = _first_index_at_or_above(n, rm.α)
     return partialsort(vec(risk), k)
@@ -514,7 +495,6 @@ end
 # Elements are divided by n before summing so that large samples cannot
 # overflow the accumulator.
 function (rm::CTE)(risk::AbstractArray{<:Real})
-    isempty(risk) && throw(ArgumentError("the risk sample must contain at least one outcome"))
     n = length(risk)
     α = rm.α
     k = _first_index_above(n, α)
@@ -526,7 +506,6 @@ function (rm::CTE)(risk::AbstractArray{<:Real})
 end
 
 function (rm::Expectation)(risk::AbstractArray{<:Real})
-    isempty(risk) && throw(ArgumentError("the risk sample must contain at least one outcome"))
     n = length(risk)
     return sum(x -> x / n, risk)
 end

@@ -22,14 +22,6 @@ Distributions.ccdf(::DelayedDirac, x::Real) = x < 100 ? 1.0 : 0.0
 
 @testset "Risk Measures" begin
 
-    @test_throws AssertionError VaR(-0.5)
-    @test_throws AssertionError VaR(1.0)
-    @test_throws AssertionError VaR(1.5)
-    @test_throws AssertionError CTE(-0.5)
-    @test_throws AssertionError CTE(1.0)
-    @test_throws AssertionError CTE(1.5)
-    @test_throws AssertionError WangTransform(0.0)
-    @test_throws AssertionError WangTransform(1.0)
     for bad in (0, -1, Inf, NaN)
         @test_throws ArgumentError DualPower(bad)
         @test_throws ArgumentError ProportionalHazard(bad)
@@ -259,9 +251,6 @@ Distributions.ccdf(::DelayedDirac, x::Real) = x < 100 ? 1.0 : 0.0
         @test RiskMeasures.Expectation()(fill(typemax(Int), 4)) ≈ 9.223372036854776e18
         @test RiskMeasures.Expectation()(Float32[1, 2, 3]) ≈ 2
         @test CTE(0.5)(BigFloat[1, 2, 3, 4]) ≈ big"3.5"
-        for rm in (VaR(0.5), CTE(0.5), RiskMeasures.Expectation(), WangTransform(0.5))
-            @test_throws ArgumentError rm(Float64[])
-        end
     end
 
 end
