@@ -92,7 +92,11 @@ return a more positive number.
 `VaR(α)` returns a functor which can then be called on a risk distribution.
 
 ## Parameters
-- α: [0,1.0)
+- `α` is a real confidence level in `0 ≤ α < 1`. Real values outside this
+  domain, including `NaN` and infinities, throw `ArgumentError` at construction.
+  `α = 0` selects the essential infimum as described above.
+  `α = 1` is excluded; no upper-endpoint extension is defined.
+  Explicitly typed constructors check the value after conversion to that type.
 
 ## Examples
 
@@ -109,7 +113,14 @@ julia> rm(rand(1000))
 """
 struct VaR{T <: Real} <: RiskMeasure
     α::T
+
+    function VaR{T}(α) where {T <: Real}
+        α = convert(T, α)
+        0 <= α < 1 || throw(ArgumentError("α must be in [0, 1), got $α"))
+        return new{T}(α)
+    end
 end
+VaR(α::T) where {T <: Real} = VaR{T}(α)
 # The boundary uses `<=` so that the Choquet form of this distortion selects the
 # lower quantile at an atom, matching `Distributions.quantile`.
 g(rm::VaR, x) = x <= (1 - rm.α) ? 0 : 1
@@ -149,7 +160,11 @@ CTE(α) returns a functor which can then be called on a risk distribution.
 
 ## Parameters
 
-- α: [0,1.0)
+- `α` is a real confidence level in `0 ≤ α < 1`. Real values outside this
+  domain, including `NaN` and infinities, throw `ArgumentError` at construction.
+  `α = 0` gives the mean. `α = 1` is excluded because the
+  averaged tail would have zero probability mass; no limiting value is used.
+  Explicitly typed constructors check the value after conversion to that type.
 
 ## Examples
 
@@ -166,7 +181,14 @@ julia> rm(rand(1000))
 """
 struct CTE{T <: Real} <: RiskMeasure
     α::T
+
+    function CTE{T}(α) where {T <: Real}
+        α = convert(T, α)
+        0 <= α < 1 || throw(ArgumentError("α must be in [0, 1), got $α"))
+        return new{T}(α)
+    end
 end
+CTE(α::T) where {T <: Real} = CTE{T}(α)
 g(rm::CTE, x) = x < (1 - rm.α) ? x / (1 - rm.α) : 1
 gbar(rm::CTE, F) = F <= rm.α ? zero(F / (1 - rm.α)) : (F - rm.α) / (1 - rm.α)
 
@@ -188,7 +210,11 @@ numerical quadrature. That path throws an error when the defining integral
 cannot be verified to converge, for example for heavy-tailed risks.
 
 ## Parameters
-- α: [0,1.0]
+- `α` is a real parameter in `0 < α < 1`. Real values outside this domain,
+  including `NaN` and infinities, throw `ArgumentError` at construction.
+  Both endpoints are excluded because `Φ⁻¹(α)` must be finite.
+  `α = 0.5` gives the identity distortion and hence the expectation.
+  Explicitly typed constructors check the value after conversion to that type.
 
 In the literature, sometimes λ is used where ``\\lambda = \\Phi^{-1}(\\alpha)``.
 
@@ -209,9 +235,16 @@ julia> rm(rand(1000))
 ## References
 - "A Risk Measure That Goes Beyond Coherence", Shaun S. Wang, 2002
 """
-struct WangTransform{T} <: RiskMeasure
+struct WangTransform{T <: Real} <: RiskMeasure
     α::T
+
+    function WangTransform{T}(α) where {T <: Real}
+        α = convert(T, α)
+        0 < α < 1 || throw(ArgumentError("α must be in (0, 1), got $α"))
+        return new{T}(α)
+    end
 end
+WangTransform(α::T) where {T <: Real} = WangTransform{T}(α)
 function g(rm::WangTransform, x)
     Φ_inv(x) = Distributions.quantile(Distributions.Normal(), x)
     return Distributions.cdf(Distributions.Normal(), Φ_inv(x) + Φ_inv(rm.α))

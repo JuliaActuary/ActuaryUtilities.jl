@@ -1,5 +1,19 @@
 # Version Upgrade Guide
 
+## Unreleased
+
+`VaR` and `CTE` now enforce their documented domain `0 ≤ α < 1` at construction,
+including through the `ValueAtRisk` and `ConditionalTailExpectation` aliases and
+explicitly typed constructors. `WangTransform` requires `0 < α < 1`; its earlier
+documentation incorrectly included the endpoints. Out-of-domain real values
+(including `NaN` and infinities) throw `ArgumentError`. Explicitly typed
+constructors validate the value after conversion.
+
+At zero, `VaR` remains the essential infimum and `CTE` remains the mean. One is
+excluded for both measures, and both endpoints are excluded for `WangTransform`.
+This establishes behavior for invalid parameters; it does not change results
+at valid confidence levels.
+
 ## v5.11.1 to v5.11.2
 
 This release fixes a class of bugs where risk measures returned believable but wrong finite numbers. Two behavior changes matter for existing code.
