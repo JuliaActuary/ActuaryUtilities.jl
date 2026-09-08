@@ -4,12 +4,22 @@
 
 - Analytic `KeyRates` calculations preserve the numeric type of discounted cashflows,
   including `BigFloat` and automatic-differentiation values from curve parameters.
-- Empty cashflow collections have zero value and zero key-rate risk, including normalized
-  duration and convexity by convention. Results retain their usual scalar, vector, matrix,
-  or named-block shape, and no curve evaluation is performed. Previously normalized results
-  contained `NaN`; dollar DV01/IR01/CS01 results remain zero. This convention applies to
-  explicit cashflow inputs. Nonempty zero-value portfolios and valuation-function inputs
-  retain their existing normalization behavior.
+- Empty cashflow collections **and all-zero cashflow amounts** now have zero value and
+  zero risk, including normalized duration and convexity by convention. This applies to
+  explicit-cashflow scalar duration/convexity, DV01/IR01/CS01, legacy key rates, and
+  `KeyRates` sensitivities (including Hull–White). Previously these inputs could produce
+  `NaN` or a `BoundsError`. Results keep their usual shapes and use positive zeros.
+  `present_values` likewise returns an empty vector or a vector of zeros.
+- Zero streams do not evaluate the curve or run simulations. Their numeric types come
+  from the amounts and times, plus the tenor grid for key-rate results, **without the
+  curve's numeric type**; nonzero streams still promote from discounted cashflows.
+  Abstractly typed empty inputs fall back to `Float64`.
+- Nonzero amounts that offset to zero present value are not zero streams: normalized
+  duration and convexity still produce `NaN`/`Inf`, and dollar exposures are not reset
+  to zero. Valuation-function and contract inputs retain their existing behavior.
+  Aggregate portfolio values and dollar derivatives before normalizing once. An
+  unweighted average of individual durations includes zero-stream entries as zeros;
+  it is not a portfolio duration. See [Zero cashflow streams](@ref).
 
 ## v5.11.1 to v5.11.2
 
