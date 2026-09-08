@@ -12,7 +12,9 @@ FC.discount(::ZeroCashflowTestCurve, t) = error("zero cashflows do not require a
     @testset "Scalar measures and legacy key rates" begin
         for (cfs, times) in (
                 (Float64[], Float64[]), ([], []),
+                (Float64[], [1.0, 2.0]),
                 ([0.0, -0.0], [1.0, 2.0]),
+                ([0.0, -0.0], [1.0, 2.0, NaN]),
                 (FC.Cashflow{Float64, Float64}[], Float64[]),
                 (FC.Cashflow[], Float64[]),
                 (FC.Cashflow.([0.0, -0.0], [1.0, 2.0]), [1.0, 2.0]),
@@ -43,7 +45,7 @@ FC.discount(::ZeroCashflowTestCurve, t) = error("zero cashflows do not require a
 
     @testset "One, two, and named discount layers" begin
         layers = (; base = curve, credit = curve, liquidity = curve)
-        for (cfs, times) in ((Float64[], Float64[]), ([0.0, -0.0], [0.0, 2.0]))
+        for (cfs, times) in ((Float64[], Float64[]), (Float64[], [1.0, 2.0]), ([0.0, -0.0], [0.0, 2.0]), ([0.0, -0.0], [0.0, 2.0, NaN]))
             @test isequal(duration(kr, curve, cfs, times), z)
             @test isequal(duration(DV01(), kr, curve, cfs, times), z)
             @test isequal(duration(IR01(), kr, curve, curve, cfs, times), z)
@@ -124,18 +126,64 @@ FC.discount(::ZeroCashflowTestCurve, t) = error("zero cashflows do not require a
         @test ForwardDiff.derivative(dollar, 0.0) ≈ 2 * FC.discount(flat, 2.0) / 10_000
         value(x) = kernel((; flat), tenors, [x], [2.0]).value
         @test ForwardDiff.derivative(value, 0.0) ≈ FC.discount(flat, 2.0)
+        squared_value(x) = value(x * x)
+        @test ForwardDiff.derivative(x -> ForwardDiff.derivative(squared_value, x), 0.0) ≈ 2 * FC.discount(flat, 2.0)
         zero_krd(rs) = duration(kr, FM.ZeroRateCurve(rs, tenors), zeros(2), [0.0, 2.0])
         @test ForwardDiff.jacobian(zero_krd, [0.02, 0.03, 0.04]) == zz
     end
 
     @testset "Hull-White skips simulation" begin
         hw = FM.ShortRate.HullWhite(0.1, 0.01, FM.Yield.Constant(0.04))
-        for (cfs, times) in ((Float64[], Float64[]), (zeros(2), [1.0, 2.0]))
+        for (cfs, times) in ((Float64[], Float64[]), (Float64[], [1.0, 2.0]), (zeros(2), [1.0, 2.0]), (zeros(2), [1.0, 2.0, NaN]))
             rng = MersenneTwister(123)
             untouched = copy(rng)
             @test isequal(sensitivities(kr, hw, cfs, times; rng), (; value = 0.0, durations = z, convexities = zz))
             @test isequal(sensitivities(DV01(), kr, hw, cfs, times; rng), (; value = 0.0, dv01s = z, convexities = zz))
             @test rand(rng) == rand(untouched)
         end
+    end
+end
+
+@testset "Trailing times are unused" begin
+    cfs, times = [5.0, 105.0], [1.0, 2.0]
+    extra = [1.0, 2.0, 50.0, NaN]
+    tenors = [1.0, 2.0, 3.0]
+    kr = KeyRates(tenors)
+    curve = FM.ZeroRateCurve([0.02, 0.03, 0.04], tenors)
+    flat = FM.Yield.Constant(FC.Continuous(0.04))
+    for yield in (0.04, FC.Periodic(0.04, 2), FC.Continuous(0.04), flat, curve)
+        for measure in (Macaulay(), Modified(), DV01())
+            @test duration(measure, yield, cfs, extra) ≈ duration(measure, yield, cfs, times)
+            @test_throws DimensionMismatch duration(measure, yield, cfs, [1.0])
+        end
+        @test convexity(yield, cfs, extra) ≈ convexity(yield, cfs, times)
+        @test_throws DimensionMismatch convexity(yield, cfs, [1.0])
+        @test present_values(yield, cfs, extra) ≈ present_values(yield, cfs, times)
+    end
+    for measure in (IR01(), CS01())
+        @test duration(measure, curve, flat, cfs, extra) ≈ duration(measure, curve, flat, cfs, times)
+        @test_throws DimensionMismatch duration(measure, curve, flat, cfs, [1.0])
+        @test duration(measure, kr, curve, flat, cfs, extra) == duration(measure, kr, curve, flat, cfs, times)
+    end
+    for measure in (KeyRateZero(1), KeyRatePar(1))
+        @test duration(measure, flat, cfs, extra) ≈ duration(measure, flat, cfs, times)
+        @test duration(measure, flat, cfs, extra, tenors) ≈ duration(measure, flat, cfs, times, tenors)
+    end
+    for args in ((kr, curve), (DV01(), kr, curve), (kr, curve, flat), (DV01(), kr, curve, flat), (kr, (; base = curve, credit = flat)))
+        @test isequal(sensitivities(args..., cfs, extra), sensitivities(args..., cfs, times))
+        @test_throws DimensionMismatch sensitivities(args..., cfs, [1.0])
+    end
+    @test convexity(kr, curve, cfs, extra) == convexity(kr, curve, cfs, times)
+    @test convexity(curve, tenors, cfs, extra) == convexity(curve, tenors, cfs, times)
+
+    # A trailing time must not extend the inferred horizon or change RNG use.
+    hw = FM.ShortRate.HullWhite(0.1, 0.01, flat)
+    for args in ((kr, hw), (DV01(), kr, hw))
+        rng_short, rng_long = MersenneTwister(42), MersenneTwister(42)
+        short = sensitivities(args..., cfs, times; n_scenarios = 8, timestep = 0.25, rng = rng_short)
+        long = sensitivities(args..., cfs, extra; n_scenarios = 8, timestep = 0.25, rng = rng_long)
+        @test isequal(short, long)
+        @test rand(rng_short) == rand(rng_long)
+        @test_throws DimensionMismatch sensitivities(args..., cfs, [1.0])
     end
 end

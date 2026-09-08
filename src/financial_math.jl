@@ -7,6 +7,8 @@ import ..ForwardDiff
 import ..ActuaryUtilities: duration
 import Random
 
+include("cashflow_risk.jl")
+
 export irr, internal_rate_of_return, spread,
     pv, present_value, price, present_values,
     breakeven, moic,
@@ -21,6 +23,7 @@ Efficiently calculate a vector representing the present value of the given cashf
 Empty collections return an empty vector. Collections whose amounts are all
 exactly zero return a vector of positive zeros without evaluating the curve;
 the element type comes from the amounts and timepoints.
+Every cashflow requires a time; additional trailing times are ignored.
 
 # Examples
 ```julia-repl
@@ -39,7 +42,7 @@ julia> present_values(0.05, [10,10,110], [1,2,3])
 
 """
 function present_values(interest, cashflows, times = eachindex(cashflows))
-    _check_cashflow_times(cashflows, times; equal_length = true)
+    _check_cashflow_times(cashflows, times)
     n = length(cashflows)
     _iszero_cashflow_stream(cashflows) && return zeros(typeof(_zero_cashflow_value(cashflows, times)), n)
     # single reverse scan: pvs[k] is the value at times[k-1] (time zero for k = 1)
@@ -280,10 +283,9 @@ Calculates the Macaulay, Modified, DV01, IR01, or CS01 duration. `times` may be 
 `cfs` can be an `AbstractVector{<:Cashflow}` (from FinanceCore), in which case `times` is extracted automatically and should be omitted.
 
 Empty collections and collections whose amounts are all exactly zero return zero
-risk, including normalized duration by convention, without evaluating the curve.
-The zero's type comes from the cashflow amounts and times. Nonzero amounts that
-offset to zero present value still have undefined normalized risk (`NaN`/`Inf`).
-Valuation-function forms retain their existing normalization behavior.
+risk without evaluating the curve. Every cashflow needs a time; unused trailing
+times are ignored. See [Zero cashflow streams](@ref) for the normalization convention,
+numeric types, and zero-net-value portfolios. Valuation-function forms are unchanged.
 
 When not given `Modified()` or `Macaulay()` as an argument, will default to `Modified()`.
 
@@ -357,7 +359,7 @@ function duration(::Macaulay, yield, cfs, times)
 end
 
 function duration(::Modified, yield, cfs, times)
-    _check_cashflow_times(cfs, times; equal_length = true)
+    times = _cashflow_times(cfs, times)
     _iszero_cashflow_stream(cfs) && return _zero_cashflow_value(cfs, times)
     D(i) = price(i, cfs, times)
     return duration(yield, D)
@@ -409,14 +411,6 @@ function duration(yield, valuation_function::T) where {T <: Function}
     return δV = -ForwardDiff.derivative(D, 0.0)
 end
 
-# Element access for cashflow vectors that may be either numeric or
-# wrapped `FinanceCore.Cashflow` values. The scalar duration / convexity
-# fast paths use this so they work uniformly across both representations.
-@inline _cf_value(c::FinanceCore.Cashflow) = FinanceCore.amount(c)
-@inline _cf_value(c) = c
-
-include("cashflow_risk.jl")
-
 function duration(yield, cfs, times)
     return duration(Modified(), yield, vec(cfs), times)
 end
@@ -429,7 +423,7 @@ function duration(yield, cfs)
 end
 
 function duration(::DV01, yield, cfs, times)
-    _check_cashflow_times(cfs, times; equal_length = true)
+    times = _cashflow_times(cfs, times)
     _iszero_cashflow_stream(cfs) && return _zero_cashflow_value(cfs, times)
     return duration(DV01(), yield, i -> price(i, vec(cfs), times))
 end
@@ -465,7 +459,7 @@ true
 ```
 """
 function duration(::IR01, base_curve, credit_spread, cfs, times)
-    _check_cashflow_times(cfs, times; equal_length = true)
+    times = _cashflow_times(cfs, times)
     _iszero_cashflow_stream(cfs) && return _zero_cashflow_value(cfs, times)
     return duration(DV01(), base_curve, i -> price(i + credit_spread, vec(cfs), times))
 end
@@ -498,7 +492,7 @@ true
 ```
 """
 function duration(::CS01, base_curve, credit_spread, cfs, times)
-    _check_cashflow_times(cfs, times; equal_length = true)
+    times = _cashflow_times(cfs, times)
     _iszero_cashflow_stream(cfs) && return _zero_cashflow_value(cfs, times)
     return duration(DV01(), credit_spread, s -> price(base_curve + s, vec(cfs), times))
 end
@@ -517,9 +511,9 @@ Calculates the convexity.
     - `times` may be omitted and it will assume `cfs` are evenly spaced beginning at the end of the first period.
 
 Empty collections and collections whose amounts are all exactly zero return zero
-by convention, without evaluating the curve. The zero's type comes from amounts
-and times. Nonzero amounts that offset to zero present value retain undefined
-normalized convexity (`NaN`/`Inf`); valuation-function forms are unchanged.
+by convention, without evaluating the curve. Every cashflow needs a time; unused
+trailing times are ignored. See [Zero cashflow streams](@ref) for numeric types and
+zero-net-value portfolios. Valuation-function forms are unchanged.
 
 # Examples
 
@@ -552,7 +546,7 @@ julia> convexity(0.03,my_lump_sum_value)
 
 """
 function convexity(yield, cfs, times)
-    _check_cashflow_times(cfs, times; equal_length = true)
+    times = _cashflow_times(cfs, times)
     _iszero_cashflow_stream(cfs) && return _zero_cashflow_value(cfs, times)
     return convexity(yield, i -> price(i, cfs, times))
 end
@@ -584,7 +578,7 @@ end
 function _weighted_ratio(yield, weight, cfs, times; divisor = 1)
     # @inbounds below indexes `times` by `eachindex(cfs)` — a silent mismatch
     # would read out of bounds rather than zip-truncate
-    _check_cashflow_times(cfs, times; equal_length = true)
+    _check_cashflow_times(cfs, times)
     _iszero_cashflow_stream(cfs) && return _zero_cashflow_value(cfs, times)
     t1 = FinanceCore.timepoint(first(cfs), first(times))
     z = _cf_value(first(cfs)) * FinanceCore.discount(yield, t1)
@@ -669,7 +663,7 @@ References:
 
 """
 function duration(keyrate::KeyRateDuration, curve, cashflows, timepoints, krd_points)
-    _check_cashflow_times(cashflows, timepoints; equal_length = true)
+    timepoints = _cashflow_times(cashflows, timepoints)
     keyrate.timepoint in krd_points || throw(ArgumentError("krd_points must contain the shifted timepoint $(keyrate.timepoint)"))
     _iszero_cashflow_stream(cashflows) && return _zero_cashflow_value(cashflows, timepoints)
     shift = keyrate.shift
@@ -753,7 +747,7 @@ function _default_krd_points(timepoints)
 end
 
 function duration(keyrate::KeyRateDuration, curve, cashflows, timepoints)
-    _check_cashflow_times(cashflows, timepoints; equal_length = true)
+    timepoints = _cashflow_times(cashflows, timepoints)
     _iszero_cashflow_stream(cashflows) && return _zero_cashflow_value(cashflows, timepoints)
     return duration(keyrate, curve, cashflows, timepoints, _default_krd_points(timepoints))
 end
@@ -970,11 +964,11 @@ function _keyrate_analytic(
     )
     an = _ncurve_analytic((; base, credit), tenors, cfs, times; order)
     order >= 2 || return (;
-        value = an.value,
+        value = an.value, zero_stream = an.zero_stream,
         base_gradient = an.gradient, credit_gradient = an.gradient,
     )
     return (;
-        value = an.value,
+        value = an.value, zero_stream = an.zero_stream,
         base_gradient = an.gradient, credit_gradient = an.gradient,
         base_hessian = an.hessian, credit_hessian = an.hessian, cross_hessian = an.hessian,
     )
@@ -996,11 +990,12 @@ end
     )
     _check_cashflow_times(cfs, times)
     n = length(tenors)
-    if _iszero_cashflow_stream(cfs)
+    zero_stream = _iszero_cashflow_stream(cfs)
+    if zero_stream
         value = _zero_cashflow_value(cfs, times)
         T = promote_type(typeof(value), eltype(tenors))
         gradient = zeros(T, n)
-        return order >= 2 ? (; value, gradient, hessian = zeros(T, n, n)) : (; value, gradient)
+        return order >= 2 ? (; value, gradient, hessian = zeros(T, n, n), zero_stream) : (; value, gradient, zero_stream)
     end
     # Seed from a valuation term so curve parameters participate in promotion
     # (including differentiation through the analytic sensitivities themselves).
@@ -1045,9 +1040,9 @@ end
         end
     end
     if order >= 2
-        return (; value = V, gradient = grad_shared, hessian = hess_shared)
+        return (; value = V, gradient = grad_shared, hessian = hess_shared, zero_stream)
     else
-        return (; value = V, gradient = grad_shared)
+        return (; value = V, gradient = grad_shared, zero_stream)
     end
 end
 
@@ -1108,7 +1103,8 @@ the bump magnitudes. The user's curve is preserved at all non-knot points.
 
 Empty collections and collections whose amounts are all exactly zero return zero
 key-rate durations by convention, with one entry per tenor and no curve evaluation.
-See [`sensitivities`](@ref) for numeric types and zero-net-value portfolios.
+Every cashflow needs a time; unused trailing times are ignored.
+See [Zero cashflow streams](@ref) for numeric types and zero-net-value portfolios.
 
 # Tenor grid
 
@@ -1151,7 +1147,7 @@ function duration(kr::KeyRates, valuation_fn::Function, curve::AYM)
 end
 function duration(kr::KeyRates, curve::AYM, cfs, times)
     an = _keyrate_analytic(curve, kr.tenors, cfs, times)
-    return _risk_ratio(an.gradient, an.value, _iszero_cashflow_stream(cfs); negate = true)
+    return _risk_ratio(an.gradient, an.value, an.zero_stream; negate = true)
 end
 duration(kr::KeyRates, curve::AYM, cfs::AbstractVector{<:FinanceCore.Cashflow}) = duration(kr, curve, _extract_cfs_times(cfs)...)
 
@@ -1178,7 +1174,7 @@ function duration(::DV01, kr::KeyRates, valuation_fn::Function, curve::AYM)
 end
 function duration(::DV01, kr::KeyRates, curve::AYM, cfs, times)
     an = _keyrate_analytic(curve, kr.tenors, cfs, times)
-    return _risk_ratio(an.gradient, 10_000, _iszero_cashflow_stream(cfs); negate = true)
+    return _risk_ratio(an.gradient, 10_000, an.zero_stream; negate = true)
 end
 duration(::DV01, kr::KeyRates, curve::AYM, cfs::AbstractVector{<:FinanceCore.Cashflow}) = duration(DV01(), kr, curve, _extract_cfs_times(cfs)...)
 
@@ -1207,7 +1203,7 @@ function duration(::IR01, kr::KeyRates, valuation_fn::Function, base::AYM, credi
 end
 function duration(::IR01, kr::KeyRates, base::AYM, credit::AYM, cfs, times)
     an = _keyrate_analytic(base, credit, kr.tenors, cfs, times)
-    return _risk_ratio(an.base_gradient, 10_000, _iszero_cashflow_stream(cfs); negate = true)
+    return _risk_ratio(an.base_gradient, 10_000, an.zero_stream; negate = true)
 end
 duration(::IR01, kr::KeyRates, base::AYM, credit::AYM, cfs::AbstractVector{<:FinanceCore.Cashflow}) = duration(IR01(), kr, base, credit, _extract_cfs_times(cfs)...)
 
@@ -1225,7 +1221,7 @@ function duration(::CS01, kr::KeyRates, valuation_fn::Function, base::AYM, credi
 end
 function duration(::CS01, kr::KeyRates, base::AYM, credit::AYM, cfs, times)
     an = _keyrate_analytic(base, credit, kr.tenors, cfs, times)
-    return _risk_ratio(an.credit_gradient, 10_000, _iszero_cashflow_stream(cfs); negate = true)
+    return _risk_ratio(an.credit_gradient, 10_000, an.zero_stream; negate = true)
 end
 duration(::CS01, kr::KeyRates, base::AYM, credit::AYM, cfs::AbstractVector{<:FinanceCore.Cashflow}) = duration(CS01(), kr, base, credit, _extract_cfs_times(cfs)...)
 
@@ -1300,7 +1296,7 @@ function convexity(kr::KeyRates, valuation_fn::Function, curve::AYM)
 end
 function convexity(kr::KeyRates, curve::AYM, cfs, times)
     an = _keyrate_analytic(curve, kr.tenors, cfs, times; order = 2)
-    return _risk_ratio(an.hessian, an.value, _iszero_cashflow_stream(cfs))
+    return _risk_ratio(an.hessian, an.value, an.zero_stream)
 end
 convexity(kr::KeyRates, curve::AYM, cfs::AbstractVector{<:FinanceCore.Cashflow}) = convexity(kr, curve, _extract_cfs_times(cfs)...)
 
@@ -1312,7 +1308,7 @@ function convexity(base::AYM, credit::AYM, tenors, cfs, times)
     # static cashflows: the analytic helper computes the same blocks as the
     # (2n)×(2n) ForwardDiff Hessian the do-block form pays for, in O(N_cf)
     an = _keyrate_analytic(base, credit, tenors, cfs, times; order = 2)
-    zero_stream = _iszero_cashflow_stream(cfs)
+    zero_stream = an.zero_stream
     return (;
         base = _risk_ratio(sum(an.base_hessian), an.value, zero_stream),
         credit = _risk_ratio(sum(an.credit_hessian), an.value, zero_stream),
@@ -1327,7 +1323,7 @@ function convexity(kr::KeyRates, valuation_fn::Function, base::AYM, credit::AYM)
 end
 function convexity(kr::KeyRates, base::AYM, credit::AYM, cfs, times)
     an = _keyrate_analytic(base, credit, kr.tenors, cfs, times; order = 2)
-    return _conv_blocks(an, _iszero_cashflow_stream(cfs))
+    return _conv_blocks(an, an.zero_stream)
 end
 convexity(kr::KeyRates, base::AYM, credit::AYM, cfs::AbstractVector{<:FinanceCore.Cashflow}) = convexity(kr, base, credit, _extract_cfs_times(cfs)...)
 
@@ -1338,7 +1334,7 @@ function convexity(kr::KeyRates, curves::NamedTuple, cfs, times)
     an = _ncurve_analytic(curves, kr.tenors, cfs, times; order = 2)
     roles = keys(curves)
     L = length(roles)
-    normalized = _risk_ratio(an.hessian, an.value, _iszero_cashflow_stream(cfs))
+    normalized = _risk_ratio(an.hessian, an.value, an.zero_stream)
     return NamedTuple{roles}(ntuple(_ -> NamedTuple{roles}(ntuple(_ -> normalized, L)), L))
 end
 convexity(kr::KeyRates, curves::NamedTuple, cfs::AbstractVector{<:FinanceCore.Cashflow}) =
@@ -1361,6 +1357,7 @@ by [`KeyRates`](@ref).
 
 Empty collections and collections whose amounts are all exactly zero have zero
 value and dollar risk; normalized duration and convexity are zero by convention.
+Every cashflow needs a time; unused trailing times are ignored.
 Shapes are preserved, and the curve is not evaluated: zero cashflows need no discount
 factors. Value types come from the amounts and times, with the tenor grid also
 participating in risk-result types. Unlike nonzero streams, these result types do
@@ -1371,6 +1368,7 @@ Nonzero amounts that offset to zero present value retain dollar exposures and ha
 undefined normalized risk (`NaN`/`Inf`). Valuation-function and contract forms retain
 their existing behavior. For portfolio risk, sum values and dollar derivatives
 before normalizing once; averaging individual normalized durations is not equivalent.
+See [Zero cashflow streams](@ref) for batch numeric types and simulation RNG behavior.
 """
 function sensitivities(kr::KeyRates, valuation_fn::Function, curve::AYM)
     ad = _keyrate_ad(curve, kr.tenors, valuation_fn; order = 2)
@@ -1382,7 +1380,7 @@ function sensitivities(kr::KeyRates, valuation_fn::Function, curve::AYM)
 end
 function sensitivities(kr::KeyRates, curve::AYM, cfs, times)
     an = _keyrate_analytic(curve, kr.tenors, cfs, times; order = 2)
-    zero_stream = _iszero_cashflow_stream(cfs)
+    zero_stream = an.zero_stream
     return (;
         value = an.value,
         durations = _risk_ratio(an.gradient, an.value, zero_stream; negate = true),
@@ -1401,7 +1399,7 @@ function sensitivities(::DV01, kr::KeyRates, valuation_fn::Function, curve::AYM)
 end
 function sensitivities(::DV01, kr::KeyRates, curve::AYM, cfs, times)
     an = _keyrate_analytic(curve, kr.tenors, cfs, times; order = 2)
-    zero_stream = _iszero_cashflow_stream(cfs)
+    zero_stream = an.zero_stream
     return (;
         value = an.value,
         dv01s = _risk_ratio(an.gradient, 10_000, zero_stream; negate = true),
@@ -1421,7 +1419,7 @@ function sensitivities(kr::KeyRates, valuation_fn::Function, base::AYM, credit::
 end
 function sensitivities(kr::KeyRates, base::AYM, credit::AYM, cfs, times)
     an = _keyrate_analytic(base, credit, kr.tenors, cfs, times; order = 2)
-    zero_stream = _iszero_cashflow_stream(cfs)
+    zero_stream = an.zero_stream
     return (;
         value = an.value,
         base_durations = _risk_ratio(an.base_gradient, an.value, zero_stream; negate = true),
@@ -1439,7 +1437,7 @@ function sensitivities(kr::KeyRates, curves::NamedTuple, cfs, times)
     an = _ncurve_analytic(curves, kr.tenors, cfs, times; order = 2)
     roles = keys(curves)
     L = length(roles)
-    zero_stream = _iszero_cashflow_stream(cfs)
+    zero_stream = an.zero_stream
     dur_normalized = _risk_ratio(an.gradient, an.value, zero_stream; negate = true)
     conv_normalized = _risk_ratio(an.hessian, an.value, zero_stream)
     durations = NamedTuple{roles}(ntuple(_ -> dur_normalized, L))
@@ -1460,7 +1458,7 @@ function sensitivities(::DV01, kr::KeyRates, valuation_fn::Function, base::AYM, 
 end
 function sensitivities(::DV01, kr::KeyRates, base::AYM, credit::AYM, cfs, times)
     an = _keyrate_analytic(base, credit, kr.tenors, cfs, times; order = 2)
-    zero_stream = _iszero_cashflow_stream(cfs)
+    zero_stream = an.zero_stream
     return (;
         value = an.value,
         base_dv01s = _risk_ratio(an.base_gradient, 10_000, zero_stream; negate = true),
@@ -1737,7 +1735,7 @@ function sensitivities(
         n_scenarios = 1000, timestep = 1 / 12, horizon = nothing,
         rng = Random.default_rng()
     )
-    _check_cashflow_times(cfs, times)
+    times = _cashflow_times(cfs, times)
     _iszero_cashflow_stream(cfs) && return sensitivities(kr, hw.curve, cfs, times)
     h = horizon === nothing ? maximum(times) + 1.0 : Float64(horizon)
     return sensitivities(kr, hw; n_scenarios, timestep, horizon = h, rng) do scenarios
@@ -1750,7 +1748,7 @@ function sensitivities(
         n_scenarios = 1000, timestep = 1 / 12, horizon = nothing,
         rng = Random.default_rng()
     )
-    _check_cashflow_times(cfs, times)
+    times = _cashflow_times(cfs, times)
     _iszero_cashflow_stream(cfs) && return sensitivities(DV01(), kr, hw.curve, cfs, times)
     h = horizon === nothing ? maximum(times) + 1.0 : Float64(horizon)
     return sensitivities(DV01(), kr, hw; n_scenarios, timestep, horizon = h, rng) do scenarios
