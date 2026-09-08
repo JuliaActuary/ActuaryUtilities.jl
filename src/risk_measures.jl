@@ -1,4 +1,5 @@
 module RiskMeasures
+import ..AtomicMeasures: finite_atoms, FiniteAtoms
 import ..Distributions
 import ..StatsBase
 import ..QuadGK
@@ -298,18 +299,13 @@ gbar(rm::ProportionalHazard, F) = -expm1(log1p(-F) / rm.y)
 # returning a silently wrong number.
 function (rm::RiskMeasure)(risk)
     if risk isa Distributions.DiscreteUnivariateDistribution
-        _finite_atoms(risk) && return _distorted_sum(rm, _atoms(risk)...)
+        atoms = finite_atoms(risk)
+        isnothing(atoms) || return _distorted_sum(rm, atoms)
         lo = minimum(risk)
         (eltype(risk) <: Integer && isfinite(lo)) && return _distorted_tail_sum(rm, risk, lo)
     end
     return _choquet(rm, risk)
 end
-
-# `hasfinitesupport` reports whether the support VALUES are bounded, so it is
-# false for a DiscreteNonParametric with an atom at ±Inf even though the atom
-# COUNT is finite. The exact sum only needs finitely many atoms.
-_finite_atoms(d::Distributions.DiscreteUnivariateDistribution) =
-    d isa Distributions.DiscreteNonParametric || Distributions.hasfinitesupport(d)
 
 function _choquet(rm::RiskMeasure, risk; rtol = sqrt(eps(Float64)), atol = 0.0, maxevals = 10^7)
     G = ccdf_func(risk)   # hoisted: each closure is built once, not once per node
@@ -359,21 +355,14 @@ end
 #
 # No quadrature crosses the cdf's jump discontinuities, so the sum is exact.
 
-function _atoms(d::Distributions.DiscreteUnivariateDistribution)
-    xs = collect(Distributions.support(d))   # sorted; `collect` also handles Dirac's tuple
-    return xs, Distributions.pdf.(d, xs)
-end
-
-function _distorted_sum(rm::RiskMeasure, xs, ps)
-    total = sum(ps)
-    (isfinite(total) && total > 0) || throw(ArgumentError("atom probabilities must have a positive finite sum, got $total"))
+function _distorted_sum(rm::RiskMeasure, atoms::FiniteAtoms)
+    xs, ps = atoms.values, atoms.probabilities
     n = length(xs)
     T = float(promote_type(eltype(xs), eltype(ps)))
-    # Survival values are normalized by the actual total and clamped into
-    # [0, 1]: even a pristine Binomial pdf sums to 1 + 7e-16, which would push
-    # a reverse cumsum above 1 and break distortions such as Φ⁻¹.
+    # FiniteAtoms normalizes the probabilities. Clamp accumulated roundoff into
+    # [0, 1] so it cannot break distortions such as Φ⁻¹.
     tailp = reverse!(cumsum(reverse(ps)))
-    S(i) = i == 1 ? one(T) : i > n ? zero(T) : clamp(T(tailp[i]) / total, zero(T), one(T))
+    S(i) = i == 1 ? one(T) : i > n ? zero(T) : clamp(T(tailp[i]), zero(T), one(T))
     return sum(eachindex(xs)) do i
         w = g(rm, S(i)) - g(rm, S(i + 1))
         # Skip zero weights before multiplying: an atom at ±Inf with zero
@@ -520,11 +509,12 @@ _mean_available(d) =
     which(Distributions.mean, Tuple{typeof(d)}) !== which(Distributions.mean, Tuple{Any})
 
 function (rm::Expectation)(risk::Distributions.UnivariateDistribution)
-    if risk isa Distributions.DiscreteUnivariateDistribution && _finite_atoms(risk)
+    atoms = finite_atoms(risk)
+    if !isnothing(atoms)
         # exact weighted sum; the identity distortion makes this Σ xᵢpᵢ with
         # zero-probability atoms skipped (an Inf atom with p = 0 must not
         # produce NaN, as `mean` would)
-        return _distorted_sum(rm, _atoms(risk)...)
+        return _distorted_sum(rm, atoms)
     end
     _mean_available(risk) && return Distributions.mean(risk)   # NaN / ±Inf pass through
     return _choquet(rm, risk)   # e.g. truncated wrappers without a `mean` method
@@ -536,8 +526,9 @@ end
 
 function (rm::CTE)(risk::Distributions.UnivariateDistribution)
     α = rm.α
-    if risk isa Distributions.DiscreteUnivariateDistribution && _finite_atoms(risk)
-        return _distorted_sum(rm, _atoms(risk)...)   # exact fractional-atom tail sum
+    atoms = finite_atoms(risk)
+    if !isnothing(atoms)
+        return _distorted_sum(rm, atoms)   # exact fractional-atom tail sum
     end
     m = _mean_available(risk) ? Distributions.mean(risk) : nothing
     if iszero(α)
