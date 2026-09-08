@@ -69,7 +69,7 @@ end
 sensitivities(target::_Contractish, curve::AYM, tenors) = sensitivities(target, curve, curve, tenors)
 
 function _contract_parallel(metric, target, forward, credit, tenors)
-    KeyRates(tenors)
+    _validate_tenors(tenors)
     f(s) = _contract_parallel_value(metric, target, forward, credit, s)
     return (; value = f(0.0), derivative = ForwardDiff.derivative(f, 0.0))
 end
@@ -145,7 +145,7 @@ Returns the spread and its sensitivity (\\\$/1bp parallel move of `credit + s`).
 """
 function zspread(contract::FinanceCore.AbstractContract, credit::AYM, market_price; forward::AYM = credit, s0 = 0.0, tol = 1.0e-12, maxiter = 100)
     ks = _contract_keys(contract)
-    pvs(s) = let disc = credit + ((z, t) -> z + FinanceCore.Continuous(s))
+    pvs(s) = let disc = credit + ((z, t) -> FinanceCore.Continuous(s) + z)
         isempty(ks) ? FinanceCore.present_value(disc, contract) :
             FinanceCore.present_value(disc, FinanceModels.Projection(contract, Dict(k => forward for k in ks), FinanceModels.CashflowProjection()))
     end

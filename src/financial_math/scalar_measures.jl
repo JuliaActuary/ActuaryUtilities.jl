@@ -3,6 +3,11 @@
 
 Efficiently calculate a vector representing the present value of the given cashflows at each period prior to the given timepoint.
 
+Empty collections return an empty vector. Collections whose amounts are all
+exactly zero return a vector of positive zeros without evaluating the curve;
+the element type comes from the amounts and timepoints.
+Every cashflow requires a time; additional trailing times are ignored.
+
 # Examples
 ```julia-repl
 julia> present_values(0.00, [1,1,1])
@@ -20,8 +25,9 @@ julia> present_values(0.05, [10,10,110], [1,2,3])
 
 """
 function present_values(interest, cashflows, times = eachindex(cashflows))
-    length(cashflows) == length(times) || throw(DimensionMismatch("cashflows and times must have equal length"))
+    _check_cashflow_times(cashflows, times)
     n = length(cashflows)
+    _iszero_cashflow_stream(cashflows) && return zeros(typeof(_zero_cashflow_value(cashflows, times)), n)
     # single reverse scan: pvs[k] is the value at times[k-1] (time zero for k = 1)
     # of cashflows k..n. O(n) and non-recursive (the prior implementation was
     # O(n²) with recursion depth n), and the element type follows the data so
@@ -189,15 +195,20 @@ See also: [`DV01`](@ref), [`IR01`](@ref), [`CS01`](@ref)
 struct KeyRates{T <: AbstractVector{<:Real}} <: Duration
     tenors::T
     function KeyRates(tenors::T) where {T <: AbstractVector{<:Real}}
-        isempty(tenors)   && throw(ArgumentError("KeyRates tenors must be non-empty"))
-        # Strict increase establishes sortedness and uniqueness in one pass.
-        previous = zero(first(tenors))
-        for t in tenors
-            isfinite(t) && t > previous || throw(ArgumentError("KeyRates tenors must be finite, strictly positive, and strictly increasing"))
-            previous = t
-        end
+        _validate_tenors(tenors)
         return new{T}(tenors)
     end
+end
+
+function _validate_tenors(tenors::AbstractVector{<:Real})
+    isempty(tenors) && throw(ArgumentError("KeyRates tenors must be non-empty"))
+    # Strict increase establishes sortedness and uniqueness in one pass.
+    previous = zero(first(tenors))
+    for t in tenors
+        isfinite(t) && t > previous || throw(ArgumentError("KeyRates tenors must be finite, strictly positive, and strictly increasing"))
+        previous = t
+    end
+    return tenors
 end
 
 abstract type KeyRateDuration <: Duration end
@@ -254,6 +265,14 @@ const KeyRate = KeyRateZero
 const _YieldInput = Union{Real, FinanceCore.Rate, FinanceModels.Yield.AbstractYieldModel}
 const _CashflowCollection = Union{AbstractArray, Tuple, Base.Generator}
 
+# Indexed kernels share one representation; materialize generators before AD
+# reevaluates a valuation, including generators backed by a stateful iterator.
+_cashflow_vector(cfs::AbstractArray) = vec(cfs)
+# Empty tuples collect to Union{}[], whose element type also matches Cashflow.
+# Use the zero-stream fallback type before dispatch derives embedded times.
+_cashflow_vector(::AbstractArray{Union{}}) = Float64[]
+_cashflow_vector(cfs::Union{Tuple, Base.Generator}) = _cashflow_vector(collect(cfs))
+
 """
     duration(Macaulay(),interest_rate,cfs,times)
     duration(Modified(),interest_rate,cfs,times)
@@ -266,6 +285,16 @@ const _CashflowCollection = Union{AbstractArray, Tuple, Base.Generator}
 Calculates the Macaulay, Modified, DV01, IR01, or CS01 duration. `times` may be ommitted and the valuation will assume evenly spaced cashflows starting at the end of the first period.
 
 `cfs` can be an `AbstractVector{<:Cashflow}` (from FinanceCore), in which case `times` is extracted automatically and should be omitted.
+
+Scalar cashflow methods accept arrays, tuples, and finite generators. Arrays are
+flattened in column-major order; generators are collected once before valuation.
+Relative duration is unchanged when the position sign reverses; dollar DV01,
+IR01, and CS01 reverse sign with the position.
+
+Empty collections and collections whose amounts are all exactly zero return zero
+risk without evaluating the curve. Every cashflow needs a time; unused trailing
+times are ignored. See [Zero cashflow streams](@ref) for the normalization convention,
+numeric types, and zero-net-value portfolios. Valuation-function forms are unchanged.
 
 When not given `Modified()` or `Macaulay()` as an argument, will default to `Modified()`.
 
@@ -334,11 +363,16 @@ julia> convexity(0.03,my_lump_sum_value)
 
 ```
 """
-function duration(::Macaulay, yield::_YieldInput, cfs::AbstractArray, times)
-    return _macaulay_ratio(yield, vec(cfs), times)
+function duration(::Macaulay, yield::_YieldInput, cfs::_CashflowCollection, times)
+    return _macaulay_ratio(yield, _cashflow_vector(cfs), times)
 end
 
-function duration(::Modified, yield::_YieldInput, cfs::_CashflowCollection, times)
+duration(d::Modified, yield::_YieldInput, cfs::_CashflowCollection, times) =
+    duration(d, yield, _cashflow_vector(cfs), times)
+
+function duration(::Modified, yield::_YieldInput, cfs::AbstractVector, times)
+    times = _cashflow_times(cfs, times)
+    _iszero_cashflow_stream(cfs) && return _zero_cashflow_value(cfs, times)
     D(i) = price(i, cfs, times)
     return duration(yield, D)
 end
@@ -368,11 +402,11 @@ end
 _macaulay_ratio(yield, cfs, times) = _weighted_ratio(yield, identity, cfs, times)
 
 function duration(::Modified, yield::Real, cfs::AbstractVector, times)
-    return _macaulay_ratio(yield, cfs, times) / (1 + yield)
+    return _weighted_ratio(yield, identity, cfs, times; divisor = 1 + yield)
 end
 function duration(::Modified, yield::FinanceCore.Rate{<:Real, FinanceCore.Periodic}, cfs::AbstractVector, times)
     m = yield.compounding.frequency
-    return _macaulay_ratio(yield, cfs, times) / (1 + FinanceCore.rate(yield) / m)
+    return _weighted_ratio(yield, identity, cfs, times; divisor = 1 + FinanceCore.rate(yield) / m)
 end
 function duration(::Modified, yield::FinanceCore.Rate{<:Real, FinanceCore.Continuous}, cfs::AbstractVector, times)
     return _macaulay_ratio(yield, cfs, times)
@@ -399,42 +433,41 @@ _parallel_bumped(yield, shift) = yield + shift
 function _parallel_bumped(
         yield::FinanceModels.Yield.AbstractYieldModel, shift
     )
+    # Rate addition inherits the left operand's compounding convention.
     return FinanceModels.Yield.TenorShift(
         yield,
-        (z, t) -> z + FinanceCore.Continuous(shift),
+        (z, t) -> FinanceCore.Continuous(shift) + z,
     )
 end
 
 
-# Element access for cashflow vectors that may be either numeric or
-# wrapped `FinanceCore.Cashflow` values. The scalar duration / convexity
-# fast paths use this so they work uniformly across both representations.
-@inline _cf_value(c::FinanceCore.Cashflow) = FinanceCore.amount(c)
-@inline _cf_value(c) = c
-
-function duration(yield::_YieldInput, cfs::AbstractArray, times)
-    return duration(Modified(), yield, vec(cfs), times)
+function duration(yield::_YieldInput, cfs::_CashflowCollection, times)
+    return duration(Modified(), yield, _cashflow_vector(cfs), times)
 end
 
 # timepoints are used to make the function more generic
 # with respect to allowing Cashflow objects
 function duration(yield::_YieldInput, cfs::_CashflowCollection)
+    cfs = _cashflow_vector(cfs)
     times = FinanceCore.timepoint.(cfs, 1:length(cfs))
     return duration(Modified(), yield, cfs, times)
 end
 
-function duration(::DV01, yield::_YieldInput, cfs::AbstractArray, times)
-    cfs = vec(cfs)
+function duration(::DV01, yield::_YieldInput, cfs::_CashflowCollection, times)
+    cfs = _cashflow_vector(cfs)
+    times = _cashflow_times(cfs, times)
+    _iszero_cashflow_stream(cfs) && return _zero_cashflow_value(cfs, times)
     return duration(DV01(), yield, i -> FinanceCore.present_value(i, cfs, times))
 end
-function duration(d::Duration, yield::_YieldInput, cfs::AbstractArray)
+function duration(d::Duration, yield::_YieldInput, cfs::_CashflowCollection)
+    cfs = _cashflow_vector(cfs)
     times = FinanceCore.timepoint.(cfs, 1:length(cfs))
-    return duration(d, yield, vec(cfs), times)
+    return duration(d, yield, cfs, times)
 end
 
-# Prefer cashflows over the generic DV01 callback when the input is an array.
-duration(d::DV01, yield::_YieldInput, cfs::AbstractArray) =
-    invoke(duration, Tuple{Duration, _YieldInput, AbstractArray}, d, yield, cfs)
+# Prefer cashflow collections over the generic DV01 callback.
+duration(d::DV01, yield::_YieldInput, cfs::_CashflowCollection) =
+    invoke(duration, Tuple{Duration, _YieldInput, _CashflowCollection}, d, yield, cfs)
 
 function duration(::DV01, yield, valuation_function::Y) where {Y}
     return duration(yield, valuation_function) * valuation_function(yield) / 10000
@@ -462,14 +495,17 @@ julia> duration(IR01(), 0.03, 0.02, cfs, times) ≈ duration(DV01(), 0.05, cfs, 
 true
 ```
 """
-function duration(::IR01, base_curve, credit_spread, cfs::AbstractArray, times)
-    cfs = vec(cfs)
+function duration(::IR01, base_curve, credit_spread, cfs::_CashflowCollection, times)
+    cfs = _cashflow_vector(cfs)
+    times = _cashflow_times(cfs, times)
+    _iszero_cashflow_stream(cfs) && return _zero_cashflow_value(cfs, times)
     return duration(DV01(), base_curve, i -> FinanceCore.present_value(i + credit_spread, cfs, times))
 end
 
-function duration(::IR01, base_curve, credit_spread, cfs::AbstractArray)
+function duration(::IR01, base_curve, credit_spread, cfs::_CashflowCollection)
+    cfs = _cashflow_vector(cfs)
     times = FinanceCore.timepoint.(cfs, 1:length(cfs))
-    return duration(IR01(), base_curve, credit_spread, vec(cfs), times)
+    return duration(IR01(), base_curve, credit_spread, cfs, times)
 end
 
 """
@@ -494,14 +530,17 @@ julia> duration(CS01(), 0.03, 0.02, cfs, times) ≈ duration(DV01(), 0.05, cfs, 
 true
 ```
 """
-function duration(::CS01, base_curve, credit_spread, cfs::AbstractArray, times)
-    cfs = vec(cfs)
+function duration(::CS01, base_curve, credit_spread, cfs::_CashflowCollection, times)
+    cfs = _cashflow_vector(cfs)
+    times = _cashflow_times(cfs, times)
+    _iszero_cashflow_stream(cfs) && return _zero_cashflow_value(cfs, times)
     return duration(DV01(), credit_spread, s -> FinanceCore.present_value(base_curve + s, cfs, times))
 end
 
-function duration(::CS01, base_curve, credit_spread, cfs::AbstractArray)
+function duration(::CS01, base_curve, credit_spread, cfs::_CashflowCollection)
+    cfs = _cashflow_vector(cfs)
     times = FinanceCore.timepoint.(cfs, 1:length(cfs))
-    return duration(CS01(), base_curve, credit_spread, vec(cfs), times)
+    return duration(CS01(), base_curve, credit_spread, cfs, times)
 end
 
 """
@@ -516,6 +555,11 @@ A scalar or `Rate` input is shocked in its own compounding space. An
 `AbstractYieldModel` input is instead shocked additively in continuously
 compounded zero-rate space, consistently across the no-tenor, tenor-aware,
 and key-rate APIs.
+
+Empty collections and collections whose amounts are all exactly zero return zero
+by convention, without evaluating the curve. Every cashflow needs a time; unused
+trailing times are ignored. See [Zero cashflow streams](@ref) for numeric types and
+zero-net-value portfolios. Valuation-function forms are unchanged.
 
 # Examples
 
@@ -547,11 +591,17 @@ julia> convexity(0.03,my_lump_sum_value)
 ```
 
 """
-function convexity(yield::_YieldInput, cfs::_CashflowCollection, times)
+convexity(yield::_YieldInput, cfs::_CashflowCollection, times) =
+    convexity(yield, _cashflow_vector(cfs), times)
+
+function convexity(yield::_YieldInput, cfs::AbstractVector, times)
+    times = _cashflow_times(cfs, times)
+    _iszero_cashflow_stream(cfs) && return _zero_cashflow_value(cfs, times)
     return convexity(yield, i -> price(i, cfs, times))
 end
 
 function convexity(yield::_YieldInput, cfs::_CashflowCollection)
+    cfs = _cashflow_vector(cfs)
     times = FinanceCore.timepoint.(cfs, 1:length(cfs))
     return convexity(yield, cfs, times)
 end
@@ -575,10 +625,11 @@ end
 # Shared accumulation kernel: Σ weight(t)·cf·d / Σ cf·d. `weight = identity`
 # gives the Macaulay ratio (Modified-duration fast paths above); the t(t+1)/t²
 # weights below give the convexity statistics.
-function _weighted_ratio(yield, weight, cfs, times)
+function _weighted_ratio(yield, weight, cfs, times; divisor = 1)
     # @inbounds below indexes `times` by `eachindex(cfs)` — a silent mismatch
     # would read out of bounds rather than zip-truncate
-    length(cfs) == length(times) || throw(DimensionMismatch("cfs and times must have equal length"))
+    _check_cashflow_times(cfs, times)
+    _iszero_cashflow_stream(cfs) && return _zero_cashflow_value(cfs, times)
     t1 = FinanceCore.timepoint(first(cfs), first(times))
     z = _cf_value(first(cfs)) * FinanceCore.discount(yield, t1)
     V = zero(z)
@@ -589,15 +640,15 @@ function _weighted_ratio(yield, weight, cfs, times)
         V += cfd
         Vw += weight(t) * cfd
     end
-    return Vw / V
+    return _risk_ratio(Vw, V; divisor)
 end
 
 function convexity(yield::Real, cfs::AbstractVector, times)
-    return _weighted_ratio(yield, t -> t * (t + 1), cfs, times) / (1 + yield)^2
+    return _weighted_ratio(yield, t -> t * (t + 1), cfs, times; divisor = (1 + yield)^2)
 end
 function convexity(yield::FinanceCore.Rate{<:Real, FinanceCore.Periodic}, cfs::AbstractVector, times)
     m = yield.compounding.frequency
-    return _weighted_ratio(yield, t -> t * (t + 1 / m), cfs, times) / (1 + FinanceCore.rate(yield) / m)^2
+    return _weighted_ratio(yield, t -> t * (t + 1 / m), cfs, times; divisor = (1 + FinanceCore.rate(yield) / m)^2)
 end
 function convexity(yield::FinanceCore.Rate{<:Real, FinanceCore.Continuous}, cfs::AbstractVector, times)
     return _weighted_ratio(yield, t -> t * t, cfs, times)
@@ -661,7 +712,11 @@ References:
 - (Financial Exam Help 123](http://www.financialexamhelp123.com/key-rate-duration/)
 
 """
-function duration(keyrate::KeyRateDuration, curve, cashflows::AbstractArray, timepoints, krd_points)
+function duration(keyrate::KeyRateDuration, curve, cashflows::_CashflowCollection, timepoints, krd_points)
+    cashflows = _cashflow_vector(cashflows)
+    timepoints = _cashflow_times(cashflows, timepoints)
+    keyrate.timepoint in krd_points || throw(ArgumentError("krd_points must contain the shifted timepoint $(keyrate.timepoint)"))
+    _iszero_cashflow_stream(cashflows) && return _zero_cashflow_value(cashflows, timepoints)
     shift = keyrate.shift
     curve_up = _krd_new_curve(keyrate, curve, krd_points)
     curve_down = _krd_new_curve(opposite(keyrate), curve, krd_points)
@@ -680,7 +735,7 @@ opposite(kr::KeyRatePar) = KeyRatePar(kr.timepoint, -kr.shift)
 """
     _tent_bump(shift, τ, krd_points)
 
-Return a closure `(z, t) -> z + Continuous(bump)` implementing the Ho (1992)
+Return a closure `(z, t) -> Continuous(bump) + z` implementing the Ho (1992)
 tent function for key-rate duration bump-and-reprice:
 
 - **First KRD point:** flat `shift` for `t ≤ τ`, linear ramp to 0 at next neighbor.
@@ -703,7 +758,7 @@ function _tent_bump(shift, τ, krd_points)
     # identical to the prior explicit tent (max abs deviation ~7e-18 over a knot
     # / t sweep, from float associativity in the ramp).
     bumps = [k == idx ? shift : zero(shift) for k in eachindex(krd_points)]
-    return (z, t) -> z + FinanceCore.Continuous(_hat_bump(krd_points, bumps, t))
+    return (z, t) -> FinanceCore.Continuous(_hat_bump(krd_points, bumps, t)) + z
 end
 
 _ensure_yield_model(curve::FinanceModels.Yield.AbstractYieldModel) = curve
@@ -742,14 +797,18 @@ function _default_krd_points(timepoints)
     return 1:mt
 end
 
-function duration(keyrate::KeyRateDuration, curve, cashflows::AbstractArray, timepoints)
+function duration(keyrate::KeyRateDuration, curve, cashflows::_CashflowCollection, timepoints)
+    cashflows = _cashflow_vector(cashflows)
+    timepoints = _cashflow_times(cashflows, timepoints)
+    _iszero_cashflow_stream(cashflows) && return _zero_cashflow_value(cashflows, timepoints)
     return duration(keyrate, curve, cashflows, timepoints, _default_krd_points(timepoints))
 end
 
-function duration(keyrate::KeyRateDuration, curve::_YieldInput, cashflows::AbstractArray)
+function duration(keyrate::KeyRateDuration, curve::_YieldInput, cashflows::_CashflowCollection)
+    cashflows = _cashflow_vector(cashflows)
     # extract embedded Cashflow times where present; otherwise the index is the time
     timepoints = FinanceCore.timepoint.(cashflows, eachindex(cashflows))
-    return duration(keyrate, curve, cashflows, timepoints, _default_krd_points(timepoints))
+    return duration(keyrate, curve, cashflows, timepoints)
 end
 
 """

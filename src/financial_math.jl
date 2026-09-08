@@ -8,6 +8,8 @@ import DiffResults
 import ..ActuaryUtilities: duration
 import Random
 
+include("cashflow_risk.jl")
+
 export irr, internal_rate_of_return, spread,
     pv, present_value, price, present_values,
     breakeven, moic,

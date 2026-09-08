@@ -1,5 +1,58 @@
 # Version Upgrade Guide
 
+## v5.12.0 (unreleased)
+
+- Yield-model duration and convexity now consistently use additive continuously
+  compounded zero-rate shocks, including custom models whose `zero` returns a
+  periodic rate. This changes public convexity values: for cashflows `[5, 5, 105]`
+  at times `[1, 2, 3]` and `Yield.Constant(Periodic(0.04, 1))`, convexity changes
+  from approximately **11.26 to 8.40**. The constant-curve analytic weights are
+  now `t²`, matching the valuation derivative and the sum of key-rate convexities.
+  Plain scalar and explicit `Rate` inputs retain their own compounding coordinates.
+- Callable valuation structs are accepted by scalar, key-rate, contract callback,
+  and Hull–White scenario APIs. Scalar cashflow methods consistently accept arrays
+  (flattened in column-major order), tuples, and finite generators, including
+  Macaulay, Modified, DV01, IR01, CS01, convexity, and legacy key-rate selectors.
+  Generators are collected once before valuation or differentiation.
+- Dollar DV01, IR01, and CS01 preserve the position sign. Relative durations and
+  convexities remain invariant to multiplying all cashflows by a nonzero factor.
+- NamedTuple cashflow sensitivity results now return independent arrays for every
+  duration role and convexity block. Mutating one no longer changes another.
+- Sensitivity Hessians reuse value and gradient results through the new DiffResults
+  dependency; contract duration bundles calculate gradients without unused Hessians.
+- ForwardDiff **1.x is now required**. Version 1.0 made Dual comparisons account
+  for partials, which the exact zero-stream check needs to preserve cashflow-amount
+  derivatives. Support for ForwardDiff 0.10 is removed; Julia 1.10 remains supported.
+- Analytic `KeyRates` calculations preserve the numeric type of discounted cashflows,
+  including `BigFloat` and automatic-differentiation values from curve parameters.
+- Empty cashflow collections **and all-zero cashflow amounts** now have zero value and
+  zero risk, including normalized duration and convexity by convention. This applies to
+  explicit-cashflow scalar duration/convexity, DV01/IR01/CS01, legacy key rates, and
+  `KeyRates` sensitivities (including Hull–White). Previously these inputs could produce
+  `NaN`, a `BoundsError`, or a legacy default-grid `ArgumentError`. Results keep
+  their usual shapes and use positive zeros.
+  `present_values` likewise returns an empty vector or a vector of zeros.
+- Covered explicit-cashflow methods accept a time grid longer than the amount
+  vector and ignore trailing entries. Previously some scalar methods rejected
+  them. Too few times now consistently throws `DimensionMismatch`. Legacy default
+  key-rate grids and Hull–White default horizons use only the supplied cashflows'
+  times. Empty streams return zero even with a populated time grid; legacy forms
+  skip default-grid derivation for zero streams but still validate an explicit grid.
+- Zero streams do not evaluate the curve or run simulations. Their numeric types come
+  from the amounts and times, plus the tenor grid for key-rate results, **without the
+  curve's numeric type**; nonzero streams still promote from discounted cashflows.
+  Abstractly typed empty inputs fall back to `Float64`.
+- Skipping Hull–White simulation for zero streams leaves the RNG unchanged. In a
+  batch using one shared RNG, subsequent contracts therefore receive different
+  draws than in prior versions. Use independently assigned RNG streams when
+  contract-level reproducibility must be independent of preceding contracts.
+- Nonzero amounts that offset to zero present value are not zero streams: normalized
+  duration and convexity still produce `NaN`/`Inf`, and dollar exposures are not reset
+  to zero. Valuation-function and contract inputs retain their existing behavior.
+  Aggregate portfolio values and dollar derivatives before normalizing once. An
+  unweighted average of individual durations includes zero-stream entries as zeros;
+  it is not a portfolio duration. See [Zero cashflow streams](@ref).
+
 ## v5.11.1 to v5.11.2
 
 This release fixes a class of bugs where risk measures returned believable but wrong finite numbers. Two behavior changes matter for existing code.

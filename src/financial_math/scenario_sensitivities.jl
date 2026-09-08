@@ -51,6 +51,8 @@ function sensitivities(
         n_scenarios = 1000, timestep = 1 / 12, horizon = nothing,
         rng = Random.default_rng()
     )
+    times = _cashflow_times(cfs, times)
+    _iszero_cashflow_stream(cfs) && return sensitivities(kr, hw.curve, cfs, times)
     h = horizon === nothing ? maximum(times) + 1.0 : Float64(horizon)
     return sensitivities(kr, hw; n_scenarios, timestep, horizon = h, rng) do scenarios
         sum(FinanceCore.pv(sc, cfs, times) for sc in scenarios) / n_scenarios
@@ -62,6 +64,8 @@ function sensitivities(
         n_scenarios = 1000, timestep = 1 / 12, horizon = nothing,
         rng = Random.default_rng()
     )
+    times = _cashflow_times(cfs, times)
+    _iszero_cashflow_stream(cfs) && return sensitivities(DV01(), kr, hw.curve, cfs, times)
     h = horizon === nothing ? maximum(times) + 1.0 : Float64(horizon)
     return sensitivities(DV01(), kr, hw; n_scenarios, timestep, horizon = h, rng) do scenarios
         sum(FinanceCore.pv(sc, cfs, times) for sc in scenarios) / n_scenarios
