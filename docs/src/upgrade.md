@@ -1,5 +1,16 @@
 # Version Upgrade Guide
 
+## Unreleased
+
+- Analytic `KeyRates` calculations preserve the numeric type of discounted cashflows,
+  including `BigFloat` and automatic-differentiation values from curve parameters.
+- Empty cashflow collections have zero value and zero key-rate risk, including normalized
+  duration and convexity by convention. Results retain their usual scalar, vector, matrix,
+  or named-block shape, and no curve evaluation is performed. Previously normalized results
+  contained `NaN`; dollar DV01/IR01/CS01 results remain zero. This convention applies to
+  explicit cashflow inputs. Nonempty zero-value portfolios and valuation-function inputs
+  retain their existing normalization behavior.
+
 ## v5.11.1 to v5.11.2
 
 This release fixes a class of bugs where risk measures returned believable but wrong finite numbers. Two behavior changes matter for existing code.

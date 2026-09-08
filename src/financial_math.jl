@@ -946,6 +946,17 @@ function _keyrate_analytic(
     )
 end
 
+function _empty_cashflow_value(cfs, times)
+    T = promote_type(eltype(cfs), eltype(times))
+    # An empty abstractly typed collection (including []) has no values from
+    # which to infer a more specific numeric type.
+    return zero(isconcretetype(T) && T <: Real ? float(T) : Float64)
+end
+
+# Empty streams have zero normalized risk by convention. Test the collection,
+# since a nonempty portfolio with zero net value can still have exposures.
+_keyrate_denominator(value, cfs) = isempty(cfs) ? one(value) : value
+
 # N-curve analytic. `curves::NamedTuple{roles}` of L curves with a shared tenor
 # grid; the discount is the product ∏_layers disc_layer(t). All roles must be
 # discount-role layers (multiplicatively composed); do not pass `:index`.
@@ -954,20 +965,30 @@ end
 # shared gradient vector and a single shared Hessian matrix. The single-, two-,
 # and N-curve public wrappers all delegate here and alias these across their
 # role positions.
-function _ncurve_analytic(
+# Inline so callers can eliminate result tuples across the empty/nonempty and
+# derivative-order branches, including when curve parameters carry Duals.
+@inline function _ncurve_analytic(
         curves::NamedTuple, tenors::AbstractVector,
         cfs::AbstractVector, times; order = 1
     )
     checkbounds(Bool, times, eachindex(cfs)) || throw(
         DimensionMismatch("times must contain at least one entry for each cashflow")
     )
-    isempty(cfs) && throw(ArgumentError("analytic key-rate sensitivities require at least one cashflow"))
     n = length(tenors)
+    if isempty(cfs)
+        value = _empty_cashflow_value(cfs, times)
+        T = promote_type(typeof(value), eltype(tenors))
+        gradient = zeros(T, n)
+        return order >= 2 ? (; value, gradient, hessian = zeros(T, n, n)) : (; value, gradient)
+    end
     # Seed from a valuation term so curve parameters participate in promotion
     # (including differentiation through the analytic sensitivities themselves).
+    # Its type must accommodate later terms; discount types are assumed stable
+    # across cashflow times, including at t=0.
+    disc(t) = prod(c -> FinanceCore.discount(c, t), values(curves))
     k0 = firstindex(cfs)
     t0 = times[k0]
-    cfd0 = cfs[k0] * prod(c -> FinanceCore.discount(c, t0), values(curves))
+    cfd0 = cfs[k0] * disc(t0)
     _, w0, _, _ = _active_hats(tenors, t0)
     T = promote_type(typeof(cfd0), typeof(t0 * cfd0 * w0), eltype(tenors))
     if order >= 2
@@ -983,7 +1004,7 @@ function _ncurve_analytic(
         # flat Constant credit). A `for c in values(curves)` loop would make `c`
         # non-concrete for a heterogeneous tuple and box `discount(c, t)` once
         # per cashflow — an O(N_cf) allocation hit on the two-curve IR01/CS01 path.
-        d = prod(c -> FinanceCore.discount(c, t), values(curves))
+        d = disc(t)
         cfd = cfs[k] * d
         V += cfd
         i, wi, j, wj = _active_hats(tenors, t)
@@ -1013,10 +1034,10 @@ end
 # `(; base, credit, cross)` convexity NamedTuple. Each `./` allocates a fresh
 # array, so callers always receive distinct output buffers even when the
 # analytic inputs alias a single shared matrix.
-_conv_blocks(r) = (;
-    base = r.base_hessian ./ r.value,
-    credit = r.credit_hessian ./ r.value,
-    cross = r.cross_hessian ./ r.value,
+_conv_blocks(r, denominator = r.value) = (;
+    base = r.base_hessian ./ denominator,
+    credit = r.credit_hessian ./ denominator,
+    cross = r.cross_hessian ./ denominator,
 )
 
 ## AbstractYieldModel + KeyRates(tenors): KRD / IR01 / CS01 / convexity / sensitivities
@@ -1064,6 +1085,9 @@ layering a triangular-hat zero-rate bump at each tenor in `kr.tenors` over
 the user's curve via `Yield.TenorShift`, then taking the AD gradient w.r.t.
 the bump magnitudes. The user's curve is preserved at all non-knot points.
 
+Empty cashflow collections return zero key-rate durations by convention, with one
+entry per tenor. No curve evaluation is needed for an empty stream.
+
 # Tenor grid
 
 `kr.tenors` is the KRD knot grid — a separate modeling choice from any
@@ -1106,7 +1130,7 @@ function duration(kr::KeyRates, valuation_fn::Function, curve::AYM)
 end
 function duration(kr::KeyRates, curve::AYM, cfs, times)
     an = _keyrate_analytic(curve, kr.tenors, cfs, times)
-    return -an.gradient ./ an.value
+    return -an.gradient ./ _keyrate_denominator(an.value, cfs)
 end
 duration(kr::KeyRates, curve::AYM, cfs::AbstractVector{<:FinanceCore.Cashflow}) = duration(kr, curve, _extract_cfs_times(cfs)...)
 
@@ -1206,6 +1230,9 @@ Key-rate convexity (matrix) and scalar convexity for any `AbstractYieldModel`,
 pair, or named tuple of discount-role curves. Mirrors `duration` but returns
 ∂²V/∂rᵢ∂rⱼ rather than ∂V/∂rᵢ.
 
+Empty cashflow collections return zero convexity by convention, retaining the
+usual scalar, matrix, or named-block shape.
+
 For the `NamedTuple` form, every named curve must be a discount-role layer
 (multiplicatively composed); do not pass `:index`. Per-role and per-pair
 outputs alias a single shared matrix — values coincide by construction
@@ -1236,8 +1263,10 @@ end
 
 convexity(valuation_fn::Function, curve::AYM, _tenors) =
     _parallel_continuous_convexity(curve, valuation_fn)
-convexity(curve::AYM, _tenors, cfs, times) =
-    _parallel_continuous_convexity(curve, c -> sum(_cf_value(cfs[k]) * FinanceCore.discount(c, times[k]) for k in eachindex(cfs)))
+function convexity(curve::AYM, _tenors, cfs, times)
+    isempty(cfs) && return _empty_cashflow_value(cfs, times)
+    return _parallel_continuous_convexity(curve, c -> sum(_cf_value(cfs[k]) * FinanceCore.discount(c, times[k]) for k in eachindex(cfs)))
+end
 convexity(curve::AYM, _tenors, cfs::AbstractVector{<:FinanceCore.Cashflow}) =
     convexity(curve, _tenors, _extract_cfs_times(cfs)...)
 
@@ -1247,7 +1276,7 @@ function convexity(kr::KeyRates, valuation_fn::Function, curve::AYM)
 end
 function convexity(kr::KeyRates, curve::AYM, cfs, times)
     an = _keyrate_analytic(curve, kr.tenors, cfs, times; order = 2)
-    return an.hessian ./ an.value
+    return an.hessian ./ _keyrate_denominator(an.value, cfs)
 end
 convexity(kr::KeyRates, curve::AYM, cfs::AbstractVector{<:FinanceCore.Cashflow}) = convexity(kr, curve, _extract_cfs_times(cfs)...)
 
@@ -1259,10 +1288,11 @@ function convexity(base::AYM, credit::AYM, tenors, cfs, times)
     # static cashflows: the analytic helper computes the same blocks as the
     # (2n)×(2n) ForwardDiff Hessian the do-block form pays for, in O(N_cf)
     an = _keyrate_analytic(base, credit, tenors, cfs, times; order = 2)
+    denominator = _keyrate_denominator(an.value, cfs)
     return (;
-        base = sum(an.base_hessian) / an.value,
-        credit = sum(an.credit_hessian) / an.value,
-        cross = sum(an.cross_hessian) / an.value,
+        base = sum(an.base_hessian) / denominator,
+        credit = sum(an.credit_hessian) / denominator,
+        cross = sum(an.cross_hessian) / denominator,
     )
 end
 convexity(base::AYM, credit::AYM, tenors, cfs::AbstractVector{<:FinanceCore.Cashflow}) = convexity(base, credit, tenors, _extract_cfs_times(cfs)...)
@@ -1273,7 +1303,7 @@ function convexity(kr::KeyRates, valuation_fn::Function, base::AYM, credit::AYM)
 end
 function convexity(kr::KeyRates, base::AYM, credit::AYM, cfs, times)
     an = _keyrate_analytic(base, credit, kr.tenors, cfs, times; order = 2)
-    return _conv_blocks(an)
+    return _conv_blocks(an, _keyrate_denominator(an.value, cfs))
 end
 convexity(kr::KeyRates, base::AYM, credit::AYM, cfs::AbstractVector{<:FinanceCore.Cashflow}) = convexity(kr, base, credit, _extract_cfs_times(cfs)...)
 
@@ -1284,7 +1314,7 @@ function convexity(kr::KeyRates, curves::NamedTuple, cfs, times)
     an = _ncurve_analytic(curves, kr.tenors, cfs, times; order = 2)
     roles = keys(curves)
     L = length(roles)
-    normalized = an.hessian ./ an.value
+    normalized = an.hessian ./ _keyrate_denominator(an.value, cfs)
     return NamedTuple{roles}(ntuple(_ -> NamedTuple{roles}(ntuple(_ -> normalized, L)), L))
 end
 convexity(kr::KeyRates, curves::NamedTuple, cfs::AbstractVector{<:FinanceCore.Cashflow}) =
@@ -1304,6 +1334,12 @@ convexity(vf::Function, kr::KeyRates, base::AYM, credit::AYM) = convexity(kr, vf
 Bundled value + key-rate durations (or DV01s) + convexity matrix for any
 `AbstractYieldModel` or pair, in a single AD pass. The knot grid is carried
 by [`KeyRates`](@ref).
+
+For empty cashflow collections, the value and all risk measures are zero by
+convention, retaining their usual vector and matrix shapes. This convention applies
+to the explicit cashflow forms; a valuation function does not identify whether its
+portfolio is empty. Nonempty portfolios with zero net value still have undefined
+normalized durations and convexities and may have nonzero dollar sensitivities.
 """
 function sensitivities(kr::KeyRates, valuation_fn::Function, curve::AYM)
     ad = _keyrate_ad(curve, kr.tenors, valuation_fn; order = 2)
@@ -1315,10 +1351,11 @@ function sensitivities(kr::KeyRates, valuation_fn::Function, curve::AYM)
 end
 function sensitivities(kr::KeyRates, curve::AYM, cfs, times)
     an = _keyrate_analytic(curve, kr.tenors, cfs, times; order = 2)
+    denominator = _keyrate_denominator(an.value, cfs)
     return (;
         value = an.value,
-        durations = -an.gradient ./ an.value,
-        convexities = an.hessian ./ an.value,
+        durations = -an.gradient ./ denominator,
+        convexities = an.hessian ./ denominator,
     )
 end
 sensitivities(kr::KeyRates, curve::AYM, cfs::AbstractVector{<:FinanceCore.Cashflow}) = sensitivities(kr, curve, _extract_cfs_times(cfs)...)
@@ -1336,7 +1373,7 @@ function sensitivities(::DV01, kr::KeyRates, curve::AYM, cfs, times)
     return (;
         value = an.value,
         dv01s = -an.gradient ./ 10_000,
-        convexities = an.hessian ./ an.value,
+        convexities = an.hessian ./ _keyrate_denominator(an.value, cfs),
     )
 end
 sensitivities(::DV01, kr::KeyRates, curve::AYM, cfs::AbstractVector{<:FinanceCore.Cashflow}) = sensitivities(DV01(), kr, curve, _extract_cfs_times(cfs)...)
@@ -1352,11 +1389,12 @@ function sensitivities(kr::KeyRates, valuation_fn::Function, base::AYM, credit::
 end
 function sensitivities(kr::KeyRates, base::AYM, credit::AYM, cfs, times)
     an = _keyrate_analytic(base, credit, kr.tenors, cfs, times; order = 2)
+    denominator = _keyrate_denominator(an.value, cfs)
     return (;
         value = an.value,
-        base_durations = -an.base_gradient ./ an.value,
-        credit_durations = -an.credit_gradient ./ an.value,
-        convexities = _conv_blocks(an),
+        base_durations = -an.base_gradient ./ denominator,
+        credit_durations = -an.credit_gradient ./ denominator,
+        convexities = _conv_blocks(an, denominator),
     )
 end
 sensitivities(kr::KeyRates, base::AYM, credit::AYM, cfs::AbstractVector{<:FinanceCore.Cashflow}) = sensitivities(kr, base, credit, _extract_cfs_times(cfs)...)
@@ -1369,8 +1407,9 @@ function sensitivities(kr::KeyRates, curves::NamedTuple, cfs, times)
     an = _ncurve_analytic(curves, kr.tenors, cfs, times; order = 2)
     roles = keys(curves)
     L = length(roles)
-    dur_normalized = -an.gradient ./ an.value
-    conv_normalized = an.hessian ./ an.value
+    denominator = _keyrate_denominator(an.value, cfs)
+    dur_normalized = -an.gradient ./ denominator
+    conv_normalized = an.hessian ./ denominator
     durations = NamedTuple{roles}(ntuple(_ -> dur_normalized, L))
     convexities = NamedTuple{roles}(ntuple(_ -> NamedTuple{roles}(ntuple(_ -> conv_normalized, L)), L))
     return (; value = an.value, durations, convexities)
@@ -1393,7 +1432,7 @@ function sensitivities(::DV01, kr::KeyRates, base::AYM, credit::AYM, cfs, times)
         value = an.value,
         base_dv01s = -an.base_gradient ./ 10_000,
         credit_dv01s = -an.credit_gradient ./ 10_000,
-        convexities = _conv_blocks(an),
+        convexities = _conv_blocks(an, _keyrate_denominator(an.value, cfs)),
     )
 end
 sensitivities(::DV01, kr::KeyRates, base::AYM, credit::AYM, cfs::AbstractVector{<:FinanceCore.Cashflow}) = sensitivities(DV01(), kr, base, credit, _extract_cfs_times(cfs)...)
