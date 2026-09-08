@@ -14,7 +14,12 @@ duration(KeyRates(knots), curve, cfs, times)
 
 The KRD knot grid is a separate modeling choice from any tenor structure baked into the curve itself. For a `ZeroRateCurve`, `zrc.tenors` is the natural default; for other curves you supply your preferred bucket convention (Bloomberg, FRTB, BMA SBA, etc.).
 
-**Requirements on `tenors`**: sorted ascending, distinct, strictly positive. These preconditions are not checked at runtime — a malformed grid produces wrong gradients silently.
+**Requirements on `tenors`**: nonempty, sorted ascending, distinct, and strictly positive. The `KeyRates` constructor validates these requirements.
+
+Explicit cashflow inputs that are empty or have all-zero amounts return zero value
+and risk without evaluating the curve. Nonzero amounts that offset to zero present
+value retain their dollar exposures and undefined normalized risk. See
+[Zero cashflow streams](@ref) for numeric types and portfolio aggregation.
 
 **Endpoint extrapolation**: the hat bump is flat outside the knot range. Bumping `tenors[1]` perturbs all cashflows at `t ≤ tenors[1]` equally; bumping `tenors[end]` perturbs all cashflows at `t ≥ tenors[end]` equally. For long-duration insurance liabilities (LTC, deferred / payout annuities), extend the grid past your longest cashflow if you want that sensitivity decomposed.
 
