@@ -357,14 +357,12 @@ end
 
 function _distorted_sum(rm::RiskMeasure, atoms::FiniteAtoms)
     xs, ps = atoms.values, atoms.probabilities
-    total = sum(ps)
     n = length(xs)
     T = float(promote_type(eltype(xs), eltype(ps)))
-    # Survival values are normalized by the actual total and clamped into
-    # [0, 1]: even a pristine Binomial pdf sums to 1 + 7e-16, which would push
-    # a reverse cumsum above 1 and break distortions such as Φ⁻¹.
+    # FiniteAtoms normalizes the probabilities. Clamp accumulated roundoff into
+    # [0, 1] so it cannot break distortions such as Φ⁻¹.
     tailp = reverse!(cumsum(reverse(ps)))
-    S(i) = i == 1 ? one(T) : i > n ? zero(T) : clamp(T(tailp[i]) / total, zero(T), one(T))
+    S(i) = i == 1 ? one(T) : i > n ? zero(T) : clamp(T(tailp[i]), zero(T), one(T))
     return sum(eachindex(xs)) do i
         w = g(rm, S(i)) - g(rm, S(i + 1))
         # Skip zero weights before multiplying: an atom at ±Inf with zero

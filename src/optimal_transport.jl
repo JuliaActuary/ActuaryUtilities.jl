@@ -67,10 +67,14 @@ julia> wasserstein(Normal(0, 1), Normal(0, 2); p=2) # same mean, |σ₁-σ₂|
 
 See also [`transportmap`](@ref), [`robustvalue`](@ref).
 
-Finite discrete laws and empirical samples share an exact cumulative-mass sweep,
-including `p=Inf`. For a finite atomic law against a continuous distribution,
-`p=Inf` uses the limits of each atomic quantile interval. Other distribution pairs
-use numerical quantile integration or supremum search.
+Finite discrete laws and empirical samples use exact cumulative-mass sweeps,
+including `p=Inf`; sample pairs use integer ranks without constructing atom weights.
+For a finite atomic law against a continuous distribution, `p=Inf` uses the limits
+of each atomic quantile interval. Interior right limits are approximated by
+evaluating the quantile at the next representable probability above the break;
+accuracy there depends on floating-point resolution and the distribution's quantile
+implementation. Other distribution pairs use numerical quantile integration or
+supremum search.
 `rtol`, `atol`, and `maxevals` control that calculation. By default the
 evaluation budget scales with the number of empirical quantile segments; an
 explicit `maxevals` is a hard cap for the numerical calculation. Finite-`p`
@@ -94,12 +98,54 @@ function wasserstein(
     (isfinite(rtol) && rtol >= 0) || throw(ArgumentError("rtol must be finite and nonnegative"))
     (isfinite(atol) && atol >= 0) || throw(ArgumentError("atol must be finite and nonnegative"))
     (isnothing(maxevals) || maxevals > 0) || throw(ArgumentError("maxevals must be positive"))
+    if a isa AbstractVector{<:Real} && b isa AbstractVector{<:Real}
+        return _wasserstein(a, b, p)
+    end
     aa, bb = finite_atoms(a), finite_atoms(b)
     return _wasserstein(isnothing(aa) ? a : aa, isnothing(bb) ? b : bb, p; rtol, atol, maxevals)
 end
 
+# Sample pairs need only sorted values. Integer ranks on a common denominator
+# preserve every overlap without allocating rational weights or cumulative sums.
+function _wasserstein(a::AbstractVector{<:Real}, b::AbstractVector{<:Real}, p; kwargs...)
+    (isempty(a) || isempty(b)) &&
+        throw(ArgumentError("an empirical measure needs at least one observation"))
+    as, bs = sort!(collect(a)), sort!(collect(b))
+    na, nb = length(as), length(bs)
+    if na == nb
+        acc = zero(float(promote_type(eltype(as), eltype(bs), Float64)))
+        for i in eachindex(as, bs)
+            gap = as[i] == bs[i] ? zero(acc) : typeof(acc)(abs(as[i] - bs[i]))
+            acc = isinf(p) ? max(acc, gap) : acc + gap^p
+        end
+        return isinf(p) ? acc : (acc / na)^(1 / p)
+    end
+    # Widen the product before deciding whether machine-integer ranks suffice.
+    # The helper specializes on the rank type, keeping the usual loop in Int.
+    denominator = widemul(na, nb)
+    return _wasserstein_samples(as, bs, p, denominator <= typemax(Int) ? Int(denominator) : denominator)
+end
+
+function _wasserstein_samples(as, bs, p, denominator)
+    na, nb = length(as), length(bs)
+    step_a, step_b = oftype(denominator, nb), oftype(denominator, na)
+    i = j = 1
+    prev = zero(denominator)
+    acc = zero(float(promote_type(eltype(as), eltype(bs), Float64)))
+    while i <= na && j <= nb
+        ua, ub = i * step_a, j * step_b
+        u = min(ua, ub)
+        gap = as[i] == bs[j] ? zero(acc) : typeof(acc)(abs(as[i] - bs[j]))
+        acc = isinf(p) ? max(acc, gap) : acc + (typeof(acc)(u - prev) / denominator) * gap^p
+        prev = u
+        ua <= ub && (i += 1)
+        ub <= ua && (j += 1)
+    end
+    return isinf(p) ? acc : acc^(1 / p)
+end
+
 # Merge cumulative probability boundaries: each overlap contributes its exact
-# mass times the quantile gap. The same sweep covers samples and discrete laws.
+# mass times the quantile gap. Sample/distribution pairs also use this sweep.
 function _wasserstein(a::FiniteAtoms, b::FiniteAtoms, p; kwargs...)
     as, bs = a.values, b.values
     ac, bc = probability_breaks(a), probability_breaks(b)
@@ -113,7 +159,7 @@ function _wasserstein(a::FiniteAtoms, b::FiniteAtoms, p; kwargs...)
         advance_b = bc[j] <= ac[i]
         u = advance_a ? ac[i] : bc[j]
         if u > prev
-            gap = as[i] == bs[j] ? zero(acc) : abs(as[i] - bs[j])
+            gap = as[i] == bs[j] ? zero(acc) : typeof(acc)(abs(as[i] - bs[j]))
             acc = isinf(p) ? max(acc, gap) : acc + (u - prev) * gap^p
         end
         prev = u
@@ -177,7 +223,12 @@ function _wasserstein_infinity(a::FiniteAtoms, b::Distributions.ContinuousUnivar
     acc = zero(float(promote_type(eltype(a.values), eltype(a.probabilities))))
     for (x, u) in zip(a.values, probability_breaks(a))
         if u > previous
-            acc = max(acc, abs(x - Distributions.quantile(b, previous)), abs(x - Distributions.quantile(b, u)))
+            # The interval is (previous, u]: at a support gap Q(previous)
+            # belongs to the preceding interval, so approach from the right.
+            lower_rank = iszero(previous) ? float(previous) : min(nextfloat(float(previous)), one(float(previous)))
+            lower = Distributions.quantile(b, lower_rank)
+            upper = Distributions.quantile(b, u)
+            acc = max(acc, abs(x - lower), abs(x - upper))
         end
         previous = u
     end
