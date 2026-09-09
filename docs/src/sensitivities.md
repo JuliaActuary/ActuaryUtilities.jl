@@ -14,7 +14,7 @@ duration(KeyRates(knots), curve, cfs, times)
 
 The KRD knot grid is a separate modeling choice from any tenor structure baked into the curve itself. For a `ZeroRateCurve`, `zrc.tenors` is the natural default; for other curves you supply your preferred bucket convention (Bloomberg, FRTB, BMA SBA, etc.).
 
-**Requirements on `tenors`**: nonempty, sorted ascending, distinct, and strictly positive. The `KeyRates` constructor validates these requirements.
+**Requirements on `tenors`**: nonempty, finite, sorted ascending, distinct, and strictly positive. The `KeyRates` constructor validates these requirements, and calculations revalidate the grid in case it has been mutated.
 
 Explicit cashflow inputs that are empty or have all-zero amounts return zero value
 and risk without evaluating the curve. Nonzero amounts that offset to zero present
@@ -84,6 +84,28 @@ dv01_result = sensitivities(DV01(), KeyRates(tenors), zrc, cfs, tenors)
 dv01_result
 ```
 
+## Callable Valuations
+
+A valuation can be a function or a callable struct. For example, a reusable
+cashflow valuation can own its amounts and payment times:
+
+```@example sensitivities
+struct CashflowValuation{C, T}
+    amounts::C
+    times::T
+end
+(v::CashflowValuation)(curve) = pv(curve, v.amounts, v.times)
+
+valuation = CashflowValuation(cfs, tenors)
+duration(zrc, valuation)
+convexity(zrc, valuation)
+sensitivities(KeyRates(tenors), valuation, zrc)
+```
+
+The scalar, key-rate, two-curve, and scenario callback APIs accept callable
+objects in their valuation argument. Cashflow arrays still select the
+collection overloads, and existing do-block calls continue to work.
+
 ## Using Cashflow Objects
 
 Any `AbstractYieldModel + tenors` method accepts `Vector{Cashflow}` directly, eliminating the need to manually split into amounts and times:
@@ -115,7 +137,17 @@ The Nelson-Siegel parameters stay fixed; only the layered zero-rate bumps move u
 
 ## Scalar vs Key-Rate Decomposition
 
-By default, `duration` and `convexity` (without `KeyRates`) return **scalars** — the total modified duration, DV01, or convexity. This is consistent with the yield-based API (`duration(0.03, cfs, times)`).
+By default, `duration` and `convexity` (without `KeyRates`) return **scalars** — the total modified duration, DV01, or convexity. This mirrors the scalar-return shape of the yield-based API (`duration(0.03, cfs, times)`).
+
+For an `AbstractYieldModel`, scalar duration and convexity use an additive
+parallel shift in continuously compounded zero-rate space. This is the same
+shock coordinate used by the tenor-aware and key-rate forms. Plain scalar and
+explicit `Rate` inputs continue to use their own compounding conventions.
+
+See [Convexity Conventions](@ref) for the ``t^2`` derivation, an executable
+comparison of analytic and AutoDiff results, and academic and industry references.
+The scalar convexity equals the sum of **all** entries in the key-rate matrix,
+including cross terms.
 
 To obtain the per-tenor decomposition, pass `KeyRates(tenors)` as the first argument:
 
@@ -137,17 +169,22 @@ The scalar value equals the sum of the key-rate decomposition:
 
 ```@example sensitivities
 duration(zrc, tenors, cfs, tenors) ≈ sum(duration(KeyRates(tenors), zrc, cfs, tenors))
+convexity(zrc, cfs, tenors) ≈ convexity(zrc, tenors, cfs, tenors)
+convexity(zrc, tenors, cfs, tenors) ≈ sum(convexity(KeyRates(tenors), zrc, cfs, tenors))
 ```
 
-For a flat curve, the scalar modified duration matches the yield-based API:
+For a flat curve, the scalar measures match an explicitly continuous rate at
+the same zero-rate level:
 
 ```@example sensitivities
 flat_cfs    = [5.0, 5.0, 5.0, 5.0, 105.0]
 flat_tenors = [1.0, 2.0, 3.0, 4.0, 5.0]
 flat_zrc    = ZeroRateCurve(fill(0.03, 5), flat_tenors)
 
-(zrc_dur     = duration(flat_zrc, flat_tenors, flat_cfs, flat_tenors),
- yield_dur   = duration(0.03, flat_cfs, flat_tenors))
+(zrc_dur   = duration(flat_zrc, flat_cfs, flat_tenors),
+ rate_dur  = duration(Continuous(0.03), flat_cfs, flat_tenors),
+ zrc_conv  = convexity(flat_zrc, flat_cfs, flat_tenors),
+ rate_conv = convexity(Continuous(0.03), flat_cfs, flat_tenors))
 ```
 
 For Macaulay duration, use the scalar yield API directly — there is no `ZeroRateCurve` dispatch:

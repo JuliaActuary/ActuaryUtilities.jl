@@ -45,12 +45,13 @@
         # chain rule. The optimized `convexity(::Effective, …)` computes that
         # scalar directly via TenorShift, in O(1) rather than O(N²) AD work.
         # Locks the numerical equivalence in for future refactors of either
-        # path. Note: `convexity(curve, cfs)` uses a *periodic* shock and is
-        # NOT equivalent here — see `_parallel_continuous_convexity` for why.
+        # path. The no-tenor curve form uses the same continuous-zero shock.
         cfs = collect(FM.Projection(fb, curve, FM.CashflowProjection()))
         amts = FC.amount.(cfs); times = FC.timepoint.(cfs)
         @test convexity(Effective(), fb, curve, tenors) ≈
             sum(convexity(KeyRates(tenors), curve, amts, times)) atol = 1.0e-8
+        @test convexity(curve, cfs) ≈
+            convexity(Effective(), fb, curve, tenors) atol = 1.0e-8
     end
 
     @testset "default duration & dv01 verb" begin

@@ -18,6 +18,10 @@ duration(discount_rate, cfs, times)                #   2.78
 convexity(discount_rate, cfs, times)               #  10.62
 ```
 
+See [Convexity Conventions](@ref) for how scalar and yield-model shocks differ,
+why the analytic continuous-zero formula uses squared payment times, and a worked
+comparison with AutoDiff.
+
 !!! tip "Floating-rate, multi-curve & portfolios"
     `Macaulay`/`Modified` duration are for **fixed** cashflows. For a floating-rate bond, a portfolio, or any curve-dependent contract, pass the contract directly — `duration(Effective(), contract, curve, tenors)` / `duration(Spread(), …)` / `dv01(…)` re-project the coupons and give the rate-vs-spread durations (years and DV01s); `sensitivities(contract, curve, tenors)` returns the full bundle, and `sensitivities(contract, tenors; discount = (; rf, credit, ilp), index = …)` does the multi-curve decomposition. See [Key Rate Sensitivities](@ref).
 

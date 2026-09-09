@@ -239,16 +239,12 @@ end
         price(i, cfs, times)
     end
     @test cv ≈ convexity(c, cfs, times)
+    @test cv ≈ convexity(FC.Continuous(log1p(0.04)), cfs, times)
 end
 
-@testset "Scalar do-block on ZRC falls through to generic FD path" begin
-    # Previously a ZRC-specific dispatch routed `duration(fn, zrc)` /
-    # `convexity(fn, zrc)` through the AD KRD path. With the unified API,
-    # those 2-arg calls fall through to the generic `duration(yield, vf)`
-    # FD-based scalar path — which adds a parallel shift via Periodic
-    # compounding, not Continuous, so the numerical values are not bitwise
-    # comparable to `sum(KRDs)` (which differentiates w.r.t. continuous zero
-    # rates). We just verify the calls execute and return a Real scalar.
+@testset "Scalar do-block on ZRC uses continuous curve shocks" begin
+    # No-tenor do-block calls use the same continuous-zero parallel shift as
+    # the tenor-aware and key-rate APIs.
     rates = [0.04, 0.04, 0.04, 0.04, 0.04]
     tenors = [1.0, 2.0, 3.0, 4.0, 5.0]
     zrc = FM.ZeroRateCurve(rates, tenors, FM.Spline.Linear())
@@ -259,9 +255,11 @@ end
         sum(cf * curve(t) for (cf, t) in zip(cfs, times))
     end
     @test vf_dur isa Real
+    @test vf_dur ≈ duration(zrc, tenors, cfs, times) atol = 1.0e-12
 
     vf_conv = convexity(zrc) do curve
         sum(cf * curve(t) for (cf, t) in zip(cfs, times))
     end
     @test vf_conv isa Real
+    @test vf_conv ≈ convexity(zrc, tenors, cfs, times) atol = 1.0e-12
 end

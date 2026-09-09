@@ -144,6 +144,45 @@ end
         @test all(dv01s .> 0)
     end
 
+    @testset "DV01 preserves position sign across scalar and curve paths" begin
+        times = [1.0, 2.0, 3.0]
+        asset_cfs = [5.0, 5.0, 105.0]
+        liability_cfs = -asset_cfs
+        rate = FC.Continuous(0.03)
+        curve = FM.Yield.Constant(rate)
+
+        asset_scalar = duration(DV01(), rate, asset_cfs, times)
+        liability_scalar = duration(DV01(), rate, liability_cfs, times)
+        liability_curve = duration(DV01(), curve, times, liability_cfs, times)
+        liability_key_rates = duration(DV01(), KeyRates(times), curve, liability_cfs, times)
+        liability_do_block = duration(DV01(), curve, times) do c
+            FC.present_value(c, liability_cfs, times)
+        end
+
+        @test liability_scalar < 0
+        @test liability_scalar ≈ -asset_scalar atol = 1.0e-12
+        @test liability_scalar ≈ liability_curve atol = 1.0e-12
+        @test liability_curve ≈ sum(liability_key_rates) atol = 1.0e-12
+        @test liability_do_block ≈ liability_curve atol = 1.0e-12
+    end
+
+    @testset "Scalar IR01 and CS01 preserve position sign" begin
+        base, spread = 0.03, 0.02
+        times = [1.0, 2.0, 3.0]
+        asset_cfs = [5.0, 5.0, 105.0]
+        # Independent derivative of the annual-compounded present value.
+        expected = sum(t * cf / (1 + base + spread)^(t + 1) for (cf, t) in zip(asset_cfs, times)) / 10000
+
+        for measure in (IR01(), CS01()), sign in (-1, 1)
+            cfs = sign * asset_cfs
+            cashflows = FC.Cashflow.(cfs, times)
+            @test duration(measure, base, spread, cfs, times) ≈ sign * expected
+            @test duration(measure, base, spread, cfs) ≈ sign * expected
+            @test duration(measure, base, spread, cashflows) ≈ sign * expected
+            @test duration(measure, base, spread, cfs, times) ≈ duration(DV01(), base + spread, cfs, times)
+        end
+    end
+
     @testset "do-block custom valuation (callable bond)" begin
         rates = [0.05, 0.05, 0.05, 0.05, 0.05]
         tenors = [1.0, 2.0, 3.0, 4.0, 5.0]
@@ -194,15 +233,31 @@ end
         times = [1.0, 2.0, 3.0, 4.0, 5.0]
 
         scalar_form = convexity(zrc, tenors, cfs, times)
+        no_tenor_form = convexity(zrc, cfs, times)
         matrix_sum = sum(convexity(KeyRates(tenors), zrc, cfs, times))
+        @test no_tenor_form ≈ scalar_form atol = 1.0e-12
         @test scalar_form ≈ matrix_sum atol = 1.0e-8
 
+        # Independent central-difference oracle: curve inputs are bumped in
+        # continuously compounded zero-rate space in both directions.
+        value(c) = sum(cf * FC.discount(c, t) for (cf, t) in zip(cfs, times))
+        Δ = 1.0e-4
+        up = zrc + FC.Continuous(+Δ)
+        down = zrc + FC.Continuous(-Δ)
+        finite_difference = (value(up) + value(down) - 2value(zrc)) / (value(zrc) * Δ^2)
+        @test no_tenor_form ≈ finite_difference atol = 1.0e-6
+
         vf_scalar = convexity(c -> sum(cf * FC.discount(c, t) for (cf, t) in zip(cfs, times)), zrc, tenors)
+        vf_no_tenor = convexity(zrc) do c
+            sum(cf * FC.discount(c, t) for (cf, t) in zip(cfs, times))
+        end
         vf_matrix = sum(convexity(KeyRates(tenors), c -> sum(cf * FC.discount(c, t) for (cf, t) in zip(cfs, times)), zrc))
+        @test vf_no_tenor ≈ vf_scalar atol = 1.0e-12
         @test vf_scalar ≈ vf_matrix atol = 1.0e-8
 
         # Cashflow-vector form
         cashflows = [FC.Cashflow(cfs[k], times[k]) for k in eachindex(cfs)]
+        @test convexity(zrc, cashflows) ≈ scalar_form atol = 1.0e-12
         @test convexity(zrc, tenors, cashflows) ≈ matrix_sum atol = 1.0e-8
     end
 
@@ -269,6 +324,8 @@ end
         # scalar ZRC duration ≈ scalar yield duration for flat curve
         # ZRC uses continuous compounding, so compare with Continuous rate
         @test scalar_dur ≈ duration(FC.Continuous(0.04), cfs, tenors) atol = 1.0e-4
+        @test convexity(zrc, cfs, tenors) ≈
+            convexity(FC.Continuous(0.04), cfs, tenors) atol = 1.0e-8
     end
 
     @testset "scalar return: two-curve duration and convexity" begin

@@ -13,6 +13,7 @@ makedocs(;
     pages = [
         "Overview" => "index.md",
         "Financial Math" => "financial_math.md",
+        "Convexity Conventions" => "convexity.md",
         "Key Rate Sensitivities" => "sensitivities.md",
         "Risk Measures" => "risk_measures.md",
         "Other Utilities" => "utilities.md",

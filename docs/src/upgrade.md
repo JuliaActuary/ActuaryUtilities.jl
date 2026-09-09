@@ -1,7 +1,28 @@
 # Version Upgrade Guide
 
-## Unreleased
+## v5.12.0 (unreleased)
 
+- Yield-model duration and convexity now consistently use additive continuously
+  compounded zero-rate shocks, including custom models whose `zero` returns a
+  periodic rate. This changes public convexity values: for cashflows `[5, 5, 105]`
+  at times `[1, 2, 3]` and `Yield.Constant(Periodic(0.04, 1))`, convexity changes
+  from approximately **11.26 to 8.40**. The constant-curve analytic weights are
+  now `t²`, matching the valuation derivative and the sum of key-rate convexities.
+  Plain scalar and explicit `Rate` inputs retain their own compounding coordinates.
+  See [Convexity Conventions](@ref) for the derivation, references, and executable
+  example, including annual-yield convexity (**10.412662**) and the need to sum
+  the full key-rate convexity matrix, including cross terms.
+- Callable valuation structs are accepted by scalar, key-rate, contract callback,
+  and Hull–White scenario APIs. Scalar cashflow methods consistently accept arrays
+  (flattened in column-major order), tuples, and finite generators, including
+  Macaulay, Modified, DV01, IR01, CS01, convexity, and legacy key-rate selectors.
+  Generators are collected once before valuation or differentiation.
+- Dollar DV01, IR01, and CS01 preserve the position sign. Relative durations and
+  convexities remain invariant to multiplying all cashflows by a nonzero factor.
+- NamedTuple cashflow sensitivity results now return independent arrays for every
+  duration role and convexity block. Mutating one no longer changes another.
+- Sensitivity Hessians reuse value and gradient results through the new DiffResults
+  dependency; contract duration bundles calculate gradients without unused Hessians.
 - ForwardDiff **1.x is now required**. Version 1.0 made Dual comparisons account
   for partials, which the exact zero-stream check needs to preserve cashflow-amount
   derivatives. Support for ForwardDiff 0.10 is removed; Julia 1.10 remains supported.
@@ -146,16 +167,18 @@ FRTB = [0.25, 0.5, 1, 2, 3, 5, 10, 15, 20, 30]
 duration(KeyRates(FRTB), pv, fitted_curve)
 ```
 
-**Non-breaking — scalar duration / convexity / DV01 calls** fall through to the generic finite-difference scalar path and continue to work without `tenors`:
+**Scalar duration / convexity / DV01 calls** continue to work without `tenors`. Yield-model inputs use an additive continuous-zero-rate parallel shock:
 
 ```julia
-duration(zrc, cfs, times)              # still works (FD scalar)
-duration(DV01(), zrc, cfs, times)      # still works (FD scalar)
-convexity(zrc, cfs, times)             # still works (FD scalar)
-duration(zrc) do c; pv(c); end         # still works (FD scalar)
+duration(zrc, cfs, times)              # continuous-zero scalar AD
+duration(DV01(), zrc, cfs, times)      # continuous-zero scalar AD
+convexity(zrc, cfs, times)             # same shock as the tenor-aware form
+duration(zrc) do c; pv(c); end         # continuous-zero scalar AD
 ```
 
-Numerical values agree with the v5.6 AD-based scalars to FD precision (~1e-6).
+The no-tenor curve convexity therefore equals the tenor-aware parallel
+convexity and the sum of the key-rate convexity matrix. Plain scalar and
+explicit `Rate` inputs retain their own compounding conventions.
 
 **Per-knot KRDs may shift slightly for non-Linear-spline `ZeroRateCurve` inputs.** The new AD path uses triangular-hat bumps; the old path propagated AD through the curve's spline. For `Spline.Linear()` ZRCs the answers are bitwise identical. For `Spline.MonotoneConvex()` (the default), `PCHIP`, `Cubic`, etc., per-knot KRDs differ by sub-bp on discount factors at typical knot spacing. **Sum of KRDs, scalar modified duration, and parallel-shift sensitivity are all invariant.** The new convention matches the textbook KRD definition and is independent of the curve's interpolator choice.
 
