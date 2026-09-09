@@ -158,6 +158,7 @@ include("callable_valuations.jl")
 include("analytic_types.jl")
 include("zero_cashflows.jl")
 include("sensitivity_regressions.jl")
+include("convexity_conventions.jl")
 include("stochastic_sensitivities.jl")
 include("contract_sensitivities.jl")
 

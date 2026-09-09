@@ -144,6 +144,11 @@ parallel shift in continuously compounded zero-rate space. This is the same
 shock coordinate used by the tenor-aware and key-rate forms. Plain scalar and
 explicit `Rate` inputs continue to use their own compounding conventions.
 
+See [Convexity Conventions](@ref) for the ``t^2`` derivation, an executable
+comparison of analytic and AutoDiff results, and academic and industry references.
+The scalar convexity equals the sum of **all** entries in the key-rate matrix,
+including cross terms.
+
 To obtain the per-tenor decomposition, pass `KeyRates(tenors)` as the first argument:
 
 ```@example sensitivities

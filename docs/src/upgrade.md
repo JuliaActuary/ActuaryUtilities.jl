@@ -9,6 +9,9 @@
   from approximately **11.26 to 8.40**. The constant-curve analytic weights are
   now `t²`, matching the valuation derivative and the sum of key-rate convexities.
   Plain scalar and explicit `Rate` inputs retain their own compounding coordinates.
+  See [Convexity Conventions](@ref) for the derivation, references, and executable
+  example, including annual-yield convexity (**10.412662**) and the need to sum
+  the full key-rate convexity matrix, including cross terms.
 - Callable valuation structs are accepted by scalar, key-rate, contract callback,
   and Hull–White scenario APIs. Scalar cashflow methods consistently accept arrays
   (flattened in column-major order), tuples, and finite generators, including
