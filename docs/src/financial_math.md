@@ -46,6 +46,30 @@ Empty cashflows are valid with either an empty or populated time grid.
 | Nonzero amounts with zero net present value | Dollar risk can be nonzero | Undefined (`NaN`/`Inf`) |
 | Nonzero present value | Calculated as usual | Calculated as usual |
 
+Scalar DV01 differentiates signed value directly. It remains defined at zero
+present value when the valuation has a finite derivative; IR01 and CS01 use the
+same calculation. Relative duration and convexity are still undefined there.
+
+```jldoctest zero_value_dollar_risk
+julia> using ActuaryUtilities, FinanceModels, FinanceCore
+
+julia> curve = Yield.Constant(Continuous(0.0));
+
+julia> cfs = [-1.0, 1.0]; times = [0.0, 1.0];
+
+julia> pv(curve, cfs, times)
+0.0
+
+julia> (duration(DV01(), curve, cfs, times),
+        duration(DV01(), curve, c -> pv(c, cfs, times)),
+        duration(IR01(), curve, curve, cfs, times),
+        duration(CS01(), curve, curve, cfs, times))
+(0.0001, 0.0001, 0.0001, 0.0001)
+
+julia> !isfinite(duration(curve, cfs, times))
+true
+```
+
 The check uses exact `iszero` on amounts, including AD partials, rather than a
 tolerance or net present value. Both `0.0` and `-0.0` are zero; a tiny nonzero amount
 is not. Normalized duration is invariant to nonzero scaling of amounts, so the

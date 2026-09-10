@@ -11,6 +11,12 @@ Yield-model inputs use additive **continuously compounded zero-rate shifts**.
 Plain scalar inputs use annual compounding; explicit `Rate` inputs use their
 specified compounding. A curve's initial discount factors are preserved.
 
+The scalar convexity convention changes for all yield-model types, including
+`Yield.Constant(Continuous(...))`, `ZeroRateCurve`, and Nelson–Siegel, as well as
+periodic constant curves. Both `convexity(curve, cfs, times)` and
+`convexity(curve, valuation_function)` use this continuous-zero coordinate and
+agree with the tenor-aware form and full key-rate matrix sum.
+
 ## Why the analytic formula contains t²
 
 For fixed cashflows ``CF_i`` paid at fixed times ``t_i`` in years, write their

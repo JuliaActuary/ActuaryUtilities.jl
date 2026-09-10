@@ -288,13 +288,16 @@ Calculates the Macaulay, Modified, DV01, IR01, or CS01 duration. `times` may be 
 
 Scalar cashflow methods accept arrays, tuples, and finite generators. Arrays are
 flattened in column-major order; generators are collected once before valuation.
+Use `collect` for other iterables, such as `Iterators.take` or `skipmissing`.
 Relative duration is unchanged when the position sign reverses; dollar DV01,
 IR01, and CS01 reverse sign with the position.
 
 Empty collections and collections whose amounts are all exactly zero return zero
 risk without evaluating the curve. Every cashflow needs a time; unused trailing
 times are ignored. See [Zero cashflow streams](@ref) for the normalization convention,
-numeric types, and zero-net-value portfolios. Valuation-function forms are unchanged.
+numeric types, and zero-net-value portfolios. Dollar sensitivities differentiate
+the signed value directly, including at zero present value; normalized duration
+remains undefined there. A zero callback value alone does not identify a zero stream.
 
 When not given `Modified()` or `Macaulay()` as an argument, will default to `Modified()`.
 
@@ -470,7 +473,8 @@ duration(d::DV01, yield::_YieldInput, cfs::_CashflowCollection) =
     invoke(duration, Tuple{Duration, _YieldInput, _CashflowCollection}, d, yield, cfs)
 
 function duration(::DV01, yield, valuation_function::Y) where {Y}
-    return duration(yield, valuation_function) * valuation_function(yield) / 10000
+    # Dollar risk is defined even when value is zero and relative duration is not.
+    return -ForwardDiff.derivative(i -> valuation_function(_parallel_bumped(yield, i)), 0.0) / 10_000
 end
 
 """
@@ -547,9 +551,11 @@ end
     convexity(yield,cfs,times)
     convexity(yield,valuation_function)
 
-Calculates the convexity.
-    - `yield` should be a fixed effective yield (e.g. `0.05`).
-    - `times` may be omitted and it will assume `cfs` are evenly spaced beginning at the end of the first period.
+Calculates the normalized second derivative of value under a parallel rate shock.
+`yield` may be a scalar annual yield (e.g. `0.05`), an explicit `Rate`, or an
+`AbstractYieldModel`. `times` may be omitted for evenly spaced cashflows beginning
+at the end of the first period. Cashflow collections may be arrays, tuples, or
+finite generators; use `collect` for other iterables.
 
 A scalar or `Rate` input is shocked in its own compounding space. An
 `AbstractYieldModel` input is instead shocked additively in continuously

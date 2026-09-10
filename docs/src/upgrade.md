@@ -2,9 +2,15 @@
 
 ## v5.12.0 (unreleased)
 
-- Yield-model duration and convexity now consistently use additive continuously
-  compounded zero-rate shocks, including custom models whose `zero` returns a
-  periodic rate. This changes public convexity values: for cashflows `[5, 5, 105]`
+- **Scalar convexity changes for all yield-model types.** Both
+  `convexity(curve, cfs, times)` and `convexity(curve, valuation_function)` now use
+  additive continuously compounded zero-rate shocks and agree with the tenor-aware
+  form and the sum of the full key-rate convexity matrix. This affects
+  `Yield.Constant(Continuous(...))`, `Yield.Constant(Periodic(...))`,
+  `ZeroRateCurve`, Nelson–Siegel, and custom yield models. The previous scalar
+  shock converted an annual-compounding increment to a continuous rate, changing
+  the second derivative even when the curve itself used continuous zero rates.
+  For example, for cashflows `[5, 5, 105]`
   at times `[1, 2, 3]` and `Yield.Constant(Periodic(0.04, 1))`, convexity changes
   from approximately **11.26 to 8.40**. The constant-curve analytic weights are
   now `t²`, matching the valuation derivative and the sum of key-rate convexities.
@@ -19,6 +25,18 @@
   Generators are collected once before valuation or differentiation.
 - Dollar DV01, IR01, and CS01 preserve the position sign. Relative durations and
   convexities remain invariant to multiplying all cashflows by a nonzero factor.
+  **Migration:** summing signed asset and liability dollar sensitivities nets
+  their exposures. Remove downstream sign corrections that existed solely to
+  compensate for the former cashflow APIs' use of absolute value.
+- Scalar DV01 now differentiates signed value directly, so offsetting cashflows
+  and valuation callbacks with zero present value retain their dollar exposure.
+  IR01 and CS01 inherit this fix. For `[-1, 1]` at `[0, 1]` under a zero curve,
+  each returns `0.0001` instead of `NaN`. Relative duration and convexity remain
+  undefined at zero present value.
+- Scalar tenor-aware convexity validates supplied grids, including callback,
+  cashflow, and effective contract forms. Empty, non-finite, non-positive,
+  duplicate, and unsorted grids throw `ArgumentError` before valuation, including
+  for empty cashflows and grids mutated after `KeyRates` construction.
 - NamedTuple cashflow sensitivity results now return independent arrays for every
   duration role and convexity block. Mutating one no longer changes another.
 - Sensitivity Hessians reuse value and gradient results through the new DiffResults
@@ -51,7 +69,8 @@
   contract-level reproducibility must be independent of preceding contracts.
 - Nonzero amounts that offset to zero present value are not zero streams: normalized
   duration and convexity still produce `NaN`/`Inf`, and dollar exposures are not reset
-  to zero. Valuation-function and contract inputs retain their existing behavior.
+  to zero. Valuation-function and contract inputs retain their existing
+  normalization behavior; a zero value alone does not identify a zero stream.
   Aggregate portfolio values and dollar derivatives before normalizing once. An
   unweighted average of individual durations includes zero-stream entries as zeros;
   it is not a portfolio duration. See [Zero cashflow streams](@ref).

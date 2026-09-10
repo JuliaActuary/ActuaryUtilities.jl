@@ -5,7 +5,7 @@
     generic_duration(yield, cfs, times) = duration(yield, i -> ActuaryUtilities.FinancialMath.price(i, cfs, times))
     parallel_bump(yield, x) = yield + x
     parallel_bump(yield::FM.Yield.AbstractYieldModel, x) =
-        FM.Yield.TenorShift(yield, (z, t) -> z + FC.Continuous(x))
+        FM.Yield.TenorShift(yield, (z, t) -> FC.Continuous(x) + z)
     function generic_convexity(yield, cfs, times)
         vf = i -> ActuaryUtilities.FinancialMath.price(i, cfs, times)
         v(x) = abs(vf(parallel_bump(yield, x)))
@@ -29,6 +29,7 @@
         FM.Yield.Constant(0.03),
         FM.Yield.Constant(FC.Continuous(0.03)),
         FM.Yield.Constant(FC.Periodic(0.04, 2)),
+        PeriodicZeroSensitivityCurve(0.04),
     ]
     @testset "yield=$y" for y in yields
         for (cfs, times) in cases

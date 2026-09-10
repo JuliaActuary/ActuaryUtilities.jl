@@ -109,8 +109,10 @@ duration(kr::KeyRates, target::_Contractish, curve::AYM) = duration(Effective(),
 # callback path, which is numerically
 # equivalent to the prior `sum(convexity(KeyRates(tenors), …))` matrix-sum form
 # under partition of unity but avoids the O(N²) Hessian.
-convexity(::Effective, target::_Contractish, curve::AYM, _tenors) =
-    convexity(curve, c -> _cvalue(target, c))
+function convexity(::Effective, target::_Contractish, curve::AYM, tenors)
+    _validate_tenors(tenors)
+    return convexity(curve, c -> _cvalue(target, c))
+end
 
 """
     dv01(args...)

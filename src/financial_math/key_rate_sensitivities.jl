@@ -448,15 +448,18 @@ the value, gradient, and Hessian from one AD pass at the same cost.
 # second derivative. Reuse the scalar curve callback path, which applies the
 # same continuous-zero shock without constructing a per-pillar Hessian.
 
-convexity(valuation_fn::F, curve::AYM, _tenors::AbstractVector) where {F} =
-    convexity(curve, valuation_fn)
-function convexity(curve::AYM, _tenors::AbstractVector, cfs::AbstractVector, times)
+function convexity(valuation_fn::F, curve::AYM, tenors::AbstractVector) where {F}
+    _validate_tenors(tenors)
+    return convexity(curve, valuation_fn)
+end
+function convexity(curve::AYM, tenors::AbstractVector, cfs::AbstractVector, times)
+    _validate_tenors(tenors)
     _check_cashflow_times(cfs, times)
     _iszero_cashflow_stream(cfs) && return _zero_cashflow_value(cfs, times)
     return convexity(curve, c -> sum(_cf_value(cfs[k]) * FinanceCore.discount(c, times[k]) for k in eachindex(cfs)))
 end
-convexity(curve::AYM, _tenors::AbstractVector, cfs::AbstractVector{<:FinanceCore.Cashflow}) =
-    convexity(curve, _tenors, _extract_cfs_times(cfs)...)
+convexity(curve::AYM, tenors::AbstractVector, cfs::AbstractVector{<:FinanceCore.Cashflow}) =
+    convexity(curve, tenors, _extract_cfs_times(cfs)...)
 
 function convexity(kr::KeyRates, valuation_fn::F, curve::AYM) where {F}
     ad = _keyrate_ad(curve, kr.tenors, valuation_fn; order = 2)

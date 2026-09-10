@@ -1,10 +1,3 @@
-# A valid user curve need not return continuously compounded zero rates.
-struct PeriodicZeroSensitivityCurve{T} <: FM.Yield.AbstractYieldModel
-    rate::T
-end
-Base.zero(c::PeriodicZeroSensitivityCurve, t) = FC.Periodic(c.rate, 1)
-FC.discount(c::PeriodicZeroSensitivityCurve, t) = FC.discount(zero(c, t), t)
-
 @testset "Scalar cashflow collection boundaries" begin
     times = [1.0, 2.0, 3.0]
     curve = FM.Yield.Constant(FC.Continuous(0.04))
@@ -100,6 +93,49 @@ end
             untouched = copy(last(matrices))
             first(matrices)[1, 1] = 456.0
             @test all(block == untouched for block in matrices[2:end])
+        end
+    end
+end
+
+@testset "Scalar convexity validates every supplied tenor grid" begin
+    cfs = [5.0, 5.0, 105.0]
+    times = [1.0, 2.0, 3.0]
+    wrapped = FC.Cashflow.(cfs, times)
+    bond = FM.Bond.Fixed(0.05, FC.Periodic(1), 3.0)
+    # Mutating a successfully constructed KeyRates grid must also be rejected
+    # when its tenors are passed to a scalar API.
+    mutated = KeyRates(copy(times))
+    mutated.tenors[2] = mutated.tenors[1]
+    bad_grids = (Float64[], [2.0, 1.0], [1.0, 1.0], [0.0, 1.0], [-1.0, 1.0], [1.0, Inf], [1.0, NaN], mutated.tenors)
+    for curve in (FM.Yield.Constant(FC.Continuous(0.04)), FM.ZeroRateCurve([0.03, 0.04, 0.05], times))
+        valuation = CashflowValue(cfs, times)
+        forms = (
+            g -> convexity(valuation, curve, g),
+            g -> convexity(curve, g, cfs, times),
+            g -> convexity(curve, g, wrapped),
+            g -> convexity(Effective(), bond, curve, g),
+            g -> convexity(Effective(), [bond], curve, g),
+            g -> convexity(curve, g, Float64[], Float64[]),
+            g -> convexity(curve, g, zeros(3), times),
+            g -> convexity(curve, g, empty(wrapped)),
+        )
+        for grid in bad_grids
+            for f in forms
+                @test_throws ArgumentError f(grid)
+            end
+            # Fail before invoking a valuation, not as a side effect of its AD.
+            @test_throws ArgumentError convexity(_ -> error("valuation was called"), curve, grid)
+        end
+        for grid in (times, [0.5, 2.5, 5.0])
+            reference = convexity(curve, valuation)
+            @test convexity(valuation, curve, grid) ≈ reference
+            @test convexity(curve, grid, cfs, times) ≈ reference
+            @test convexity(curve, grid, wrapped) ≈ reference
+            @test convexity(Effective(), bond, curve, grid) ≈ convexity(curve, c -> FC.pv(c, bond))
+            @test convexity(Effective(), [bond], curve, grid) ≈ convexity(curve, c -> FC.pv(c, bond))
+            @test iszero(convexity(curve, grid, Float64[], Float64[]))
+            @test iszero(convexity(curve, grid, zeros(3), times))
+            @test iszero(convexity(curve, grid, empty(wrapped)))
         end
     end
 end
