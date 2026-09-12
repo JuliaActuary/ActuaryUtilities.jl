@@ -157,6 +157,7 @@ include("analytic_types.jl")
 include("zero_cashflows.jl")
 include("stochastic_sensitivities.jl")
 include("contract_sensitivities.jl")
+include("projection_models.jl")
 
 using Aqua
 @testset "Aqua.jl" begin
