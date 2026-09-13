@@ -34,6 +34,14 @@
   Aggregate portfolio values and dollar derivatives before normalizing once. An
   unweighted average of individual durations includes zero-stream entries as zeros;
   it is not a portfolio duration. See [Zero cashflow streams](@ref).
+- `VaR` and `CTE` now enforce their documented domain `0 ≤ α < 1` at construction,
+  including through the `ValueAtRisk` and `ConditionalTailExpectation` aliases and
+  explicitly typed constructors. `WangTransform` requires `0 < α < 1`; its earlier
+  documentation incorrectly included the endpoints. Out-of-domain real values
+  (including `NaN` and infinities) throw `ArgumentError`. Explicitly typed
+  constructors validate the value after conversion. At zero, `VaR` remains the
+  essential infimum and `CTE` remains the mean. This establishes behavior for
+  invalid parameters; it does not change results at valid confidence levels.
 
 ## v5.11.1 to v5.11.2
 
