@@ -14,6 +14,7 @@ const FC = ActuaryUtilities.FinanceCore
 
 include("risk_measures.jl")
 include("optimal_transport.jl")
+include("discrete_transport.jl")
 include("audit.jl")
 
 @testset "Temporal functions" begin
