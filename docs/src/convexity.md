@@ -92,7 +92,7 @@ The former statistic is unmodified annual-compounding convexity. It lacks the
 to annual yield. [Clarke, de Silva, and Thorley (2013)](https://www.cfainstitute.org/sites/default/files/-/media/documents/book/rf-publication/2013/rf-v2013-n3-1-pdf.pdf),
 *Fundamentals of Futures and Options*, appendix p. 127, equation (A.15) and the
 following modification, distinguishes these annual-compounding quantities.
-Version 5.12 uses continuous-zero convexity for yield models. To measure the
+Version 6.0 uses continuous-zero convexity for yield models. To measure the
 annual-yield derivative of these fixed cashflows, pass the scalar yield or
 explicit annual rate:
 

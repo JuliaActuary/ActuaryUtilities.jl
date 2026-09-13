@@ -1,6 +1,6 @@
 # Version Upgrade Guide
 
-## v5.12.0 (unreleased)
+## v5.11.2 to v6.0.0
 
 - **Scalar convexity changes for all yield-model types.** Both
   `convexity(curve, cfs, times)` and `convexity(curve, valuation_function)` now use
@@ -33,6 +33,12 @@
   IR01 and CS01 inherit this fix. For `[-1, 1]` at `[0, 1]` under a zero curve,
   each returns `0.0001` instead of `NaN`. Relative duration and convexity remain
   undefined at zero present value.
+- Contract and portfolio `sensitivities` bundles compute `effective_dv01`,
+  `spread_dv01`, and `forward_dv01` from the value gradient directly, so they are
+  defined at zero present value (an at-market swap, a hedged asset/liability pair)
+  and agree with `dv01(Effective()/Spread(), …)`. Previously they were derived
+  from duration times value and returned `NaN` there. The normalized durations and
+  key-rate vectors in the bundle remain undefined at zero value.
 - Scalar tenor-aware convexity validates supplied grids, including callback,
   cashflow, and effective contract forms. Empty, non-finite, non-positive,
   duplicate, and unsorted grids throw `ArgumentError` before valuation, including

@@ -49,21 +49,30 @@ curves. Coupons are estimated on `forward`, discounted on `credit` (pass a singl
   - `forward_duration` / `forward_dv01` / `forward_key_rate` — bump the index only;
     `effective = forward + spread` (first order).
 
-Durations in years; DV01s in dollars per 1bp. For a fixed bond `effective == spread ==`
+Durations in years; DV01s in dollars per 1bp. Dollar DV01s differentiate the signed value
+directly and remain defined at zero present value; the normalized durations and key-rate
+vectors are undefined there. For a fixed bond `effective == spread ==`
 the modified duration and `forward == 0`. See [`duration`](@ref) with [`Effective`](@ref)/
 [`Spread`](@ref), [`dv01`](@ref), [`zspread`](@ref), [`locked_floater`](@ref).
 """
 function sensitivities(target::_Contractish, forward::AYM, credit::AYM, tenors)
     r = _ncurve_ad(c -> _cvalue2(target, c.forward, c.credit), (; forward, credit), tenors; order = 1)
     v = r.value
-    fwd = -r.gradient.forward ./ v
-    spr = -r.gradient.credit ./ v
+    gf, gc = r.gradient.forward, r.gradient.credit
+    # Dollar risk differentiates the signed value directly, so it stays defined at
+    # zero present value (an at-market swap, a hedged asset/liability pair) where
+    # the normalized durations below are not.
+    forward_dv01 = -sum(gf) / 10_000
+    spread_dv01 = -sum(gc) / 10_000
+    effective_dv01 = forward_dv01 + spread_dv01
+    fwd = -gf ./ v
+    spr = -gc ./ v
     eff = fwd .+ spr
     return (;
         value = v,
-        effective_duration = sum(eff), effective_dv01 = sum(eff) * v / 10_000, effective_key_rate = eff,
-        spread_duration = sum(spr), spread_dv01 = sum(spr) * v / 10_000, spread_key_rate = spr,
-        forward_duration = sum(fwd), forward_dv01 = sum(fwd) * v / 10_000, forward_key_rate = fwd,
+        effective_duration = sum(eff), effective_dv01, effective_key_rate = eff,
+        spread_duration = sum(spr), spread_dv01, spread_key_rate = spr,
+        forward_duration = sum(fwd), forward_dv01, forward_key_rate = fwd,
     )
 end
 sensitivities(target::_Contractish, curve::AYM, tenors) = sensitivities(target, curve, curve, tenors)
