@@ -118,6 +118,21 @@ Two definitions are fixed by this framework and by this package:
 - `VaR(α)` is the lower generalized inverse: $\mathrm{VaR}_\alpha(X) = \inf\{x : F_X(x) \ge \alpha\}$. At an atom, the lower quantile applies: `VaR(0.5)(Bernoulli(0.5)) == 0`.
 - `CTE(α)` is the expected shortfall (average Value at Risk): the mean of exactly the worst $1-\alpha$ of probability mass. When the $\alpha$ boundary falls inside an atom, that atom contributes fractional weight. CTE's atom handling does not depend on the VaR boundary convention.
 
+The constructors establish the parameter domains before a measure is applied to
+an array or distribution:
+
+| Measure | Domain | Endpoint behavior |
+|:--|:--|:--|
+| `VaR(α)` | `0 ≤ α < 1` | At zero, the sample minimum or `quantile(risk, 0)` (`-Inf` for support unbounded below). One is excluded. |
+| `CTE(α)` | `0 ≤ α < 1` | At zero, the mean with the same conventions as `Expectation()`. One is excluded because the tail has zero probability mass. |
+| `WangTransform(α)` | `0 < α < 1` | Both endpoints are excluded so that `Φ⁻¹(α)` is finite. At `α = 0.5`, the distortion is the identity. |
+
+Out-of-domain real parameters, including `NaN` and infinities, throw
+`ArgumentError` at construction. Explicitly typed constructors, such as
+`CTE{Float32}(α)`, validate the converted value; a value that rounds to one is
+rejected. `ValueAtRisk` and `ConditionalTailExpectation` are aliases and follow
+the same rules.
+
 !!! note "How the computation is performed"
     The implementation picks the most exact path available, in this order:
 

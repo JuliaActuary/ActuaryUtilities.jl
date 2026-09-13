@@ -1,6 +1,6 @@
 # Version Upgrade Guide
 
-## v5.11.2 to v6.0.0
+## v5.12.0 to v6.0.0
 
 - **Scalar convexity changes for all yield-model types.** Both
   `convexity(curve, cfs, times)` and `convexity(curve, valuation_function)` now use
@@ -47,6 +47,9 @@
   duration role and convexity block. Mutating one no longer changes another.
 - Sensitivity Hessians reuse value and gradient results through the new DiffResults
   dependency; contract duration bundles calculate gradients without unused Hessians.
+
+## v5.11.2 to v5.12.0
+
 - ForwardDiff **1.x is now required**. Version 1.0 made Dual comparisons account
   for partials, which the exact zero-stream check needs to preserve cashflow-amount
   derivatives. Support for ForwardDiff 0.10 is removed; Julia 1.10 remains supported.
@@ -80,6 +83,14 @@
   Aggregate portfolio values and dollar derivatives before normalizing once. An
   unweighted average of individual durations includes zero-stream entries as zeros;
   it is not a portfolio duration. See [Zero cashflow streams](@ref).
+- `VaR` and `CTE` now enforce their documented domain `0 ≤ α < 1` at construction,
+  including through the `ValueAtRisk` and `ConditionalTailExpectation` aliases and
+  explicitly typed constructors. `WangTransform` requires `0 < α < 1`; its earlier
+  documentation incorrectly included the endpoints. Out-of-domain real values
+  (including `NaN` and infinities) throw `ArgumentError`. Explicitly typed
+  constructors validate the value after conversion. At zero, `VaR` remains the
+  essential infimum and `CTE` remains the mean. This establishes behavior for
+  invalid parameters; it does not change results at valid confidence levels.
 
 ## v5.11.1 to v5.11.2
 

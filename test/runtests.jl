@@ -15,6 +15,7 @@ include("sensitivity_fixtures.jl")
 
 include("risk_measures.jl")
 include("optimal_transport.jl")
+include("discrete_transport.jl")
 include("audit.jl")
 
 @testset "Temporal functions" begin

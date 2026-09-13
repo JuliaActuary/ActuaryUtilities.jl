@@ -22,6 +22,62 @@ Distributions.ccdf(::DelayedDirac, x::Real) = x < 100 ? 1.0 : 0.0
 
 @testset "Risk Measures" begin
 
+    @testset "Parameter domains" begin
+        for Measure in (VaR, ValueAtRisk, CTE, ConditionalTailExpectation, WangTransform)
+            for α in (-Inf, -0.5, prevfloat(0.0), 1, nextfloat(1.0), Inf, NaN)
+                @test_throws ArgumentError Measure(α)
+                @test_throws ArgumentError Measure{Float64}(α)
+            end
+            for α in (0.5f0, 0.5, big"0.5", 1 // 2)
+                @test Measure(α).α === α
+            end
+            @test Measure{Float32}(0.5).α === 0.5f0
+            @test Measure{Real}(0.5) isa Measure{Real}
+            # Conversion must not create an unchecked endpoint value.
+            @test_throws ArgumentError Measure{Float32}(prevfloat(1.0))
+            @test Measure(prevfloat(1.0)).α == prevfloat(1.0)
+        end
+        for Measure in (VaR, CTE)
+            @test Measure(0).α === 0
+            @test Measure(-0.0).α === -0.0
+            @test Measure(nextfloat(0.0)).α == nextfloat(0.0)
+        end
+        @test_throws ArgumentError WangTransform(0)
+        @test_throws ArgumentError WangTransform(-0.0)
+        @test_throws ArgumentError WangTransform{Float64}(0)
+        @test_throws ArgumentError WangTransform{Float32}(nextfloat(0.0))
+        @test WangTransform(nextfloat(0.0)).α == nextfloat(0.0)
+    end
+
+    @testset "Confidence levels on samples and discrete laws" begin
+        # Repeated outcomes, both signs, and exact atom boundaries. The
+        # distribution aggregates the same eight equally weighted observations.
+        sample = [2.0, -3.0, 9.0, 2.0, 0.0, -3.0, 5.0, 2.0]
+        d = DiscreteNonParametric([-3.0, 0.0, 2.0, 5.0, 9.0], [2, 1, 3, 1, 1] ./ 8)
+        levels = vcat(
+            collect(0.0:0.03125:0.96875),
+            nextfloat(0.0), prevfloat(1.0),
+            [f(α) for α in (0.25, 0.375, 0.75, 0.875) for f in (prevfloat, nextfloat)],
+        )
+        for α in levels, Measure in (VaR, CTE)
+            rm = Measure(α)
+            @test rm(sample) ≈ rm(d) atol = 1.0e-14
+            @test rm(reshape(sample, 2, 4)) ≈ rm(d) atol = 1.0e-14
+        end
+        @test VaR(0)(sample) == VaR(0)(d) == -3
+        @test CTE(0)(sample) ≈ CTE(0)(d) ≈ mean(sample)
+        @test VaR(0.75)(sample) == VaR(0.75)(d) == 2
+        @test VaR(nextfloat(0.75))(sample) == VaR(nextfloat(0.75))(d) == 5
+        @test CTE(0.5)(sample) ≈ CTE(0.5)(d) ≈ 4.5
+        for Measure in (VaR, CTE)
+            @test Measure(prevfloat(1.0))(sample) == Measure(prevfloat(1.0))(d) == 9
+        end
+        for α in (nextfloat(0.0), 0.01, 0.5, 0.99, prevfloat(1.0))
+            @test WangTransform(α)(sample) ≈ WangTransform(α)(d)
+        end
+        @test WangTransform(0.5)(sample) ≈ WangTransform(0.5)(d) ≈ mean(sample)
+    end
+
     for bad in (0, -1, Inf, NaN)
         @test_throws ArgumentError DualPower(bad)
         @test_throws ArgumentError ProportionalHazard(bad)
