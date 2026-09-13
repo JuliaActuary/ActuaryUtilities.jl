@@ -22,6 +22,50 @@ convexity(discount_rate, cfs, times)               #  10.62
     `Macaulay`/`Modified` duration are for **fixed** cashflows. For a floating-rate bond, a portfolio, or any curve-dependent contract, pass the contract directly — `duration(Effective(), contract, curve, tenors)` / `duration(Spread(), …)` / `dv01(…)` re-project the coupons and give the rate-vs-spread durations (years and DV01s); `sensitivities(contract, curve, tenors)` returns the full bundle, and `sensitivities(contract, tenors; discount = (; rf, credit, ilp), index = …)` does the multi-curve decomposition. See [Key Rate Sensitivities](@ref).
 
 
+## Zero cashflow streams
+
+An empty collection and an all-zero projection grid both represent no cashflows.
+Explicit-cashflow duration, convexity, and key-rate sensitivities return zero risk
+for either representation. Value and dollar risk are zero; normalized duration and
+convexity are assigned zero by convention. This includes scalar Macaulay/Modified
+duration, DV01/IR01/CS01, legacy key rates, and Hull–White cashflow sensitivities.
+`present_values` returns an empty vector or a vector of zeros.
+
+Every cashflow needs a corresponding time, but the time grid may be longer.
+Unused trailing times are ignored, including when deriving a legacy key-rate grid
+or a Hull–White simulation horizon. Too few times throws `DimensionMismatch`.
+Empty cashflows are valid with either an empty or populated time grid.
+
+| Cashflow amounts | Value and dollar risk | Normalized risk |
+|:--|:--|:--|
+| Empty or all exactly zero | Zero | Zero by convention |
+| Nonzero amounts with zero net present value | Dollar risk can be nonzero | Undefined (`NaN`/`Inf`) |
+| Nonzero present value | Calculated as usual | Calculated as usual |
+
+The check uses exact `iszero` on amounts, including AD partials, rather than a
+tolerance or net present value. Both `0.0` and `-0.0` are zero; a tiny nonzero amount
+is not. Normalized duration is invariant to nonzero scaling of amounts, so the
+assigned value at exactly zero is not the limit as amounts shrink. Explicit
+key-rate grid validation still applies; zero streams need no derived default grid.
+Zero streams need no discount factors, so the curve is never evaluated and
+Hull–White does not simulate. Their numeric types come from amounts and times,
+plus the tenor grid for key-rate results. They may therefore differ from a nonzero
+stream's curve-derived type (for example, `Float64` versus `BigFloat` or `Dual`).
+Abstractly typed empty inputs fall back to `Float64`.
+When preallocating batch or AD buffers, choose a compatible numeric type from the
+calculation's inputs inside the differentiated function. Do not infer it from the
+first contract's result, which may come from a zero stream.
+
+Skipping Hull–White simulation leaves the RNG unchanged, so a shared-RNG batch
+uses different subsequent draws than versions that simulated zero streams.
+Independently assigned RNG streams avoid dependence on preceding contracts.
+
+To aggregate portfolio risk, sum values and dollar derivatives before normalizing
+once. This also preserves exposures from positions whose net value is zero.
+An unweighted average of contract durations includes zero-stream entries as zeros
+and is not a portfolio duration. Valuation-function and contract APIs retain their
+existing normalization behavior: a zero valuation alone does not identify a zero stream.
+
 ## Curve Transformations
 
 [`FinanceModels.Yield.TenorShift`](https://docs.juliaactuary.org/FinanceModels/dev/) lets you lazily transform any yield curve's zero rates via `curve + (z, t) -> new_rate`. This is useful for scenario analysis (parallel shifts, twists, stresses) without refitting.
