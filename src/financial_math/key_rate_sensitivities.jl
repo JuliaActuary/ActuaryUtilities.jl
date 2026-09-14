@@ -167,8 +167,8 @@ end
     # across cashflow times, including at t=0.
     disc(t) = prod(c -> FinanceCore.discount(c, t), values(curves))
     k0 = firstindex(cfs)
-    t0 = times[k0]
-    cfd0 = cfs[k0] * disc(t0)
+    t0 = FinanceCore.timepoint(cfs[k0], times[k0])
+    cfd0 = _cf_value(cfs[k0]) * disc(t0)
     _, w0, _, _ = _active_hats(tenors, t0)
     T = promote_type(typeof(cfd0), typeof(t0 * cfd0 * w0), eltype(tenors))
     if order >= 2
@@ -178,14 +178,14 @@ end
     hess_shared = order >= 2 ? zeros(T, n, n) : nothing
     V = zero(cfd0)
     @inbounds for k in eachindex(cfs)
-        t = times[k]
+        t = FinanceCore.timepoint(cfs[k], times[k])
         # `prod` over the curve tuple is unrolled and type-stable even when the
         # roles have different concrete types (e.g. a ZeroRateCurve base with a
         # flat Constant credit). A `for c in values(curves)` loop would make `c`
         # non-concrete for a heterogeneous tuple and box `discount(c, t)` once
         # per cashflow — an O(N_cf) allocation hit on the two-curve IR01/CS01 path.
         d = disc(t)
-        cfd = cfs[k] * d
+        cfd = _cf_value(cfs[k]) * d
         V += cfd
         i, wi, j, wj = _active_hats(tenors, t)
         grad_shared[i] -= t * cfd * wi
@@ -279,6 +279,8 @@ the bump magnitudes. The user's curve is preserved at all non-knot points.
 Empty collections and collections whose amounts are all exactly zero return zero
 key-rate durations by convention, with one entry per tenor and no curve evaluation.
 Every cashflow needs a time; unused trailing times are ignored.
+Wrapped `Cashflow` objects use their embedded amounts and payment times, including
+when explicit `times` are supplied. Numeric amounts use the explicit times.
 See [Zero cashflow streams](@ref) for numeric types and zero-net-value portfolios.
 
 # Tenor grid
@@ -454,9 +456,7 @@ function convexity(valuation_fn::F, curve::AYM, tenors::AbstractVector) where {F
 end
 function convexity(curve::AYM, tenors::AbstractVector, cfs::AbstractVector, times)
     _validate_tenors(tenors)
-    _check_cashflow_times(cfs, times)
-    _iszero_cashflow_stream(cfs) && return _zero_cashflow_value(cfs, times)
-    return convexity(curve, c -> sum(_cf_value(cfs[k]) * FinanceCore.discount(c, times[k]) for k in eachindex(cfs)))
+    return convexity(curve, cfs, times)
 end
 convexity(curve::AYM, tenors::AbstractVector, cfs::AbstractVector{<:FinanceCore.Cashflow}) =
     convexity(curve, tenors, _extract_cfs_times(cfs)...)

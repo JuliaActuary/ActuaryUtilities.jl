@@ -284,7 +284,10 @@ _cashflow_vector(cfs::Union{Tuple, Base.Generator}) = _cashflow_vector(collect(c
 
 Calculates the Macaulay, Modified, DV01, IR01, or CS01 duration. `times` may be ommitted and the valuation will assume evenly spaced cashflows starting at the end of the first period.
 
-`cfs` can be an `AbstractVector{<:Cashflow}` (from FinanceCore), in which case `times` is extracted automatically and should be omitted.
+`cfs` can be an `AbstractVector{<:Cashflow}` (from FinanceCore), in which case
+`times` may be omitted. A `Cashflow` always supplies its embedded amount and time;
+explicit `times` supply payment times for numeric amounts. If supplied, `times`
+must still contain an entry for each cashflow; unused trailing entries are ignored.
 
 Scalar cashflow methods accept arrays, tuples, and finite generators. Arrays are
 flattened in column-major order; generators are collected once before valuation.
@@ -557,6 +560,9 @@ Calculates the normalized second derivative of value under a parallel rate shock
 at the end of the first period. Cashflow collections may be arrays, tuples, or
 finite generators; use `collect` for other iterables.
 
+Wrapped `Cashflow` objects use their embedded payment times even when `times` is
+supplied. Numeric amounts use the corresponding explicit time.
+
 A scalar or `Rate` input is shocked in its own compounding space. An
 `AbstractYieldModel` input is instead shocked additively in continuously
 compounded zero-rate space, consistently across the no-tenor, tenor-aware,
@@ -612,7 +618,7 @@ function convexity(yield::_YieldInput, cfs::_CashflowCollection)
     return convexity(yield, cfs, times)
 end
 
-# ── Analytic convexity fast paths for flat yields ───────────────────────────
+# ── Analytic convexity for fixed cashflows ─────────────────────────────────
 #
 # Exactly equal to the generic nested-AD path (locked by equality tests vs
 # `convexity(yield, i -> price(i, cfs, times))`). As with the Modified-duration
@@ -622,7 +628,7 @@ end
 # * `Real` y: V(x) = Σ cf·(1+y+x)^(-t) → Σ cf·d·t(t+1) / V / (1+y)²
 # * `Rate{Periodic(m)}`: V(x) = Σ cf·(1+(y+x)/m)^(-mt) → Σ cf·d·t(t+1/m) / V / (1+y/m)²
 # * `Rate{Continuous}`: V(x) = Σ cf·e^(-(y+x)t) → Σ cf·d·t² / V
-# * `Yield.Constant`: as a yield model it is shocked in continuous-zero space,
+# * `AbstractYieldModel`: it is shocked in continuous-zero space,
 #   so V(x) = Σ cf·d·exp(-xt) → Σ cf·d·t² / V.
 #
 # The ratio uses the signed V, matching the generic path's |V|-normalized
@@ -657,6 +663,12 @@ function convexity(yield::FinanceCore.Rate{<:Real, FinanceCore.Periodic}, cfs::A
     return _weighted_ratio(yield, t -> t * (t + 1 / m), cfs, times; divisor = (1 + FinanceCore.rate(yield) / m)^2)
 end
 function convexity(yield::FinanceCore.Rate{<:Real, FinanceCore.Continuous}, cfs::AbstractVector, times)
+    return _weighted_ratio(yield, t -> t * t, cfs, times)
+end
+function convexity(yield::FinanceModels.Yield.AbstractYieldModel, cfs::AbstractVector, times)
+    # A continuous-zero shift multiplies each fixed payment's discount by
+    # exp(-s*t), so the t² kernel applies to every yield model, including curves
+    # that are not flat. Keep the callback form for rate-dependent cashflows.
     return _weighted_ratio(yield, t -> t * t, cfs, times)
 end
 function convexity(yield::FinanceModels.Yield.Constant{<:FinanceCore.Rate}, cfs::AbstractVector, times)
@@ -793,11 +805,11 @@ function _krd_new_curve(keyrate::KeyRatePar, curve, krd_points)
     return new_curve
 end
 
-function _default_krd_points(timepoints)
-    mt = maximum(timepoints)
+function _default_krd_points(cashflows, timepoints)
+    mt = _maximum_cashflow_time(cashflows, timepoints)
     mt >= 1 || throw(
         ArgumentError(
-            "the default krd_points grid 1:maximum(timepoints) is empty because all timepoints are < 1; pass krd_points explicitly"
+            "the default krd_points grid is empty because all payment times are < 1; pass krd_points explicitly"
         )
     )
     return 1:mt
@@ -807,7 +819,7 @@ function duration(keyrate::KeyRateDuration, curve, cashflows::_CashflowCollectio
     cashflows = _cashflow_vector(cashflows)
     timepoints = _cashflow_times(cashflows, timepoints)
     _iszero_cashflow_stream(cashflows) && return _zero_cashflow_value(cashflows, timepoints)
-    return duration(keyrate, curve, cashflows, timepoints, _default_krd_points(timepoints))
+    return duration(keyrate, curve, cashflows, timepoints, _default_krd_points(cashflows, timepoints))
 end
 
 function duration(keyrate::KeyRateDuration, curve::_YieldInput, cashflows::_CashflowCollection)

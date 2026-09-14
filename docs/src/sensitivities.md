@@ -121,6 +121,21 @@ b = duration(zrc, tenors, [5.0, 5.0, 5.0, 5.0, 105.0], [1.0, 2.0, 3.0, 4.0, 5.0]
 
 The same dispatch works with all method variants — `KeyRates(tenors)`, `DV01()`, two-curve `IR01()`/`CS01()`, `convexity`, and `sensitivities`.
 
+A `Cashflow` supplies its own amount and payment time. If explicit times are also
+passed, they provide fallback times for numeric amounts; embedded cashflow times
+take precedence. The explicit vector must still cover the cashflow collection,
+and unused trailing entries are ignored. For example:
+
+```@example sensitivities
+fallback_times = fill(10.0, length(cfs_obj))
+duration(KeyRates(tenors), zrc, cfs_obj, fallback_times) ≈
+    duration(KeyRates(tenors), zrc, cfs_obj)
+```
+
+Legacy default key-rate grids and Hull–White default simulation horizons also use
+these resolved payment times. To change payment dates, construct new `Cashflow`
+objects or pass numeric amounts with the desired times.
+
 ## Any AbstractYieldModel — no resampling required
 
 Because the AD path is curve-agnostic, you can compute key rates directly against any `AbstractYieldModel` — a fitted Nelson-Siegel, a user-defined composite, a UFR extrapolator, etc. There is no need to first convert to `ZeroRateCurve`:
@@ -303,6 +318,15 @@ floater = Bond.Floating(0.015, Periodic(1), 5.0, "SOFR")   # SOFR + 150bp, 5y an
 duration(Effective(), floater, zrc, tenors)   # rate duration, yrs — small
 duration(Spread(),    floater, zrc, tenors)   # spread duration, yrs — ≈ maturity
 dv01(Effective(),     floater, zrc, tenors)   # effective DV01, $/bp
+```
+
+Single-curve calls without a marker default to `Effective()` for all three verbs,
+including portfolios. Request spread risk explicitly with `Spread()`.
+
+```@example sensitivities
+(duration(floater, zrc, tenors) ≈ duration(Effective(), floater, zrc, tenors),
+ dv01(floater, zrc, tenors) ≈ dv01(Effective(), floater, zrc, tenors),
+ convexity(floater, zrc, tenors) ≈ convexity(Effective(), floater, zrc, tenors))
 ```
 
 `sensitivities` returns the whole picture (years, DV01s, and key-rate vectors) in one AD pass:

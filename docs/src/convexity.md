@@ -46,8 +46,9 @@ of duration. This formula also applies to fixed cashflows on a nonflat curve.
 continuous-rate definition.
 
 **AutoDiff does not need a supplied ``t^2`` formula.** The callback API
-differentiates the shocked valuation. The analytic fast path for constant curves
-evaluates the formula directly to avoid that work. Their results must agree.
+differentiates the shocked valuation. The analytic cashflow path evaluates the
+formula directly for every yield model, including nonflat curves. Their results
+must agree.
 For rate-dependent cashflows, use a valuation callback or contract API so that
 differentiation includes changes in the cashflows; the fixed-cashflow formula
 alone does not capture those effects.

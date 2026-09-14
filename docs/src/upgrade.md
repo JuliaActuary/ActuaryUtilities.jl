@@ -2,6 +2,21 @@
 
 ## v5.12.0 to v6.0.0
 
+- Unmarked single-curve contract and portfolio `dv01` and `convexity` calls now
+  default to `Effective()`, matching `duration`. The `duration(DV01(), target,
+  curve, tenors)` alias uses the same default. Use `Spread()` explicitly for
+  spread risk.
+- Sensitivity cashflow forms consistently use the amount and payment time stored
+  in each `Cashflow`, even when explicit times are supplied. Numeric amounts use
+  the corresponding explicit time. Analytic key-rate forms previously errored
+  on nonzero wrapped cashflows with explicit times; tenor-aware scalar convexity
+  instead used the explicit times. Legacy default key-rate grids and Hull–White
+  default simulation horizons now use embedded payment times too.
+  **Migration:** if explicit times differ from embedded times, the embedded
+  times take precedence throughout these calculations. To change payment dates,
+  construct updated `Cashflow` objects or pass numeric amounts and the desired
+  times. Explicit time vectors must still cover the collection; trailing entries
+  are ignored.
 - **Scalar convexity changes for all yield-model types.** Both
   `convexity(curve, cfs, times)` and `convexity(curve, valuation_function)` now use
   additive continuously compounded zero-rate shocks and agree with the tenor-aware

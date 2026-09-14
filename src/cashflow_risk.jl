@@ -23,6 +23,10 @@ end
     return length(times) == length(cfs) ? times : view(times, eachindex(cfs))
 end
 
+# Call after bounds validation and the zero-stream return. Derived grids and
+# simulation horizons must use the same embedded payment times as valuation.
+_maximum_cashflow_time(cfs, times) = maximum(k -> FinanceCore.timepoint(cfs[k], times[k]), eachindex(cfs))
+
 # Zero streams do not require a curve query. Concrete input types determine the
 # value type; abstractly typed empty collections have no values to promote.
 _cashflow_amount_type(::Type{T}) where {T} = T

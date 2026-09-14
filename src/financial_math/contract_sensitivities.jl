@@ -92,9 +92,14 @@ _contract_parallel_value(::Spread, target, forward, credit, s) =
     duration(Spread(),    target, curve, tenors)          # spread duration, yrs
     duration(Effective(), KeyRates(tenors), target, curve) # key-rate vector
     dv01(Effective()/Spread(), target, curve, tenors)     # the dollar versions
+    duration(target, curve, tenors)                     # defaults to Effective()
+    dv01(target, curve, tenors)                         # defaults to Effective()
+    convexity(target, curve, tenors)                    # defaults to Effective()
 
 Effective (rate) and spread (credit) duration / DV01 for a contract or portfolio,
 re-projecting cashflows under bumped curves. Two-curve forms take `(forward, credit)`.
+Unmarked single-curve contract and portfolio calls use `Effective()` for duration,
+DV01, and convexity; spread risk requires an explicit `Spread()` marker.
 See [`sensitivities`](@ref) for the full one-pass bundle.
 """
 function duration(metric::Effective, target::_Contractish, forward::AYM, credit::AYM, tenors)
@@ -112,6 +117,8 @@ duration(::Spread, kr::KeyRates, target::_Contractish, curve::AYM) = sensitiviti
 # default (no marker) on a contract/portfolio = effective
 duration(target::_Contractish, curve::AYM, tenors::AbstractVector) = duration(Effective(), target, curve, tenors)
 duration(kr::KeyRates, target::_Contractish, curve::AYM) = duration(Effective(), kr, target, curve)
+duration(::DV01, target::_Contractish, curve::AYM, tenors::AbstractVector) = dv01(Effective(), target, curve, tenors)
+convexity(target::_Contractish, curve::AYM, tenors::AbstractVector) = convexity(Effective(), target, curve, tenors)
 
 # Effective convexity: parallel-shift second derivative of the contract's
 # present value under a continuous-rate shock. Routes through the O(1) scalar
@@ -129,6 +136,8 @@ end
 Dollar value of a 1bp move. `dv01(args...)` ≡ `duration(DV01(), args...)` for the
 cashflow/curve forms, with `dv01(Effective()/Spread(), target, [forward, credit,] tenors)`
 giving the floating-rate dollar durations (years × value ÷ 10⁴).
+For a contract or portfolio, `dv01(target, curve, tenors)` and
+`duration(DV01(), target, curve, tenors)` default to `Effective()`.
 """
 function dv01(metric::Effective, target::_Contractish, forward::AYM, credit::AYM, tenors)
     return -_contract_parallel(metric, target, forward, credit, tenors).derivative / 10_000

@@ -55,7 +55,16 @@
     end
 
     @testset "default duration & dv01 verb" begin
-        @test duration(flm, curve, tenors) ≈ duration(Effective(), flm, curve, tenors)
+        for target in (fb, flm, [fb, flm])
+            @test duration(target, curve, tenors) ≈ duration(Effective(), target, curve, tenors)
+            @test dv01(target, curve, tenors) ≈ dv01(Effective(), target, curve, tenors)
+            @test duration(DV01(), target, curve, tenors) ≈ dv01(Effective(), target, curve, tenors)
+            @test convexity(target, curve, tenors) ≈ convexity(Effective(), target, curve, tenors)
+        end
+        @test (@inferred dv01(fb, curve, tenors)) isa Float64
+        @test (@inferred convexity(fb, curve, tenors)) isa Float64
+        @test_throws ArgumentError dv01(fb, curve, [2.0, 1.0])
+        @test_throws ArgumentError convexity(fb, curve, [2.0, 1.0])
         @test dv01(Effective(), flm, curve, tenors) ≈ sensitivities(flm, curve, tenors).effective_dv01
         @test dv01(0.05, [5.0, 5.0, 105.0]) ≈ duration(DV01(), 0.05, [5.0, 5.0, 105.0])   # cashflow fallback
     end

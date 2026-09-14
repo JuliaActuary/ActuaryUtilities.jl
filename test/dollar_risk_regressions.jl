@@ -86,6 +86,8 @@ end
         r = sensitivities(port, curve, tenors)
         @test r.effective_dv01 ≈ expected
         @test r.effective_dv01 ≈ dv01(Effective(), port, curve, tenors)
+        @test dv01(port, curve, tenors) ≈ expected
+        @test duration(DV01(), port, curve, tenors) ≈ expected
         @test r.spread_dv01 ≈ dv01(Spread(), port, curve, tenors)
         @test r.forward_dv01 ≈ 0 atol = 1.0e-12
         @test !isfinite(r.effective_duration)
