@@ -1,6 +1,43 @@
 # Version Upgrade Guide
 
-## Unreleased
+## v5.12.0 to v6.0.0
+
+- **Curve convexity uses continuous-zero shocks.** This changes scalar convexity
+  for every yield model, including constant curves, ZeroRateCurve, Nelson–Siegel,
+  and custom models. Cashflow and callback results agree with tenor-aware
+  convexity and the full key-rate matrix sum. For `[5, 5, 105]` at `[1, 2, 3]`
+  under `Yield.Constant(Periodic(0.04, 1))`, convexity changes from **11.26 to 8.40**.
+  Scalars and explicit `Rate` inputs retain their compounding conventions.
+  See [Convexity Conventions](@ref) for formulas and examples.
+- **Dollar risk preserves position sign and zero-value exposure.** DV01, IR01,
+  and CS01 use signed value derivatives. For `[-1, 1]` at `[0, 1]` under a zero
+  curve, they return `0.0001` instead of `NaN`. Contract sensitivity bundles also
+  retain dollar exposure at zero value. Normalized duration and convexity remain
+  undefined there.
+  **Migration:** sum signed asset and liability risk directly. Remove sign
+  corrections added to compensate for the former use of absolute value.
+- **Embedded cashflow times take precedence.** Analytic key-rate forms now accept
+  wrapped `Cashflow` objects with explicit times. Scalar, key-rate, and bundled
+  sensitivities use embedded payment times, as do legacy default grids and
+  Hull–White default horizons. Numeric amounts use the corresponding explicit
+  times. Explicit time vectors must cover the collection; trailing entries are ignored.
+  **Migration:** to change payment dates, construct updated `Cashflow` objects or
+  pass numeric amounts with the desired times.
+- Unmarked single-curve contract and portfolio DV01 and convexity default to
+  `Effective()`, matching duration. This includes `duration(DV01(), target, curve,
+  tenors)`. Use `Spread()` explicitly for spread risk.
+- Callback APIs accept callable structs. Scalar cashflow APIs accept arrays,
+  tuples, and finite generators. Arrays are flattened in column-major order;
+  generators are collected once before valuation.
+- Scalar tenor-aware convexity validates grids before valuation, including empty
+  streams and grids mutated after construction. Empty, non-finite, non-positive,
+  duplicate, or unsorted grids throw `ArgumentError`.
+- Named cashflow results own independent arrays for each duration role and
+  convexity block. Mutating one no longer changes another.
+- Hessian calculations reuse value and gradient results through DiffResults.
+  Contract duration bundles compute gradients without unused Hessians.
+
+## v5.11.2 to v5.12.0
 
 - ForwardDiff **1.x is now required**. Version 1.0 made Dual comparisons account
   for partials, which the exact zero-stream check needs to preserve cashflow-amount
@@ -30,7 +67,8 @@
   contract-level reproducibility must be independent of preceding contracts.
 - Nonzero amounts that offset to zero present value are not zero streams: normalized
   duration and convexity still produce `NaN`/`Inf`, and dollar exposures are not reset
-  to zero. Valuation-function and contract inputs retain their existing behavior.
+  to zero. Valuation-function and contract inputs retain their existing
+  normalization behavior; a zero value alone does not identify a zero stream.
   Aggregate portfolio values and dollar derivatives before normalizing once. An
   unweighted average of individual durations includes zero-stream entries as zeros;
   it is not a portfolio duration. See [Zero cashflow streams](@ref).
@@ -154,16 +192,18 @@ FRTB = [0.25, 0.5, 1, 2, 3, 5, 10, 15, 20, 30]
 duration(KeyRates(FRTB), pv, fitted_curve)
 ```
 
-**Non-breaking — scalar duration / convexity / DV01 calls** fall through to the generic finite-difference scalar path and continue to work without `tenors`:
+**Scalar duration / convexity / DV01 calls** continue to work without `tenors`. Yield-model inputs use an additive continuous-zero-rate parallel shock:
 
 ```julia
-duration(zrc, cfs, times)              # still works (FD scalar)
-duration(DV01(), zrc, cfs, times)      # still works (FD scalar)
-convexity(zrc, cfs, times)             # still works (FD scalar)
-duration(zrc) do c; pv(c); end         # still works (FD scalar)
+duration(zrc, cfs, times)              # continuous-zero scalar AD
+duration(DV01(), zrc, cfs, times)      # continuous-zero scalar AD
+convexity(zrc, cfs, times)             # same shock as the tenor-aware form
+duration(zrc) do c; pv(c); end         # continuous-zero scalar AD
 ```
 
-Numerical values agree with the v5.6 AD-based scalars to FD precision (~1e-6).
+The no-tenor curve convexity therefore equals the tenor-aware parallel
+convexity and the sum of the key-rate convexity matrix. Plain scalar and
+explicit `Rate` inputs retain their own compounding conventions.
 
 **Per-knot KRDs may shift slightly for non-Linear-spline `ZeroRateCurve` inputs.** The new AD path uses triangular-hat bumps; the old path propagated AD through the curve's spline. For `Spline.Linear()` ZRCs the answers are bitwise identical. For `Spline.MonotoneConvex()` (the default), `PCHIP`, `Cubic`, etc., per-knot KRDs differ by sub-bp on discount factors at typical knot spacing. **Sum of KRDs, scalar modified duration, and parallel-shift sensitivity are all invariant.** The new convention matches the textbook KRD definition and is independent of the curve's interpolator choice.
 

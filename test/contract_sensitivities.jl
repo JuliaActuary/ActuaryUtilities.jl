@@ -29,32 +29,33 @@
     end
 
     @testset "floater: effective convexity (dynamic cashflows under reproject)" begin
-        # The new `convexity(::Effective)` routes through TenorShift +
-        # ForwardDiff on a closure that calls `reproject(target, c)` — i.e.
-        # cashflows are themselves curve-dependent (the coupon resets follow
-        # the bumped curve). The result must still equal the matrix-sum form
-        # (same AD chain, just unrolled). Locks the dynamic-cashflow path.
+        # Reproject coupons under each shock; scalar and matrix-sum risk must agree.
         _cvalue_flm(c) = FC.present_value(c, ActuaryUtilities.reproject(flm, c))
         @test convexity(Effective(), flm, curve, tenors) ≈
             sum(convexity(KeyRates(tenors), _cvalue_flm, curve)) atol = 1.0e-10
     end
 
-    @testset "fixed bond: effective convexity matches matrix-sum (POU equivalence regression guard)" begin
-        # Under partition of unity of the KRD hat functions, sum(N×N key-rate
-        # Hessian) = continuous-shock parallel-shift second derivative by the
-        # chain rule. The optimized `convexity(::Effective, …)` computes that
-        # scalar directly via TenorShift, in O(1) rather than O(N²) AD work.
-        # Locks the numerical equivalence in for future refactors of either
-        # path. Note: `convexity(curve, cfs)` uses a *periodic* shock and is
-        # NOT equivalent here — see `_parallel_continuous_convexity` for why.
+    @testset "fixed bond: effective convexity equals the key-rate matrix sum" begin
+        # The hats sum to one, so contract, scalar, and full matrix risk agree.
         cfs = collect(FM.Projection(fb, curve, FM.CashflowProjection()))
         amts = FC.amount.(cfs); times = FC.timepoint.(cfs)
         @test convexity(Effective(), fb, curve, tenors) ≈
             sum(convexity(KeyRates(tenors), curve, amts, times)) atol = 1.0e-8
+        @test convexity(curve, cfs) ≈
+            convexity(Effective(), fb, curve, tenors) atol = 1.0e-8
     end
 
     @testset "default duration & dv01 verb" begin
-        @test duration(flm, curve, tenors) ≈ duration(Effective(), flm, curve, tenors)
+        for target in (fb, flm, [fb, flm])
+            @test duration(target, curve, tenors) ≈ duration(Effective(), target, curve, tenors)
+            @test dv01(target, curve, tenors) ≈ dv01(Effective(), target, curve, tenors)
+            @test duration(DV01(), target, curve, tenors) ≈ dv01(Effective(), target, curve, tenors)
+            @test convexity(target, curve, tenors) ≈ convexity(Effective(), target, curve, tenors)
+        end
+        @test (@inferred dv01(fb, curve, tenors)) isa Float64
+        @test (@inferred convexity(fb, curve, tenors)) isa Float64
+        @test_throws ArgumentError dv01(fb, curve, [2.0, 1.0])
+        @test_throws ArgumentError convexity(fb, curve, [2.0, 1.0])
         @test dv01(Effective(), flm, curve, tenors) ≈ sensitivities(flm, curve, tenors).effective_dv01
         @test dv01(0.05, [5.0, 5.0, 105.0]) ≈ duration(DV01(), 0.05, [5.0, 5.0, 105.0])   # cashflow fallback
     end
