@@ -1,7 +1,8 @@
 """
     present_values(interest, cashflows, timepoints)
 
-Efficiently calculate a vector representing the present value of the given cashflows at each period prior to the given timepoint.
+Return the value of remaining cashflows before each payment period.
+Entry `k` values cashflows `k:end` at `timepoints[k-1]`, or time zero for `k = 1`.
 
 Empty collections return an empty vector. Collections whose amounts are all
 exactly zero return a vector of positive zeros without evaluating the curve;
@@ -28,10 +29,7 @@ function present_values(interest, cashflows, times = eachindex(cashflows))
     _check_cashflow_times(cashflows, times)
     n = length(cashflows)
     _iszero_cashflow_stream(cashflows) && return zeros(typeof(_zero_cashflow_value(cashflows, times)), n)
-    # single reverse scan: pvs[k] is the value at times[k-1] (time zero for k = 1)
-    # of cashflows k..n. O(n) and non-recursive (the prior implementation was
-    # O(n²) with recursion depth n), and the element type follows the data so
-    # AD dual numbers propagate.
+    # Discount backward in one pass; derive the accumulator type from valuation.
     acc = zero(FinanceCore.discount(interest, first(times)) * first(cashflows))
     pvs = Vector{typeof(acc)}(undef, n)
     @inbounds for k in n:-1:1
@@ -46,11 +44,7 @@ end
 """
     price(...)
 
-The absolute value of the `present_value(...)`.
-
-# Extended help
-
-Using `price` can be helpful if the directionality of the value doesn't matter. For example, in the common usage, duration is more interested in the change in price than present value, so `price` is used there.
+Return `abs(present_value(...))`. Use `present_value` when the position sign matters.
 """
 price(x1, x2) = FinanceCore.present_value(x1, x2) |> abs
 price(x1, x2, x3) = FinanceCore.present_value(x1, x2, x3) |> abs
@@ -59,12 +53,12 @@ price(x1, x2, x3) = FinanceCore.present_value(x1, x2, x3) |> abs
     breakeven(yield, cashflows::Vector)
     breakeven(yield, cashflows::Vector,times::Vector)
 
-Calculate the time when the accumulated cashflows breakeven given the yield.
+Return the payment time when accumulated cashflows break even at the given yield.
 
 Assumptions:
 
 - cashflows occur at the end of the period
-- cashflows evenly spaced with the first one occuring at time zero if `times` not given
+- cashflows are evenly spaced from time zero if `times` is omitted
 
 Returns `nothing` if cashflow stream never breaks even.
 
@@ -84,7 +78,7 @@ function breakeven(y, cashflows, timepoints = (eachindex(cashflows) .- 1))
     accum = 0.0
     last_neg = nothing
 
-    # `amount` and `timepoint` allow to generically handle `Cashflow`s and amount/time vectors
+    # Resolve embedded amounts and times for Cashflow inputs.
     accum += FinanceCore.amount(cashflows[1])
     if accum >= 0 && isnothing(last_neg)
         last_neg = FinanceCore.timepoint(cashflows[1], timepoints[1])
@@ -116,9 +110,9 @@ struct Modified <: Duration end
 """
     DV01 <: Duration
 
-Dollar Value of 01. The dollar change in value for a 1 basis point (0.01%) parallel shift in rates.
-
-`DV01 = -∂V/∂r / 10000`, so a DV01 of 0.045 means the position loses \\\$0.045 per \\\$100 notional for a 1bp rate increase.
+Signed dollar risk for a one-basis-point (0.01%) parallel rate shift:
+`DV01 = -∂V/∂r / 10000`. A positive DV01 of 0.045 means a 1bp rate increase
+reduces the position's value by approximately 0.045, in the cashflows' currency units.
 
 See also: [`IR01`](@ref), [`CS01`](@ref)
 """
@@ -149,11 +143,10 @@ struct CS01 <: Duration end
 """
     Effective <: Duration
 
-Effective (rate) duration / convexity for a curve-dependent contract (e.g. a
-floating-rate bond): reprices under a shifted curve with the projected cashflows
-RE-COMPUTED, so a floating coupon re-fixes. The correct interest-rate duration for
-floating-rate instruments; `Modified`/`Macaulay` are valid only for curve-independent
-(fixed) cashflows. `duration(Effective(), contract, curve, tenors)`.
+Measure contract risk while reprojecting cashflows under shifted curves, so
+floating coupons reset. Use `duration(Effective(), contract, curve, tenors)`;
+the same marker applies to `dv01` and `convexity`. `Modified` and `Macaulay`
+operate on fixed cashflows.
 
 See also: [`Spread`](@ref), [`sensitivities`](@ref), [`locked_floater`](@ref).
 """
@@ -173,14 +166,10 @@ struct Spread <: Duration end
 """
     KeyRates(tenors) <: Duration
 
-Marker type carrying the key-rate knot grid `tenors` for use with [`duration`](@ref),
-[`convexity`](@ref), and [`sensitivities`](@ref). Requests the full key-rate
-decomposition (vector of durations, matrix of convexities) instead of the default
-scalar summary.
-
-`tenors` is any `AbstractVector{<:Real}` of positive knot times. The knot grid is
-carried with the measurement intent — "key rate durations at these tenors" lives in
-one object.
+Select the tenor grid for key-rate [`duration`](@ref), [`convexity`](@ref), and
+[`sensitivities`](@ref). Results contain per-tenor vectors and convexity matrices.
+`tenors` must be a nonempty `AbstractVector{<:Real}` of finite, positive, strictly
+increasing knot times in years.
 
 ```julia
 tenors = [1.0, 2.0, 5.0, 10.0, 30.0]
@@ -217,11 +206,9 @@ abstract type KeyRateDuration <: Duration end
 """
     KeyRatePar(timepoint,shift=0.001) <: KeyRateDuration
 
-Shift the par curve by the given amount at the given timepoint. Use in conjunction with `duration` to calculate the key rate duration.
-
-Unlike other duration statistics which are computed using analytic derivatives, `KeyRateDuration`s are computed via a shift-and-compute the yield curve approach.
-
-`KeyRatePar` is more commonly reported (than [`KeyRateZero`](@ref)) in the fixed income markets, even though [`KeyRateZero`](@ref) has more analytically attractive properties. See the discussion of KeyRateDuration in the FinanceModels.jl docs.
+Select a par-rate bump at `timepoint` for `duration`. The calculation refits the
+curve on `krd_points` after upward and downward bumps of size `shift`, then uses
+central differences.
 
 """
 struct KeyRatePar{T, R} <: KeyRateDuration
@@ -233,11 +220,10 @@ end
 """
     KeyRateZero(timepoint,shift=0.001) <: KeyRateDuration
 
-Shift the **zero** curve by the given amount at the given timepoint. Use in conjunction with `duration` to calculate the key rate duration.
-
-Unlike other duration statistics which are computed using analytic derivatives, `KeyRateDuration` is computed via a shift-and-compute the yield curve approach.
-
-`KeyRateZero` is less commonly reported (than [`KeyRatePar`](@ref)) in the fixed income markets, even though zero-curve shifts have more analytically attractive properties (rates beyond the shifted timepoint are unaffected). See the discussion of KeyRateDuration in the FinanceModels.jl docs.
+Select a triangular continuous-zero bump at `timepoint` for `duration`.
+The calculation uses central differences with upward and downward bumps of size
+`shift`. Neighboring `krd_points` define the bump width; endpoint bumps extend flat
+beyond the grid.
 """
 struct KeyRateZero{T, R} <: KeyRateDuration
     timepoint::T
@@ -248,15 +234,7 @@ end
 """
     KeyRate(timepoints,shift=0.001)
 
-A convenience constructor for [`KeyRateZero`](@ref).
-
-## Extended Help
-[`KeyRateZero`](@ref) is chosen as the default constructor because it has more attractive properties than [`KeyRatePar`](@ref):
-
-- rates after the key `timepoint` remain unaffected by the `shift`
-  - e.g. shifting the 5-year par rate would (incorrectly) give a 6-year zero coupon bond a negative key rate duration, while a 5-year zero-rate shift leaves it unaffected
-
-
+Alias for [`KeyRateZero`](@ref).
 """
 const KeyRate = KeyRateZero
 
@@ -282,7 +260,8 @@ _cashflow_vector(cfs::Union{Tuple, Base.Generator}) = _cashflow_vector(collect(c
     duration(interest_rate,cfs,times)             # Modified Duration
     duration(interest_rate,valuation_function)    # Modified Duration
 
-Calculates the Macaulay, Modified, DV01, IR01, or CS01 duration. `times` may be ommitted and the valuation will assume evenly spaced cashflows starting at the end of the first period.
+Calculate Macaulay or modified duration, or signed dollar DV01, IR01, or CS01.
+For numeric amounts, omitted `times` default to `1:length(cfs)`.
 
 `cfs` can be an `AbstractVector{<:Cashflow}` (from FinanceCore), in which case
 `times` may be omitted. A `Cashflow` always supplies its embedded amount and time;
@@ -302,22 +281,24 @@ numeric types, and zero-net-value portfolios. Dollar sensitivities differentiate
 the signed value directly, including at zero present value; normalized duration
 remains undefined there. A zero callback value alone does not identify a zero stream.
 
-When not given `Modified()` or `Macaulay()` as an argument, will default to `Modified()`.
+The default measure is `Modified()`.
 
 - Modified duration: the relative change per point of yield change.
-- Macaulay: the cashflow-weighted average time.
+- Macaulay: the present-value-weighted average payment time.
 - DV01: the signed dollar change per basis point (hundredth of a percentage point), defined as `-∂V/∂r / 10000`.
 - IR01: the signed dollar change per basis point shift in the risk-free (base) curve, holding credit spread constant.
 - CS01: the signed dollar change per basis point shift in the credit spread, holding the risk-free (base) curve constant.
 
 # Periodicity convention
 
-The Modified duration returned depends on the space in which the parallel rate shock is applied, and this differs between plain rates and yield *models*:
+Modified duration depends on the shock's compounding convention:
 
-- A scalar (e.g. `0.04`) or a `Rate` is shocked in its own compounding space. A scalar is treated as `Periodic(0.04, 1)`, so Modified = Macaulay / (1 + 0.04); in general a `Periodic(y, m)` rate gives Modified = Macaulay / (1 + y/m), and a `Continuous(y)` rate gives Modified = Macaulay.
-- A yield model (e.g. `Yield.Constant(0.04)` from FinanceModels) is shocked additively in continuous-zero space, so Modified = Macaulay under the curve's own discounting, regardless of the compounding convention stored in the model. Curve convexity uses the same coordinate, giving `t²` rather than `t(t+1)` weights.
+- Scalars use annual compounding: Modified = Macaulay / (1 + y).
+- `Periodic(y, m)` uses Modified = Macaulay / (1 + y/m).
+- `Continuous(y)` and yield models use continuous-zero shifts: Modified = Macaulay.
 
-The same inputs therefore produce two different numbers by design:
+Wrapping a scalar in `Yield.Constant` preserves its discount factors but changes
+the shock coordinate:
 
 ```julia-repl
 julia> times = 1:5; cfs = [0,0,0,0,100];
@@ -383,28 +364,10 @@ function duration(::Modified, yield::_YieldInput, cfs::AbstractVector, times)
     return duration(yield, D)
 end
 
-# ── Analytic Modified-duration fast paths for flat yields ───────────────────
-#
-# Each method below is exactly equal to the generic AD path (locked by
-# equality tests vs `duration(yield, i -> price(i, cfs, times))`); the only
-# difference between yield types is the space in which the parallel shock is
-# applied:
-#
-# * `Real` y: nominal `Periodic(1)` space → V(i) = Σ cf·(1+y+i)^(-t),
-#   so Modified = Macaulay / (1 + y).
-# * `Rate{Periodic(m)}`: the rate's own nominal space →
-#   Modified = Macaulay / (1 + y/m).
-# * `Rate{Continuous}`: the continuous rate itself → Modified = Macaulay.
-# * `Yield.Constant`: as an `AbstractYieldModel`, it is shocked explicitly in
-#   continuous-zero space, so Modified = Macaulay under the curve's own
-#   discounting, regardless of the stored compounding.
-#
-# Macaulay here is the signed cashflow-weighted time Σ t·cf·d / Σ cf·d, which
-# matches the generic path's d/di log|V| for any sign of V.
-
-# Macaulay (cashflow-weighted average time) is the identity-weighted ratio.
-# Shares the guarded `@inbounds` accumulation kernel `_weighted_ratio` (defined
-# alongside the convexity fast paths below) with the convexity statistics.
+## Analytic duration for flat yields
+# Macaulay = Σ t·cf·d / Σ cf·d. Modified divides by 1+y/m for periodic rates
+# (m=1 for scalars); continuous rates and yield models use Macaulay directly.
+# Tests compare these formulas with the callback derivative of log|V|.
 _macaulay_ratio(yield, cfs, times) = _weighted_ratio(yield, identity, cfs, times)
 
 function duration(::Modified, yield::Real, cfs::AbstractVector, times)
@@ -422,18 +385,13 @@ function duration(::Modified, yield::FinanceModels.Yield.Constant{<:FinanceCore.
 end
 
 function duration(yield, valuation_function::T) where {T}
-    # `abs`: duration is defined on the magnitude of value, consistent with
-    # `price` (used by the cashflow forms) and the `convexity` sibling — a
-    # negative-valued (liability) valuation function is a valid input
+    # log|V| supports both asset and liability values.
     D(i) = log(abs(valuation_function(_parallel_bumped(yield, i))))
     return δV = -ForwardDiff.derivative(D, 0.0)
 end
 
-# Yield models use one canonical risk coordinate: an additive shift to their
-# continuously compounded zero rates. Wrapping the ForwardDiff variable in a
-# `Continuous` rate avoids the nonlinear `Real -> Periodic(1) -> Continuous`
-# conversion, whose first derivative agrees at zero but whose second derivative
-# does not.
+# Use Continuous(shift) for yield models. Converting an annual-rate increment
+# to continuous compounding would change the second derivative.
 _parallel_bumped(yield, shift) = yield + shift
 
 function _parallel_bumped(
@@ -451,8 +409,7 @@ function duration(yield::_YieldInput, cfs::_CashflowCollection, times)
     return duration(Modified(), yield, _cashflow_vector(cfs), times)
 end
 
-# timepoints are used to make the function more generic
-# with respect to allowing Cashflow objects
+# Use embedded Cashflow times or default numeric amounts to periods 1:n.
 function duration(yield::_YieldInput, cfs::_CashflowCollection)
     cfs = _cashflow_vector(cfs)
     times = FinanceCore.timepoint.(cfs, 1:length(cfs))
@@ -571,7 +528,7 @@ and key-rate APIs.
 Empty collections and collections whose amounts are all exactly zero return zero
 by convention, without evaluating the curve. Every cashflow needs a time; unused
 trailing times are ignored. See [Zero cashflow streams](@ref) for numeric types and
-zero-net-value portfolios. Valuation-function forms are unchanged.
+zero-net-value portfolios.
 
 # Examples
 
@@ -620,10 +577,8 @@ end
 
 # ── Analytic convexity for fixed cashflows ─────────────────────────────────
 #
-# Exactly equal to the generic nested-AD path (locked by equality tests vs
-# `convexity(yield, i -> price(i, cfs, times))`). As with the Modified-duration
-# fast paths above, the weight and divisor follow from the selected shock
-# coordinate:
+# Weights and divisors follow the shock coordinate. Tests compare each formula
+# with the normalized second derivative from the callback API.
 #
 # * `Real` y: V(x) = Σ cf·(1+y+x)^(-t) → Σ cf·d·t(t+1) / V / (1+y)²
 # * `Rate{Periodic(m)}`: V(x) = Σ cf·(1+(y+x)/m)^(-mt) → Σ cf·d·t(t+1/m) / V / (1+y/m)²
@@ -631,15 +586,13 @@ end
 # * `AbstractYieldModel`: it is shocked in continuous-zero space,
 #   so V(x) = Σ cf·d·exp(-xt) → Σ cf·d·t² / V.
 #
-# The ratio uses the signed V, matching the generic path's |V|-normalized
-# second derivative for any sign of V (signs cancel).
+# Signed normalization makes convexity invariant to position sign.
 
 # Shared accumulation kernel: Σ weight(t)·cf·d / Σ cf·d. `weight = identity`
 # gives the Macaulay ratio (Modified-duration fast paths above); the t(t+1)/t²
 # weights below give the convexity statistics.
 function _weighted_ratio(yield, weight, cfs, times; divisor = 1)
-    # @inbounds below indexes `times` by `eachindex(cfs)` — a silent mismatch
-    # would read out of bounds rather than zip-truncate
+    # Check bounds before indexing times in the @inbounds loop.
     _check_cashflow_times(cfs, times)
     _iszero_cashflow_stream(cfs) && return _zero_cashflow_value(cfs, times)
     t1 = FinanceCore.timepoint(first(cfs), first(times))
@@ -692,16 +645,18 @@ end
     duration(keyrate::KeyRateDuration,curve,cashflows,timepoints)
     duration(keyrate::KeyRateDuration,curve,cashflows,timepoints,krd_points)
 
-Calculate the key rate duration by shifting the **zero** (not par) curve by the kwarg `shift` at the timepoint specified by a KeyRateDuration(time).
+Calculate key-rate duration by bumping and repricing. `KeyRateZero` applies
+triangular continuous-zero bumps; `KeyRatePar` bumps par rates and refits the
+curve. Both use the selector's `shift` for central differences.
 
-The approach is to carve up the curve into `krd_points` (default is the unit steps between `1` and  the last timepoint of the casfhlows). The
-zero rate corresponding to the timepoint within the `KeyRateDuration` is shifted by `shift` (specified by the `KeyRateZero` or `KeyRatePar` constructors. A new curve is created from the shifted rates. This means that the
-"width" of the shifted section is ± 1 time period, unless specific points are specified via `krd_points`.
-
-The `curve` may be any FinanceModels.jl curve (e.g. does not have to be a curve constructed via `FinanceModels.Zero(...)`).
+`krd_points` defaults to annual knots from year 1 through the latest payment time.
+It must contain the selected key rate. Supply a grid explicitly for payments
+before year 1 or a different bucket convention. Any FinanceModels yield curve
+is accepted.
 
 !!! warning "Experimental"
-    Due to the paucity of examples in the literature, this feature does not have unit tests like the rest of JuliaActuary functionality. Additionally, the API may change in a future major/minor version update.
+    The legacy `KeyRateDuration` API may change. Use `KeyRates(tenors)` for
+    derivatives under continuous-zero bumps without finite-difference error.
 
 # Examples
 
@@ -722,12 +677,12 @@ julia> duration(KeyRate(1),rf_curve,cfs)
 
 # Extended Help
 
-Key Rate Duration is not a well specified topic in the literature and in practice. The reference below suggest that shocking the par curve is more common
-in practice, but that the zero curve produces more consistent results. Future versions may support shifting the par curve.
+Par-rate and zero-rate bumps measure different risks. Choose the convention
+used by your hedging or reporting process.
 
 References:
 - [Quant Finance Stack Exchange: To compute key rate duration, shall I use par curve or zero curve?](https://quant.stackexchange.com/questions/33891/to-compute-key-rate-duration-shall-i-use-par-curve-or-zero-curve)
-- (Financial Exam Help 123](http://www.financialexamhelp123.com/key-rate-duration/)
+- [Financial Exam Help 123](http://www.financialexamhelp123.com/key-rate-duration/)
 
 """
 function duration(keyrate::KeyRateDuration, curve, cashflows::_CashflowCollection, timepoints, krd_points)
@@ -767,14 +722,7 @@ function _tent_bump(shift, τ, krd_points)
             "KeyRateDuration timepoint $τ is not a point of the krd_points grid $krd_points; pass krd_points containing the shifted timepoint"
         )
     )
-    # A single-knot tent is the modern `_hat_bump` kernel (defined alongside the
-    # AD KRD path below) evaluated at a unit bump vector for this knot — one
-    # source of truth for the key-rate hat shape across the legacy
-    # bump-and-reprice path and the AD path. The flat extrapolation `_hat_bump`
-    # applies beyond the first / last knot reproduces the original first-point
-    # (flat left) and last-point (flat right) tent behavior. Numerically
-    # identical to the prior explicit tent (max abs deviation ~7e-18 over a knot
-    # / t sweep, from float associativity in the ramp).
+    # Reuse the key-rate hat shape, including flat endpoint extrapolation.
     bumps = [k == idx ? shift : zero(shift) for k in eachindex(krd_points)]
     return (z, t) -> FinanceCore.Continuous(_hat_bump(krd_points, bumps, t)) + z
 end
@@ -832,7 +780,8 @@ end
 """
     spread(curve1,curve2,cashflows)
 
-Return the solved-for constant spread to add to `curve1` in order to equate the discounted `cashflows` with `curve2`
+Find the constant spread to add to `curve1` so the cashflows have the same present
+value as under `curve2`.
 
 The spread is found via a damped Newton iteration on the pricing residual and is solved to machine precision; an `ErrorException` is thrown if the solve does not converge within `maxiter` iterations.
 
@@ -851,13 +800,8 @@ function spread(curve1, curve2, cashflows, times = eachindex(cashflows); tol = 1
     cashflows = FinanceCore.amount.(cashflows)
     pv2 = FinanceCore.pv(curve2, cashflows, times)
 
-    # Newton + AD on the smooth pricing residual — converges to machine
-    # precision in a handful of iterations, vs. the previous derivative-free
-    # simplex minimization of the squared residual, whose attainable precision
-    # was only ~sqrt of the function tolerance. The step is damped because the
-    # residual is not monotone for mixed-sign cashflows: a duration-neutral
-    # portfolio has f′(0) ≈ 0, and an undamped step would launch the iterate
-    # out of the valid spread domain (s > -1).
+    # Dampen Newton steps: mixed-sign cashflows can have nearly zero price
+    # derivatives, producing steps outside the valid spread domain s > -1.
     f(s) = FinanceCore.pv(curve1 + FinanceCore.Periodic(s, 1), cashflows, times) - pv2
     ftol = tol * max(one(pv2), abs(pv2))
     max_step = 0.25

@@ -15,9 +15,8 @@ function _check_cashflow_times(cfs, times)
     return nothing
 end
 
-# Trim only when delegating to code that consumes all times (including default
-# key-rate grids and simulation horizons). Indexed accumulation loops need only
-# the bounds check above. The ordinary equal-length path retains the input.
+# Trim trailing times before delegating to code that consumes the full grid.
+# Keep the original input when lengths match.
 @inline function _cashflow_times(cfs, times)
     _check_cashflow_times(cfs, times)
     return length(times) == length(cfs) ? times : view(times, eachindex(cfs))

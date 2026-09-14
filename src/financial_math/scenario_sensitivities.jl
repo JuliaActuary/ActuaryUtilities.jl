@@ -1,11 +1,10 @@
 ## Hull-White convenience methods
 #
-# `hw.curve` can be any `AbstractYieldModel` — the AD path uses TenorShift
-# bumps over the curve via the AYM-based `sensitivities` impls above.
+# Apply the shared continuous-zero shocks to `hw.curve`.
 
 const HW = FinanceModels.ShortRate.HullWhite
 
-# Rebuild HW under a perturbed curve and produce its scenario set under the same dynamics.
+# Rebuild and simulate with the bumped curve, holding model parameters fixed.
 function _hw_paths(hw::HW, curve; n_scenarios, timestep, horizon, rng)
     hw_new = FinanceModels.ShortRate.HullWhite(hw.a, hw.σ, curve)
     return FinanceModels.simulate(hw_new; n_scenarios, timestep, horizon, rng)
@@ -13,12 +12,8 @@ end
 
 # Do-block primary forms
 #
-# Pathwise seeding: every AD evaluation of the inner closure must see the same
-# MC sample, otherwise `KRD = -∇V/V` divides a gradient computed over one
-# sample by a value computed over another (ForwardDiff calls the closure many
-# times for value, gradient chunks, and Hessian chunks). Snapshot a UInt64 from
-# the user's rng once per call and rebuild a fresh `Xoshiro(seed)` inside the
-# closure so every AD step draws the same scenarios.
+# Draw one seed per call and reset Xoshiro inside the valuation. Every AD
+# evaluation must use the same random draws for value and derivatives to agree.
 function sensitivities(
         kr::KeyRates, valuation_fn::F, hw::HW;
         n_scenarios = 1000, timestep = 1 / 12, horizon = 30.0,

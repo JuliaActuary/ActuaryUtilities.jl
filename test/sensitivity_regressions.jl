@@ -102,8 +102,7 @@ end
     times = [1.0, 2.0, 3.0]
     wrapped = FC.Cashflow.(cfs, times)
     bond = FM.Bond.Fixed(0.05, FC.Periodic(1), 3.0)
-    # Mutating a successfully constructed KeyRates grid must also be rejected
-    # when its tenors are passed to a scalar API.
+    # Revalidate grids that were mutated after construction.
     mutated = KeyRates(copy(times))
     mutated.tenors[2] = mutated.tenors[1]
     bad_grids = (Float64[], [2.0, 1.0], [1.0, 1.0], [0.0, 1.0], [-1.0, 1.0], [1.0, Inf], [1.0, NaN], mutated.tenors)
@@ -123,7 +122,7 @@ end
             for f in forms
                 @test_throws ArgumentError f(grid)
             end
-            # Fail before invoking a valuation, not as a side effect of its AD.
+            # Validate before calling the valuation.
             @test_throws ArgumentError convexity(_ -> error("valuation was called"), curve, grid)
         end
         for grid in (times, [0.5, 2.5, 5.0])

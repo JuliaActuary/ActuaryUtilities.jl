@@ -92,7 +92,7 @@ end
             @test eltype(result.hessian.base.base) == BigFloat
             @test sum(result.hessian.base.base) ≈ 4result.value
         end
-        # Output types belong to the valuation, not just the supplied curves.
+        # Allocate results using the valuation's numeric type.
         constant = engine(_ -> big"3.0", (; base = curve(0.04)), tenors; order)
         @test constant.value isa BigFloat
         @test constant.value == big"3.0"
@@ -107,7 +107,7 @@ end
     second_order(r) = sum(engine(c -> FC.discount(c.base, 2.0), (; base = curve(r)), tenors; order = 2).hessian.base.base)
     @test ForwardDiff.derivative(second_order, 0.04) ≈ -8exp(-0.08)
 
-    # Internal views must not make the public normalized blocks alias each other.
+    # Public blocks must own independent arrays.
     bundle = sensitivities(KeyRates(tenors), (b, c) -> FC.discount(b, 2.0) * FC.discount(c, 2.0), curve(0.03), curve(0.01))
     credit_block = copy(bundle.convexities.credit)
     cross_block = copy(bundle.convexities.cross)

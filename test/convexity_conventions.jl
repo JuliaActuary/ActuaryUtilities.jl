@@ -15,8 +15,7 @@
     continuous = sum(weights .* times .^ 2)
     @test value ≈ 102.77509103322713
     @test continuous ≈ 8.40087191197841
-    # This independent price function uses no library bump or sensitivity helper.
-    # ForwardDiff differentiates the exponential; no t^2 is supplied to AD.
+    # Differentiate price directly, independently of the library's shock helpers.
     shifted_price(s) = sum(cfs .* exp.(-(log1p(y) + s) .* times))
     ad_reference = ForwardDiff.derivative(s -> ForwardDiff.derivative(shifted_price, s), 0.0) / value
     @test ad_reference ≈ continuous

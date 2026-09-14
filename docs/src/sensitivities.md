@@ -1,8 +1,12 @@
 # Key Rate Sensitivities
 
-Compute key rate durations, DV01s, and convexities via automatic differentiation against any [`AbstractYieldModel`](https://github.com/JuliaActuary/FinanceModels.jl) — `ZeroRateCurve`, `NelsonSiegel`, a fitted spline, a user-defined composite, anything that defines `discount(curve, t)`.
+Calculate key-rate durations, DV01s, and convexities for any FinanceModels
+[`AbstractYieldModel`](https://github.com/JuliaActuary/FinanceModels.jl).
 
-The AD pathway layers a triangular-hat zero-rate bump on top of the user's curve via `Yield.TenorShift`, then takes ForwardDiff gradients w.r.t. the bump magnitudes. The user's curve is preserved at all non-knot points; no resampling or refitting occurs. See the [autodiff ALM chapter](https://modernfinancialmodeling.com/autodiff_alm) for background.
+Sensitivities measure triangular continuous-zero bumps on the original curve.
+Callbacks use ForwardDiff through `Yield.TenorShift`; fixed cashflows use analytic
+derivatives. See the [autodiff ALM chapter](https://modernfinancialmodeling.com/autodiff_alm)
+for background.
 
 ## API shape: curve + explicit KRD knots
 
@@ -12,7 +16,8 @@ Every key-rate API takes the **curve** and an **explicit `tenors` vector**:
 duration(KeyRates(knots), curve, cfs, times)
 ```
 
-The KRD knot grid is a separate modeling choice from any tenor structure baked into the curve itself. For a `ZeroRateCurve`, `zrc.tenors` is the natural default; for other curves you supply your preferred bucket convention (Bloomberg, FRTB, BMA SBA, etc.).
+Choose the risk grid independently of the curve's own knots. For a `ZeroRateCurve`,
+you can use `zrc.tenors`; otherwise choose the buckets your reporting requires.
 
 **Requirements on `tenors`**: nonempty, finite, sorted ascending, distinct, and strictly positive. The `KeyRates` constructor validates these requirements, and calculations revalidate the grid in case it has been mutated.
 
@@ -21,7 +26,9 @@ and risk without evaluating the curve. Nonzero amounts that offset to zero prese
 value retain their dollar exposures and undefined normalized risk. See
 [Zero cashflow streams](@ref) for numeric types and portfolio aggregation.
 
-**Endpoint extrapolation**: the hat bump is flat outside the knot range. Bumping `tenors[1]` perturbs all cashflows at `t ≤ tenors[1]` equally; bumping `tenors[end]` perturbs all cashflows at `t ≥ tenors[end]` equally. For long-duration insurance liabilities (LTC, deferred / payout annuities), extend the grid past your longest cashflow if you want that sensitivity decomposed.
+**Endpoint extrapolation:** the first and last bumps stay constant beyond the
+grid. Sensitivity after the last tenor belongs to its bucket. Extend the grid
+to separate exposures at longer maturities.
 
 ## Basic Usage
 
@@ -65,7 +72,7 @@ dv01s = duration(DV01(), KeyRates(tenors), zrc, cfs, tenors)
 conv_matrix = convexity(KeyRates(tenors), zrc, cfs, tenors)
 ```
 
-For a complete set of key-rate results in a single AD pass, use `sensitivities`:
+Use `sensitivities` to calculate value, duration or DV01, and convexity together:
 
 ```@example sensitivities
 result = sensitivities(KeyRates(tenors), zrc, cfs, tenors)
@@ -86,8 +93,7 @@ dv01_result
 
 ## Callable Valuations
 
-A valuation can be a function or a callable struct. For example, a reusable
-cashflow valuation can own its amounts and payment times:
+A valuation can be a function or a callable struct that holds its input data:
 
 ```@example sensitivities
 struct CashflowValuation{C, T}
@@ -102,13 +108,11 @@ convexity(zrc, valuation)
 sensitivities(KeyRates(tenors), valuation, zrc)
 ```
 
-The scalar, key-rate, two-curve, and scenario callback APIs accept callable
-objects in their valuation argument. Cashflow arrays still select the
-collection overloads, and existing do-block calls continue to work.
+All callback APIs accept callable objects. Functions also support do-block syntax.
 
 ## Using Cashflow Objects
 
-Any `AbstractYieldModel + tenors` method accepts `Vector{Cashflow}` directly, eliminating the need to manually split into amounts and times:
+Yield-model cashflow methods accept `Vector{Cashflow}` directly:
 
 ```@example sensitivities
 cfs_obj = Cashflow.([5.0, 5.0, 5.0, 5.0, 105.0], [1.0, 2.0, 3.0, 4.0, 5.0])
@@ -119,12 +123,11 @@ b = duration(zrc, tenors, [5.0, 5.0, 5.0, 5.0, 105.0], [1.0, 2.0, 3.0, 4.0, 5.0]
 (a, b, a ≈ b)
 ```
 
-The same dispatch works with all method variants — `KeyRates(tenors)`, `DV01()`, two-curve `IR01()`/`CS01()`, `convexity`, and `sensitivities`.
+This applies to duration, DV01, two-curve IR01/CS01, convexity, and sensitivity bundles.
 
-A `Cashflow` supplies its own amount and payment time. If explicit times are also
-passed, they provide fallback times for numeric amounts; embedded cashflow times
-take precedence. The explicit vector must still cover the cashflow collection,
-and unused trailing entries are ignored. For example:
+A `Cashflow` supplies its own amount and payment time. Explicit times apply to
+numeric amounts; embedded times take precedence. An explicit time vector must
+cover the collection, and trailing entries are ignored:
 
 ```@example sensitivities
 fallback_times = fill(10.0, length(cfs_obj))
@@ -136,9 +139,9 @@ Legacy default key-rate grids and Hull–White default simulation horizons also 
 these resolved payment times. To change payment dates, construct new `Cashflow`
 objects or pass numeric amounts with the desired times.
 
-## Any AbstractYieldModel — no resampling required
+## Other yield models
 
-Because the AD path is curve-agnostic, you can compute key rates directly against any `AbstractYieldModel` — a fitted Nelson-Siegel, a user-defined composite, a UFR extrapolator, etc. There is no need to first convert to `ZeroRateCurve`:
+The same API works with fitted curves, including Nelson–Siegel:
 
 ```@example sensitivities
 ns        = Yield.NelsonSiegel(1.0, 0.04, -0.02, 0.01)
@@ -152,17 +155,15 @@ The Nelson-Siegel parameters stay fixed; only the layered zero-rate bumps move u
 
 ## Scalar vs Key-Rate Decomposition
 
-By default, `duration` and `convexity` (without `KeyRates`) return **scalars** — the total modified duration, DV01, or convexity. This mirrors the scalar-return shape of the yield-based API (`duration(0.03, cfs, times)`).
+Without `KeyRates`, duration, DV01, and convexity return scalar parallel risk.
 
 For an `AbstractYieldModel`, scalar duration and convexity use an additive
 parallel shift in continuously compounded zero-rate space. This is the same
 shock coordinate used by the tenor-aware and key-rate forms. Plain scalar and
 explicit `Rate` inputs continue to use their own compounding conventions.
 
-See [Convexity Conventions](@ref) for the ``t^2`` derivation, an executable
-comparison of analytic and AutoDiff results, and academic and industry references.
-The scalar convexity equals the sum of **all** entries in the key-rate matrix,
-including cross terms.
+Scalar convexity equals the sum of **all** key-rate matrix entries, including
+cross terms. See [Convexity Conventions](@ref) for the derivation and examples.
 
 To obtain the per-tenor decomposition, pass `KeyRates(tenors)` as the first argument:
 
@@ -202,7 +203,7 @@ flat_zrc    = ZeroRateCurve(fill(0.03, 5), flat_tenors)
  rate_conv = convexity(Continuous(0.03), flat_cfs, flat_tenors))
 ```
 
-For Macaulay duration, use the scalar yield API directly — there is no `ZeroRateCurve` dispatch:
+Request Macaulay duration with its marker:
 
 ```@example sensitivities
 duration(Macaulay(), 0.03, flat_cfs, flat_tenors)
@@ -271,11 +272,13 @@ twocurve_result = sensitivities(KeyRates(tenors), base, credit, cfs, tenors)
 twocurve_result.base_durations
 ```
 
-The default two-curve valuation uses multiplicative discount factors: `V = Σ cf × base(t) × credit(t)`, which corresponds to additive rates.
+The fixed-cashflow valuation is `V = Σ cf × base(t) × credit(t)`: discount factors
+multiply, so continuously compounded zero rates add.
 
 ### Example: Credit-Risky Floating Rate Bond
 
-For fixed cashflows, IR01 and CS01 are identical because base and credit rates enter additively. A **credit-risky floating rate bond** breaks this symmetry — its coupons reset to the risk-free forward rate plus a fixed credit spread, so bumping base rates changes both coupon amounts and discount factors (partially canceling), while bumping credit rates only affects discounting:
+Fixed cashflows have equal IR01 and CS01 under this discount composition. For a
+floater, base-rate changes also reset coupons, so the sensitivities can differ:
 
 ```@example sensitivities
 credit_spread = 0.02
@@ -302,11 +305,12 @@ end
  CS01 = sum(floater_result.credit_durations))
 ```
 
-Bumping base rates changes both the floating coupon amounts and the discount factors (partially canceling), while bumping credit rates only affects discounting. This asymmetry is why the IR01/CS01 decomposition matters for instruments with rate-dependent cashflows.
+Base-rate changes affect coupons and discounting; credit changes affect discounting only.
 
 ## Floating-Rate Instruments: Effective vs Spread Duration
 
-The do-block above re-projects the floating coupons by hand. You can instead pass a `FinanceModels` contract — or a vector of contracts (a portfolio) — directly: the familiar markers select the risk and the verb selects the units. A floater has two durations and both matter:
+Pass a FinanceModels contract or portfolio directly to reproject its cashflows.
+The marker selects the risk:
 
 - **Effective (rate) duration** — bump the curve, coupons re-fix → small (≈ time to next reset).
 - **Spread (credit) duration** — bump the discount only, coupons fixed → ≈ maturity.
@@ -329,7 +333,7 @@ including portfolios. Request spread risk explicitly with `Spread()`.
  convexity(floater, zrc, tenors) ≈ convexity(Effective(), floater, zrc, tenors))
 ```
 
-`sensitivities` returns the whole picture (years, DV01s, and key-rate vectors) in one AD pass:
+`sensitivities` returns effective, spread, and forward risk together:
 
 ```@example sensitivities
 s = sensitivities(floater, zrc, tenors)
@@ -344,7 +348,8 @@ duration(Effective(), locked_floater(floater, 0.04, 1.0), zrc, tenors)   # ≈ 1
 
 ### Portfolios
 
-A vector of contracts is a target too — valued by summation in one AD pass (value-weighted):
+For a portfolio, pass a vector of contracts. The calculation sums their values
+before normalizing risk:
 
 ```@example sensitivities
 portfolio = [floater, Bond.Fixed(0.03, Periodic(1), 7.0)]
@@ -353,7 +358,7 @@ duration(portfolio, zrc, tenors)
 
 ### Multi-curve: risk-free + credit + ILP + index
 
-Pass the discount as a stack of named layers plus the coupon-projection `index`; sensitivities come back per role, no `Dict` to assemble:
+Pass named discount layers and a coupon-projection `index` to obtain risk by role:
 
 ```@example sensitivities
 rf     = zrc
@@ -363,7 +368,8 @@ r = sensitivities(floater, tenors; discount = (; rf, credit, ilp), index = zrc)
 r.duration    # (; rf ≈ IR01, credit ≈ CS01, ilp = "ILP01", index = reset sensitivity)
 ```
 
-ILP / matching-adjustment / basis are just additional named layers. For arbitrary valuations, the do-block form with [`reproject`](@ref) hides the model `Dict`:
+Additional layers can represent liquidity, matching adjustment, or basis spreads.
+Use a callback with [`reproject`](@ref) for custom valuations:
 
 ```@example sensitivities
 sensitivities((; rf, credit, ilp, index = zrc); tenors) do c
@@ -371,7 +377,7 @@ sensitivities((; rf, credit, ilp, index = zrc); tenors) do c
 end
 ```
 
-And [`zspread`](@ref) solves the discount margin to a market price:
+Use [`zspread`](@ref) to fit the discount margin to a market price:
 
 ```@example sensitivities
 zspread(floater, zrc, 0.99)
@@ -388,12 +394,12 @@ bond1_times = [1.0, 2.0, 3.0, 4.0, 5.0]
 bond2_cfs   = [3.0, 3.0, 3.0, 3.0, 103.0]
 bond2_times = [1.0, 2.0, 3.0, 4.0, 5.0]
 
-# Compute portfolio DV01 vector in a single AD pass
+# Portfolio DV01 vector
 portfolio_dv01 = duration(DV01(), KeyRates(tenors), zrc) do curve
     pv(curve, bond1_cfs, bond1_times) + pv(curve, bond2_cfs, bond2_times)
 end
 
-# Equivalently (but two AD passes):
+# Equivalently, sum the individual DV01 vectors:
 dv01_1 = duration(DV01(), KeyRates(tenors), zrc, bond1_cfs, bond1_times)
 dv01_2 = duration(DV01(), KeyRates(tenors), zrc, bond2_cfs, bond2_times)
 
@@ -402,7 +408,7 @@ dv01_2 = duration(DV01(), KeyRates(tenors), zrc, bond2_cfs, bond2_times)
 
 ### Example: Portfolio of Floating Rate Bonds
 
-Floating rate bonds have coupons that reset to the prevailing market rate, so their cashflows depend on the rate curve itself. The do-block captures this dependency through AD — differentiating through both the discount factors and the coupon amounts in a single pass:
+For a floater portfolio, differentiate both coupon amounts and discount factors:
 
 ```@example sensitivities
 flt_rates  = [0.02, 0.025, 0.03, 0.035, 0.04, 0.042, 0.044, 0.046, 0.048, 0.05]
@@ -442,15 +448,19 @@ end
  total_duration = sum(floater_portfolio.durations))
 ```
 
-Without the spread, a floater prices at par and has near-zero duration (coupons offset discount factor changes). The spread introduces duration because its fixed cashflows are rate-sensitive — similar to a portfolio of small fixed-rate annuities layered on top of the par-valued floaters.
+A par floater at reset has near-zero effective duration. A fixed coupon spread
+adds duration because those payments do not reset with the curve.
 
 ## Stochastic Model Sensitivities
 
-ForwardDiff's dual numbers propagate through the full Monte Carlo simulation pipeline in FinanceModels.jl, including the Euler-Maruyama path generation. This means you can compute exact sensitivities of expected present values under stochastic short-rate models — differentiating through thousands of simulated rate paths in a single AD pass.
+ForwardDiff can differentiate the simulated valuation through Hull–White path
+generation. These derivatives describe the Monte Carlo estimate, which remains
+subject to sampling and time-discretization error.
 
 ### What is being differentiated?
 
-The `sensitivities` function always differentiates with respect to the **zero rates in the `ZeroRateCurve`** — these are the market-observable inputs. When you wrap a stochastic model inside the do-block:
+The curve-risk API differentiates continuous-zero bumps at the supplied tenors.
+For a stochastic valuation:
 
 ```julia
 hw = ShortRate.HullWhite(0.1, 0.01, zrc)
@@ -459,27 +469,26 @@ sensitivities(KeyRates(tenors), hw, cfs, times; n_scenarios=500, rng=Xoshiro(42)
 
 the chain of differentiation is:
 
-1. ForwardDiff perturbs zero rate `rᵢ`
+1. ForwardDiff perturbs the zero-rate bump at tenor `i`
 2. The perturbed `curve` changes the forward curve `f(0, t)`
 3. Hull-White recalibrates `θ(t)` from the new forwards
 4. All simulated paths shift (same random draws, different drift)
-5. The expected PV changes → this change is the KRD at tenor `i`
+5. The value derivative, divided by `-V`, gives KRD at tenor `i`
 
-The stochastic model parameters (`a`, `σ`) are **not** being differentiated — they are constants in this computation. The KRDs answer: *"if the market yield curve shifts, how does my model-valued portfolio respond?"* This is the relevant question for hedging with market instruments (bonds, swaps), which is the primary use case for key rate durations.
+Mean reversion `a` and volatility `σ` stay fixed. These KRDs measure the
+portfolio's response to curve shocks.
 
 ### Model parameter sensitivities (vega, mean-reversion sensitivity)
 
-A separate question is: *"how does expected PV change if I change the model parameters `a` or `σ`?"* These are **model risk** sensitivities, useful for understanding calibration sensitivity and model uncertainty. They are conceptually different from curve KRDs:
+Parameter sensitivities measure changes in `a` or `σ`:
 
-| | Curve KRDs (`∂V/∂rᵢ`) | Model Greeks (`∂V/∂a`, `∂V/∂σ`) |
+| | Curve KRDs (`-(∂V/∂rᵢ)/V`) | Parameter sensitivities (`∂V/∂a`, `∂V/∂σ`) |
 |---|---|---|
 | **What moves** | Market zero rates | Model calibration parameters |
 | **Use case** | Hedging with bonds/swaps | Model risk, calibration stability |
-| **Hedgeable?** | Yes (with market instruments) | No (not directly tradeable) |
 
-Model parameter sensitivities (`∂V/∂a`, `∂V/∂σ`) are **not currently supported** by the AD pathway. The `simulate` function in FinanceModels.jl uses `Float64` arrays internally for simulation paths, which prevents ForwardDiff dual numbers from propagating through the model parameters. Dual numbers flow through the *curve rates* (because `build_model` and `θ(t)` calibration handle generic numeric types), but `a` and `σ` must be plain `Float64`.
-
-For model parameter sensitivities, use finite differences as a workaround:
+The curve-risk methods do not calculate parameter sensitivities. One way to
+estimate them is finite differences with matched random draws:
 
 ```@example sensitivities
 using FinanceModels: ShortRate, simulate
@@ -505,12 +514,10 @@ dV_dσ   = (mc_value(0.1, 0.01 + ε) - mc_value(0.1, 0.01 - ε)) / (2ε)   # vol
 (dV_da, dV_dσ)
 ```
 
-!!! note
-    Supporting AD through model parameters would require parameterizing the element type of internal simulation arrays on the model parameter types in FinanceModels.jl. This is a potential future enhancement.
-
 ### Hull-White: sensitivities w.r.t. the initial term structure
 
-A Hull-White model calibrates its drift θ(t) to match an initial yield curve. When that curve is a `ZeroRateCurve`, you can compute how the Monte Carlo expected value responds to movements in the initial zero rates:
+A Hull–White model calibrates its drift θ(t) to the initial yield curve. Calculate
+the simulated value's sensitivity to curve bumps:
 
 ```@example sensitivities
 # Key rate sensitivities of E[V] under Hull-White dynamics
@@ -526,11 +533,13 @@ hw_result = sensitivities(KeyRates(mc_tenors), hw, mc_cfs, mc_tenors;
  sum_durations = sum(hw_result.durations))
 ```
 
-This involves nested AD: the outer ForwardDiff differentiates w.r.t. zero rates, while Hull-White's θ(t) calibration internally uses ForwardDiff to compute instantaneous forward rates from the curve. ForwardDiff's [tag system](https://github.com/JuliaDiff/ForwardDiff.jl/issues/83) disambiguates the two differentiation passes automatically.
+This uses nested AD: curve-risk derivatives pass through the forward-rate
+derivatives used to calibrate Hull–White drift. ForwardDiff's
+[tag system](https://github.com/JuliaDiff/ForwardDiff.jl/issues/83) separates them.
 
 ### Comparison: deterministic vs model-based sensitivities
 
-The deterministic `ZeroRateCurve` and Hull-White MC valuations produce the same total duration for fixed cashflows (a consequence of the [risk-neutral pricing theorem](https://en.wikipedia.org/wiki/Risk-neutral_measure)), but decompose it across tenors differently:
+Compare simulated sensitivities with direct discounting for fixed cashflows:
 
 ```@example sensitivities
 # Deterministic: discount directly off the initial curve
@@ -543,14 +552,20 @@ det_result = sensitivities(KeyRates(mc_tenors), hw_curve, mc_cfs, mc_tenors)
  sum_hw         = sum(hw_result.durations))
 ```
 
-**Why the totals match:** For fixed cashflows, E[V] = Σ cf_i × P(0, t_i) under any risk-neutral model ([Glasserman, 2003, Ch. 7](https://link.springer.com/book/10.1007/978-0-387-21617-1)), so a parallel shift of all zero rates produces the same ΔV regardless of whether we compute it by direct discounting or via Monte Carlo. This implies Σ KRD_det = Σ KRD_HW.
+For fixed cashflows, exact risk-neutral valuation gives
+`V = Σ cf_i × P(0, t_i)` ([Glasserman, 2003, Ch. 7](https://link.springer.com/book/10.1007/978-0-387-21617-1)).
+A model calibrated to each shocked curve should therefore reproduce both total
+and bucket risk under those same shocks. Sampling, time discretization, and the
+implementation of curve shocks can cause differences in numerical estimates.
+Agreement in total alone does not validate the individual buckets.
 
-**Why the decomposition differs:** The two approaches construct discount factors through different mathematical pathways. `ZeroRateCurve` with linear interpolation gives `df(t) = exp(-r_interp(t) × t)`, where bumping rate_j only affects the interpolated rate near tenor j — producing localized KRDs. Hull-White constructs discount factors by integrating a calibrated short-rate ODE: bumping rate_j changes the forward curve f(0,t), which changes θ(t) = ∂f/∂t + a·f + σ²(1−e^{−2at})/2a everywhere, altering the short-rate path at all times via the mean-reversion dynamics ([Brigo & Mercurio, 2006, Ch. 3](https://link.springer.com/book/10.1007/978-3-540-34604-3)). This creates non-local sensitivity even in the σ→0 limit — it is the model's parametric structure, not stochastic volatility, that redistributes duration.
-
-This phenomenon is well-established in derivatives pricing as "model-dependent Greeks": different models calibrated to the same curve produce identical prices but different sensitivities. The pathwise differentiation technique used here ([Giles & Glasserman, 2006](https://people.maths.ox.ac.uk/~gilesm/files/mc_greeks.pdf)) computes exact derivatives of the Monte Carlo estimate in a single forward pass, capturing the full chain of dependencies from initial curve through θ(t) calibration through path simulation to valuation.
+Pathwise AD differentiates the simulated estimate through drift calibration,
+path generation, and valuation. See
+[Giles & Glasserman (2006)](https://people.maths.ox.ac.uk/~gilesm/files/mc_greeks.pdf).
 
 !!! note
-    The fixed `rng` seed ensures reproducibility: the same random draws are used for every AD perturbation, giving exact pathwise derivatives. Without a fixed seed, each call would use different paths, introducing MC noise into the gradient.
+    Reuse the same random draws for every AD evaluation. Changing the draws
+    between evaluations makes the value and derivatives inconsistent.
 
 ## Choosing Interpolation
 
@@ -572,21 +587,19 @@ interp_cfs = [3.0, 3.0, 3.0, 103.0]
  linear_durs  = sensitivities(KeyRates(interp_tenors), zrc_lin,     interp_cfs, interp_tenors).durations)
 ```
 
-**MonotoneConvex** (`Spline.MonotoneConvex()`, default): Finance-aware interpolation ([Hagan & West, 2006](https://doi.org/10.1080/13504860600829233)). Guarantees positive continuous forward rates, best KRD locality among smooth methods, and fastest AD performance.
+Interpolation controls the base curve between its quoted points. The supported
+choices include monotone convex, PCHIP, linear, Akima, and cubic interpolation.
+See the [FinanceModels interpolation guide](https://docs.juliaactuary.org/FinanceModels/dev/interpolation/)
+for their smoothness and shape constraints.
 
-**PCHIP** (`Spline.PCHIP()`): Smooth forward curves (C1), local sensitivity, monotonicity-preserving. Good general-purpose alternative.
-
-**Linear** (`Spline.Linear()`): Perfectly local KRDs (zero sensitivity outside adjacent intervals), but kinks in the forward curve at tenor points.
-
-**Akima** (`Spline.Akima()`): Alternative to PCHIP with different behavior near inflection points. Slightly more non-local leakage than PCHIP.
-
-**Cubic spline** (`Spline.Cubic()`): Smoothest (C2), but bumps have non-local effects. KRDs at distant tenors may be negative. Use when smoothness matters most.
-
-See the [FinanceModels interpolation guide](https://docs.juliaactuary.org/FinanceModels/dev/interpolation/) for detailed benchmarks and tradeoff analysis. On a flat curve, all methods produce identical results.
+`KeyRates` applies the same triangular bumps for every interpolation method.
+Changing the base interpolation can change discounted cashflow weights, but it
+does not change the bump shape or tenor grid.
 
 ## Validating AD vs Bump-and-Reprice
 
-AD sensitivities can be cross-validated against traditional finite-difference (bump-and-reprice) results. The AD approach gives exact derivatives in a single pass, while FD has O(ε²) truncation error:
+Compare AD with central finite differences using the same shocks. The finite
+difference has O(ε²) truncation error:
 
 ```@example sensitivities
 val_rates  = [0.02, 0.03, 0.04, 0.05]
@@ -612,7 +625,8 @@ end
 
 ## Validating AD with TenorShift
 
-AD gives the instantaneous rate of change (the derivative), while `TenorShift` (created via `curve + (z, t) -> ...`) lets you apply an actual finite shift and observe the PV change. Comparing the two is a useful sanity check — the AD-predicted change should closely match the actual change for small shifts:
+Use `TenorShift` to compare the observed price change with the derivative's
+prediction for a small finite shock:
 
 ```@example sensitivities
 # AD: total DV01 across all tenors — already in dollar-per-1bp units
@@ -632,4 +646,5 @@ predicted_change = total_dv01
    ratio            = round(actual_change / predicted_change, digits = 6))
 ```
 
-The ratio is very close to 1.0, confirming AD and TenorShift agree. The small deviation is due to convexity — DV01 is a first-order (linear) approximation, while the actual PV change includes higher-order effects.
+The ratio approaches one as the shock shrinks. DV01 is a first-order estimate;
+finite price changes also include convexity and higher-order terms.

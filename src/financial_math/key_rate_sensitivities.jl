@@ -1,11 +1,6 @@
-## Key rate sensitivities via AD on zero-rate bumps (Yield.TenorShift)
-#
-# KRDs are computed by layering a triangular-hat zero-rate bump on top of the
-# user's curve via `FinanceModels.Yield.TenorShift`, then taking ForwardDiff
-# gradients/hessians w.r.t. the bump magnitudes. This works on any
-# `AbstractYieldModel` — no curve-internal field is required, and there is no
-# special dispatch for `ZeroRateCurve`. Callers always pass `tenors` (the KRD
-# knot grid) explicitly; for a ZRC, the natural choice is `zrc.tenors`.
+## Key-rate sensitivities
+# Apply triangular continuous-zero bumps at the supplied tenors. Callbacks use
+# ForwardDiff through Yield.TenorShift; fixed cashflows use analytic derivatives.
 
 const AYM = FinanceModels.Yield.AbstractYieldModel
 
@@ -39,8 +34,7 @@ function _ad_derivatives(f::F, z, order) where {F}
     return (; value = DiffResults.value(result), gradient = g, hessian = DiffResults.hessian(result))
 end
 
-# One derivative engine over named curve roles. All adapters share the same
-# validated grid, bump layout, derivative order, and named result structure.
+# Shared derivative engine for named curve roles on one tenor grid.
 function _ncurve_ad(valuation::F, curves::NamedTuple{roles}, tenors; order = 1) where {F, roles}
     order in (1, 2) || throw(ArgumentError("derivative order must be 1 or 2"))
     grid = _validate_tenors(tenors)
@@ -49,8 +43,7 @@ function _ncurve_ad(valuation::F, curves::NamedTuple{roles}, tenors; order = 1) 
     n, k = length(grid), length(curves)
     indices(i) = ((i - 1) * n + 1):(i * n)
     slice(b, i) = length(curves) == 1 ? b : view(b, indices(i))
-    # Derive the count from the typed tuple inside the AD callback so its
-    # return type remains inferable across the derivative function barrier.
+    # Use the typed tuple's length to keep the callback's return type inferable.
     f(b) = valuation(NamedTuple{roles}(ntuple(i -> _bumped(curves[i], grid, slice(b, i)), length(curves))))
     z = zeros(k * n)
     result = _ad_derivatives(f, z, order)
@@ -63,7 +56,7 @@ function _ncurve_ad(valuation::F, curves::NamedTuple{roles}, tenors; order = 1) 
     return (; value, gradient, hessian)
 end
 
-# Compatibility adapters for the public single- and two-curve return shapes.
+# Adapt named derivatives to the single- and two-curve result fields.
 function _keyrate_ad(curve::AYM, tenors::AbstractVector, valuation_fn::F; order = 1) where {F}
     r = _ncurve_ad(c -> valuation_fn(c.curve), (; curve), tenors; order)
     result = (; value = r.value, gradient = r.gradient.curve)
@@ -81,17 +74,9 @@ function _keyrate_ad(base::AYM, credit::AYM, tenors::AbstractVector, valuation_f
         )
 end
 
-# ─── Closed-form KRD for the vanilla cashflow case ──────────────────────
-#
-# When the valuation function is just `Σ cf_k · disc(curve, t_k)`, the
-# gradient and Hessian of V(b) w.r.t. the hat-bump vector b are linear /
-# quadratic in the hat weights at each cashflow time. The triangular hats
-# only support 1–2 pillars per time, so each t_k writes at most 2 entries
-# of the gradient and a 2×2 Hessian block. Total work is O(N_cf),
-# independent of the number of KRD pillars — no ForwardDiff Dual
-# arithmetic over an N-wide partials vector. Numerically equivalent to
-# `_keyrate_ad` for these inputs; just much cheaper for typical bond /
-# liability cashflow vectors.
+## Analytic derivatives for fixed cashflows
+# After locating its hat interval, each payment updates at most two gradient
+# entries and a 2×2 Hessian block.
 
 # Active hat pair at `t`. Returns (i, w_i, j, w_j) such that the hat sum
 # at t equals `w_i * b[i] + w_j * b[j]`. At/beyond the endpoints only one
@@ -110,14 +95,8 @@ end
     end
 end
 
-# Single- and two-curve analytic KRD are the L = 1 and L = 2 cases of the
-# multi-curve kernel `_ncurve_analytic` (just below). For the vanilla
-# `Σ cf · ∏ disc` valuation the per-role gradients and all three Hessian blocks
-# (base, credit, cross) coincide — see the kernel's note — so the two-curve
-# adapter aliases the single shared gradient / Hessian into the base / credit /
-# cross names. Downstream callers only broadcast (`./`) these, never mutate them
-# in place, so the aliasing is safe and the public two-curve forms still hand
-# back distinct output buffers.
+# Adapt the shared analytic derivatives to one or two discount curves.
+# Internal arrays may alias; public normalization creates independent arrays.
 _keyrate_analytic(curve::AYM, tenors::AbstractVector, cfs::AbstractVector, times; order = 1) =
     _ncurve_analytic((; curve), tenors, cfs, times; order)
 
@@ -137,16 +116,10 @@ function _keyrate_analytic(
     )
 end
 
-# N-curve analytic. `curves::NamedTuple{roles}` of L curves with a shared tenor
-# grid; the discount is the product ∏_layers disc_layer(t). All roles must be
-# discount-role layers (multiplicatively composed); do not pass `:index`.
-# Under multiplicative composition every per-role gradient and every (role,
-# role) Hessian block carry identical values, so the helper returns a single
-# shared gradient vector and a single shared Hessian matrix. The single-, two-,
-# and N-curve public wrappers all delegate here and return independent arrays
-# for their role positions.
-# Inline so callers can eliminate result tuples across the zero/nonzero-stream and
-# derivative-order branches, including when curve parameters carry Duals.
+# Value is Σ cf(t) * ∏ discount(curve, t). Every curve must be a discount layer;
+# an index curve that projects coupons does not belong here. All curve roles
+# have identical gradients and Hessian blocks, stored once internally.
+# Inline to eliminate result tuples across derivative-order and zero-stream branches.
 @inline function _ncurve_analytic(
         curves::NamedTuple, tenors::AbstractVector,
         cfs::AbstractVector, times; order = 1
@@ -161,10 +134,8 @@ end
         gradient = zeros(T, n)
         return order >= 2 ? (; value, gradient, hessian = zeros(T, n, n), zero_stream) : (; value, gradient, zero_stream)
     end
-    # Seed from a valuation term so curve parameters participate in promotion
-    # (including differentiation through the analytic sensitivities themselves).
-    # Its type must accommodate later terms; discount types are assumed stable
-    # across cashflow times, including at t=0.
+    # Seed from a discounted payment to preserve curve numeric types and AD.
+    # Its type must accommodate later terms, including payments at t=0.
     disc(t) = prod(c -> FinanceCore.discount(c, t), values(curves))
     k0 = firstindex(cfs)
     t0 = FinanceCore.timepoint(cfs[k0], times[k0])
@@ -179,11 +150,7 @@ end
     V = zero(cfd0)
     @inbounds for k in eachindex(cfs)
         t = FinanceCore.timepoint(cfs[k], times[k])
-        # `prod` over the curve tuple is unrolled and type-stable even when the
-        # roles have different concrete types (e.g. a ZeroRateCurve base with a
-        # flat Constant credit). A `for c in values(curves)` loop would make `c`
-        # non-concrete for a heterogeneous tuple and box `discount(c, t)` once
-        # per cashflow — an O(N_cf) allocation hit on the two-curve IR01/CS01 path.
+        # Tuple reduction specializes each curve type, avoiding per-payment boxing.
         d = disc(t)
         cfd = _cf_value(cfs[k]) * d
         V += cfd
@@ -210,27 +177,14 @@ end
     end
 end
 
-# Normalize the three Hessian blocks of a two-curve AD/analytic result into the
-# `(; base, credit, cross)` convexity NamedTuple. Each `./` allocates a fresh
-# array, so callers always receive distinct output buffers even when the
-# analytic inputs alias a single shared matrix.
+# Normalize into independent base, credit, and cross-convexity matrices.
 _conv_blocks(r, zero_stream = false) = (;
     base = _risk_ratio(r.base_hessian, r.value, zero_stream),
     credit = _risk_ratio(r.credit_hessian, r.value, zero_stream),
     cross = _risk_ratio(r.cross_hessian, r.value, zero_stream),
 )
 
-## AbstractYieldModel + KeyRates(tenors): KRD / IR01 / CS01 / convexity / sensitivities
-#
-# These dispatches accept any `FinanceModels.Yield.AbstractYieldModel`. The
-# KRD knot grid is carried by `KeyRates(tenors)`. Internally the AD path layers
-# a hat-function zero-rate bump over the user's curve via `Yield.TenorShift`;
-# the user's curve is never resampled or rebuilt.
-#
-# `ZeroRateCurve` inputs go through the same path — it has no special dispatch.
-#
-# Tenor grid is required (no default) because KRD bucket conventions vary
-# (Bloomberg, FRTB, BMA SBA, etc.); downstream should choose explicitly.
+## Public yield-model sensitivities
 
 """
     duration(valuation_fn, curve::AbstractYieldModel, tenors) -> scalar
@@ -271,10 +225,9 @@ duration(curve::AYM, tenors::AbstractVector, cfs::AbstractVector{<:FinanceCore.C
     duration(kr::KeyRates, curve::AbstractYieldModel, cfs, times) -> Vector
     duration(kr::KeyRates, curve::AbstractYieldModel, cfs::AbstractVector{<:Cashflow}) -> Vector
 
-Key-rate durations (modified) for any `AbstractYieldModel`, computed by
-layering a triangular-hat zero-rate bump at each tenor in `kr.tenors` over
-the user's curve via `Yield.TenorShift`, then taking the AD gradient w.r.t.
-the bump magnitudes. The user's curve is preserved at all non-knot points.
+Return normalized key-rate durations `-∂V/∂rᵢ / V` for an `AbstractYieldModel`.
+Each `rᵢ` is a triangular continuous-zero bump at `kr.tenors[i]`. The base curve
+is used directly, without resampling or refitting.
 
 Empty collections and collections whose amounts are all exactly zero return zero
 key-rate durations by convention, with one entry per tenor and no curve evaluation.
@@ -285,29 +238,19 @@ See [Zero cashflow streams](@ref) for numeric types and zero-net-value portfolio
 
 # Tenor grid
 
-`kr.tenors` is the KRD knot grid — a separate modeling choice from any
-tenor structure baked into the curve itself. You can evaluate key-rate
-durations on any grid (e.g. Bloomberg `{0.25, 1, 2, 5, 10, 30}`, FRTB
-`{0.25, 0.5, 1, 2, 3, 5, 10, 15, 20, 30}`, etc.) without re-fitting the
-underlying curve.
-
-The grid must be nonempty, sorted ascending, distinct, and strictly positive.
-The `KeyRates` constructor validates these requirements.
+Choose `kr.tenors` independently of the curve's own knots. The grid must be
+nonempty, finite, positive, and strictly increasing. It is validated both at
+construction and when calculating sensitivities.
 
 # Bump shape and endpoint extrapolation
 
 The bump at the i-th knot is a triangular hat centered at `tenors[i]` with
-support `[tenors[i-1], tenors[i+1]]`. Outside the knot range it is flat:
-bumping `tenors[1]` perturbs all cashflows at `t ≤ tenors[1]` equally, and
-bumping `tenors[end]` perturbs all cashflows at `t ≥ tenors[end]` equally.
-For long-duration insurance liabilities (LTC, deferred / payout annuities),
-the last-knot KRD absorbs all super-tenor sensitivity — extend the grid
-past your longest cashflow if you want that decomposed.
+support `[tenors[i-1], tenors[i+1]]` for interior knots. Endpoint bumps stay
+constant beyond the grid. All sensitivity after the last tenor belongs to its
+bucket; extend the grid to separate exposures at longer maturities.
 
-For a linearly-interpolated zero-rate curve the result matches AD over
-the curve's own rates exactly. For other splines the bump kernel is
-hat-shaped rather than spline-shaped, so per-knot KRDs shift slightly;
-the sum of KRDs (= scalar modified duration) is invariant either way.
+The hats sum to one, so the sum of key-rate durations equals parallel duration.
+These are sensitivities to the specified bumps, not to spline parameters.
 
 # Example
 ```julia
@@ -420,9 +363,8 @@ duration(vf::Function, ::CS01, kr::KeyRates, base::AYM, credit::AYM) = duration(
     convexity(kr::KeyRates, base, credit, cfs, times) -> NamedTuple
     convexity(kr::KeyRates, curves::NamedTuple, cfs, times) -> NamedTuple{roles}{roles}
 
-Key-rate convexity (matrix) and scalar convexity for any `AbstractYieldModel`,
-pair, or named tuple of discount-role curves. Mirrors `duration` but returns
-∂²V/∂rᵢ∂rⱼ rather than ∂V/∂rᵢ.
+Return normalized convexity for a yield model, a pair of curves, or named
+discount layers. Matrix entries are `(∂²V/∂rᵢ∂rⱼ) / V`.
 
 Empty collections and collections whose amounts are all exactly zero return zero
 convexity by convention, retaining the usual scalar, matrix, or named-block shape
@@ -434,22 +376,14 @@ For the `NamedTuple` form, every named curve must be a discount-role layer
 values under multiplicative composition, but each matrix is independent and can
 be mutated without changing another block.
 
-The scalar forms (first two signatures) return the parallel-shift second
-derivative ∂²V/∂s² under a *continuous-rate* shock — matching the matrix
-forms exactly under partition of unity of the KRD hats. `tenors` is accepted
-for API symmetry but is not used by the scalar derivative computation.
-
-If you also want the durations / DV01s, prefer [`sensitivities`](@ref) — it returns
-the value, gradient, and Hessian from one AD pass at the same cost.
+The scalar forms return `(∂²V/∂s²) / V` for a parallel continuous-zero shift.
+This equals the sum of all key-rate matrix entries, including cross terms.
+Scalar forms validate `tenors` for API consistency; their calculation does not
+depend on the grid. Use [`sensitivities`](@ref) to also obtain value and duration
+or DV01 from the same derivatives.
 """
-# Continuous-shock parallel-shift convexity via a single scalar second
-# derivative. Under partition of unity of the KRD hat functions (`_hat_bump`
-# above), `sum(convexity(KeyRates(tenors), …))` equals ∂²V/∂s² for parallel
-# shift `s` by the chain rule — the matrix path returns the right number but
-# pays O(N² AD work + dense Hessian allocation) for what is an O(1) scalar
-# second derivative. Reuse the scalar curve callback path, which applies the
-# same continuous-zero shock without constructing a per-pillar Hessian.
-
+# The hats sum to one. Use the scalar derivative for parallel convexity to
+# avoid constructing the equivalent full key-rate Hessian.
 function convexity(valuation_fn::F, curve::AYM, tenors::AbstractVector) where {F}
     _validate_tenors(tenors)
     return convexity(curve, valuation_fn)
@@ -476,8 +410,7 @@ function convexity(valuation_fn::F, base::AYM, credit::AYM, tenors::AbstractVect
     return (; base = sum(cv.base), credit = sum(cv.credit), cross = sum(cv.cross))
 end
 function convexity(base::AYM, credit::AYM, tenors::AbstractVector, cfs::AbstractVector, times)
-    # static cashflows: the analytic helper computes the same blocks as the
-    # (2n)×(2n) ForwardDiff Hessian the do-block form pays for, in O(N_cf)
+    # Fixed cashflows have analytic base, credit, and cross derivatives.
     an = _keyrate_analytic(base, credit, tenors, cfs, times; order = 2)
     zero_stream = an.zero_stream
     return (;
@@ -523,9 +456,8 @@ convexity(vf::Function, kr::KeyRates, base::AYM, credit::AYM) = convexity(kr, vf
     sensitivities(::DV01, kr::KeyRates, base, credit, cfs, times) -> NamedTuple
     sensitivities(kr::KeyRates, curves::NamedTuple, cfs, times) -> NamedTuple
 
-Bundled value + key-rate durations (or DV01s) + convexity matrix for any
-`AbstractYieldModel` or pair, in a single AD pass. The knot grid is carried
-by [`KeyRates`](@ref).
+Calculate value, key-rate durations or DV01s, and convexity together on the
+[`KeyRates`](@ref) grid. Callbacks use AD; fixed cashflows use analytic derivatives.
 
 For the `NamedTuple` cashflow form, every named curve is a multiplicatively
 composed discount layer. Per-role durations and per-pair convexity matrices
@@ -536,16 +468,14 @@ position sign; dollar DV01s change sign with the position.
 Empty collections and collections whose amounts are all exactly zero have zero
 value and dollar risk; normalized duration and convexity are zero by convention.
 Every cashflow needs a time; unused trailing times are ignored.
-Shapes are preserved, and the curve is not evaluated: zero cashflows need no discount
-factors. Value types come from the amounts and times, with the tenor grid also
-participating in risk-result types. Unlike nonzero streams, these result types do
-not incorporate the curve's numeric type; abstractly typed empty inputs fall back
+Shapes are preserved without evaluating the curve. Zero-stream result types come
+from the amounts, times, and tenor grid; abstractly typed empty inputs fall back
 to `Float64`. The zero check includes automatic-differentiation partials.
 
 Nonzero amounts that offset to zero present value retain dollar exposures and have
-undefined normalized risk (`NaN`/`Inf`). Valuation-function and contract forms retain
-their existing behavior. For portfolio risk, sum values and dollar derivatives
-before normalizing once; averaging individual normalized durations is not equivalent.
+undefined normalized risk (`NaN`/`Inf`). For portfolio risk, sum values and dollar
+derivatives before normalizing. A zero callback or contract value alone does not
+identify an empty or all-zero cashflow stream.
 See [Zero cashflow streams](@ref) for batch numeric types and simulation RNG behavior.
 """
 function sensitivities(kr::KeyRates, valuation_fn::F, curve::AYM) where {F}
@@ -655,12 +585,11 @@ sensitivities(vf::Function, ::DV01, kr::KeyRates, base::AYM, credit::AYM) = sens
     sensitivities(valuation, curves::NamedTuple; tenors) -> (; value, duration, dv01, key_rate)
     sensitivities(target, tenors; discount::NamedTuple, index) -> same
 
-Multi-curve sensitivities: differentiate `valuation(curves)` w.r.t. each named curve
-in `curves` in a single AD pass, returning a per-role `duration`/`dv01`/`key_rate`
-NamedTuple. The structured form assembles `discount = sum(discount layers)` and projects
-the contract's coupons on `index` — e.g. `discount = (; rf, credit, ilp)` gives `r.duration.rf`
-(≈ IR01), `.credit` (≈ CS01), `.ilp` ("ILP01"), and `.index` (the reset sensitivity). ILP /
-matching-adjustment / basis are just additional named curves.
+Differentiate `valuation(curves)` with respect to each named curve. Return value
+and per-role duration, DV01, and key-rate vectors. The contract form sums the
+`discount` layers and projects coupons using `index`. For example,
+`discount = (; rf, credit, ilp)` produces separate risk-free, credit, liquidity,
+and index sensitivities.
 """
 function sensitivities(valuation::F, curves::NamedTuple; tenors) where {F}
     r = _ncurve_ad(valuation, curves, tenors; order = 1)

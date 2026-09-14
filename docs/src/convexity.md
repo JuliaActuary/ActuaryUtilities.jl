@@ -1,9 +1,8 @@
 # Convexity Conventions
 
-Convexity measures a second derivative of value with respect to a specified rate
-shock, divided by the unshocked value. The shock coordinate is part of the
-definition: changing an annually compounded yield and changing a continuously
-compounded zero rate give different derivatives, even at the same initial price.
+Convexity is the second derivative of value with respect to a rate shock, divided
+by the initial value. Annual-yield and continuous-zero shocks produce different
+convexities, even when they start from the same price.
 See [Coleman (2011)](https://closemountain.com/papers/risktransform1_brief.pdf),
 pp. 3–4, for the role of compounding in rate sensitivities.
 
@@ -11,11 +10,9 @@ Yield-model inputs use additive **continuously compounded zero-rate shifts**.
 Plain scalar inputs use annual compounding; explicit `Rate` inputs use their
 specified compounding. A curve's initial discount factors are preserved.
 
-The scalar convexity convention changes for all yield-model types, including
-`Yield.Constant(Continuous(...))`, `ZeroRateCurve`, and Nelson–Siegel, as well as
-periodic constant curves. Both `convexity(curve, cfs, times)` and
-`convexity(curve, valuation_function)` use this continuous-zero coordinate and
-agree with the tenor-aware form and full key-rate matrix sum.
+In v6.0, scalar convexity changes for every yield-model type. Both
+`convexity(curve, cfs, times)` and `convexity(curve, valuation_function)` agree
+with the tenor-aware form and the sum of the full key-rate matrix.
 
 ## Why the analytic formula contains t²
 
@@ -37,21 +34,16 @@ C = \frac{P''(0)}{P(0)} = \sum_i w_i t_i^2,
 w_i = \frac{PV_i}{P(0)}.
 ```
 
-Each derivative of the exponential supplies a factor ``-t_i``. Thus ``t_i^2``
-means the square of each payment time: payments at years 1, 2, and 3 receive
-time weights 1, 4, and 9 before weighting by present value. It is not the square
-of duration. This formula also applies to fixed cashflows on a nonflat curve.
+Each derivative contributes a factor ``-t_i``. Payments at years 1, 2, and 3
+therefore receive time weights 1, 4, and 9. The formula uses squared payment
+times, weighted by present value, and applies to nonflat curves too.
 [Nawalkha, Soto, and Beliaeva (2005)](https://catalogimages.wiley.com/images/db/pdf/0471427241.excerpt.pdf),
 *Interest Rate Risk Modeling*, chapter 1, pp. 5–6, equation (1.2), gives this
 continuous-rate definition.
 
-**AutoDiff does not need a supplied ``t^2`` formula.** The callback API
-differentiates the shocked valuation. The analytic cashflow path evaluates the
-formula directly for every yield model, including nonflat curves. Their results
-must agree.
-For rate-dependent cashflows, use a valuation callback or contract API so that
-differentiation includes changes in the cashflows; the fixed-cashflow formula
-alone does not capture those effects.
+The callback API derives convexity by differentiating the shocked valuation.
+The cashflow API evaluates the formula directly. For rate-dependent cashflows,
+use a callback or contract so the derivative includes changes in the payments.
 
 ## Worked example: 11.26, 8.40, and annual-yield convexity
 
@@ -88,14 +80,11 @@ For this example, with ``y=0.04`` and the same present-value weights:
 | Annual-yield convexity | ``\sum_i w_i t_i(t_i+1)/(1+y)^2`` | 10.412662 |
 | Former constant-curve statistic | ``\sum_i w_i t_i(t_i+1)`` | 11.262335 |
 
-The former statistic is unmodified annual-compounding convexity. It lacks the
-``(1+y)^2`` divisor needed to equal the normalized second derivative with respect
-to annual yield. [Clarke, de Silva, and Thorley (2013)](https://www.cfainstitute.org/sites/default/files/-/media/documents/book/rf-publication/2013/rf-v2013-n3-1-pdf.pdf),
+The former statistic omits the ``(1+y)^2`` divisor required for annual-yield
+convexity. [Clarke, de Silva, and Thorley (2013)](https://www.cfainstitute.org/sites/default/files/-/media/documents/book/rf-publication/2013/rf-v2013-n3-1-pdf.pdf),
 *Fundamentals of Futures and Options*, appendix p. 127, equation (A.15) and the
 following modification, distinguishes these annual-compounding quantities.
-Version 6.0 uses continuous-zero convexity for yield models. To measure the
-annual-yield derivative of these fixed cashflows, pass the scalar yield or
-explicit annual rate:
+For annual-yield convexity, pass a scalar yield or explicit annual rate:
 
 ```jldoctest convexity_conventions
 julia> round.((convexity(0.04, cfs, times),
@@ -123,8 +112,7 @@ C_{\mathrm{parallel}} = \mathbf{1}^{\mathsf T} K \mathbf{1}
                      = \sum_{j,k} K_{jk}.
 ```
 
-This sums **every matrix entry**, including mixed derivatives. The normalized
-Hessian and its use for directional price changes are developed in
+Sum **every matrix entry**, including mixed derivatives. See
 [Reitano (1991), “Multivariate Duration Analysis”](https://www.soa.org/globalassets/assets/library/monographs/50th-anniversary/investment-section/1999/january/m-as99-2-05.pdf),
 section 3(c), definitions 3.3–3.5 and equation (3.28) (SOA monograph reprint).
 
@@ -140,5 +128,5 @@ julia> (sum(K) ≈ convexity(curve, valuation),
 (true, true, true)
 ```
 
-This identity concerns derivatives under the specified hat shocks. Summing only
-diagonal entries, or using finite-bump estimates, need not reproduce it exactly.
+The identity holds for derivatives under the specified hat shocks. Finite-bump
+estimates have approximation error.

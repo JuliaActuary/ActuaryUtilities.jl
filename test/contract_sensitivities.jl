@@ -29,23 +29,14 @@
     end
 
     @testset "floater: effective convexity (dynamic cashflows under reproject)" begin
-        # The new `convexity(::Effective)` routes through TenorShift +
-        # ForwardDiff on a closure that calls `reproject(target, c)` — i.e.
-        # cashflows are themselves curve-dependent (the coupon resets follow
-        # the bumped curve). The result must still equal the matrix-sum form
-        # (same AD chain, just unrolled). Locks the dynamic-cashflow path.
+        # Reproject coupons under each shock; scalar and matrix-sum risk must agree.
         _cvalue_flm(c) = FC.present_value(c, ActuaryUtilities.reproject(flm, c))
         @test convexity(Effective(), flm, curve, tenors) ≈
             sum(convexity(KeyRates(tenors), _cvalue_flm, curve)) atol = 1.0e-10
     end
 
-    @testset "fixed bond: effective convexity matches matrix-sum (POU equivalence regression guard)" begin
-        # Under partition of unity of the KRD hat functions, sum(N×N key-rate
-        # Hessian) = continuous-shock parallel-shift second derivative by the
-        # chain rule. The optimized `convexity(::Effective, …)` computes that
-        # scalar directly via TenorShift, in O(1) rather than O(N²) AD work.
-        # Locks the numerical equivalence in for future refactors of either
-        # path. The no-tenor curve form uses the same continuous-zero shock.
+    @testset "fixed bond: effective convexity equals the key-rate matrix sum" begin
+        # The hats sum to one, so contract, scalar, and full matrix risk agree.
         cfs = collect(FM.Projection(fb, curve, FM.CashflowProjection()))
         amts = FC.amount.(cfs); times = FC.timepoint.(cfs)
         @test convexity(Effective(), fb, curve, tenors) ≈

@@ -2,66 +2,40 @@
 
 ## v5.12.0 to v6.0.0
 
-- Unmarked single-curve contract and portfolio `dv01` and `convexity` calls now
-  default to `Effective()`, matching `duration`. The `duration(DV01(), target,
-  curve, tenors)` alias uses the same default. Use `Spread()` explicitly for
-  spread risk.
-- Sensitivity cashflow forms consistently use the amount and payment time stored
-  in each `Cashflow`, even when explicit times are supplied. Numeric amounts use
-  the corresponding explicit time. Analytic key-rate forms previously errored
-  on nonzero wrapped cashflows with explicit times; tenor-aware scalar convexity
-  instead used the explicit times. Legacy default key-rate grids and Hull–White
-  default simulation horizons now use embedded payment times too.
-  **Migration:** if explicit times differ from embedded times, the embedded
-  times take precedence throughout these calculations. To change payment dates,
-  construct updated `Cashflow` objects or pass numeric amounts and the desired
-  times. Explicit time vectors must still cover the collection; trailing entries
-  are ignored.
-- **Scalar convexity changes for all yield-model types.** Both
-  `convexity(curve, cfs, times)` and `convexity(curve, valuation_function)` now use
-  additive continuously compounded zero-rate shocks and agree with the tenor-aware
-  form and the sum of the full key-rate convexity matrix. This affects
-  `Yield.Constant(Continuous(...))`, `Yield.Constant(Periodic(...))`,
-  `ZeroRateCurve`, Nelson–Siegel, and custom yield models. The previous scalar
-  shock converted an annual-compounding increment to a continuous rate, changing
-  the second derivative even when the curve itself used continuous zero rates.
-  For example, for cashflows `[5, 5, 105]`
-  at times `[1, 2, 3]` and `Yield.Constant(Periodic(0.04, 1))`, convexity changes
-  from approximately **11.26 to 8.40**. The constant-curve analytic weights are
-  now `t²`, matching the valuation derivative and the sum of key-rate convexities.
-  Plain scalar and explicit `Rate` inputs retain their own compounding coordinates.
-  See [Convexity Conventions](@ref) for the derivation, references, and executable
-  example, including annual-yield convexity (**10.412662**) and the need to sum
-  the full key-rate convexity matrix, including cross terms.
-- Callable valuation structs are accepted by scalar, key-rate, contract callback,
-  and Hull–White scenario APIs. Scalar cashflow methods consistently accept arrays
-  (flattened in column-major order), tuples, and finite generators, including
-  Macaulay, Modified, DV01, IR01, CS01, convexity, and legacy key-rate selectors.
-  Generators are collected once before valuation or differentiation.
-- Dollar DV01, IR01, and CS01 preserve the position sign. Relative durations and
-  convexities remain invariant to multiplying all cashflows by a nonzero factor.
-  **Migration:** summing signed asset and liability dollar sensitivities nets
-  their exposures. Remove downstream sign corrections that existed solely to
-  compensate for the former cashflow APIs' use of absolute value.
-- Scalar DV01 now differentiates signed value directly, so offsetting cashflows
-  and valuation callbacks with zero present value retain their dollar exposure.
-  IR01 and CS01 inherit this fix. For `[-1, 1]` at `[0, 1]` under a zero curve,
-  each returns `0.0001` instead of `NaN`. Relative duration and convexity remain
-  undefined at zero present value.
-- Contract and portfolio `sensitivities` bundles compute `effective_dv01`,
-  `spread_dv01`, and `forward_dv01` from the value gradient directly, so they are
-  defined at zero present value (an at-market swap, a hedged asset/liability pair)
-  and agree with `dv01(Effective()/Spread(), …)`. Previously they were derived
-  from duration times value and returned `NaN` there. The normalized durations and
-  key-rate vectors in the bundle remain undefined at zero value.
-- Scalar tenor-aware convexity validates supplied grids, including callback,
-  cashflow, and effective contract forms. Empty, non-finite, non-positive,
-  duplicate, and unsorted grids throw `ArgumentError` before valuation, including
-  for empty cashflows and grids mutated after `KeyRates` construction.
-- NamedTuple cashflow sensitivity results now return independent arrays for every
-  duration role and convexity block. Mutating one no longer changes another.
-- Sensitivity Hessians reuse value and gradient results through the new DiffResults
-  dependency; contract duration bundles calculate gradients without unused Hessians.
+- **Curve convexity uses continuous-zero shocks.** This changes scalar convexity
+  for every yield model, including constant curves, ZeroRateCurve, Nelson–Siegel,
+  and custom models. Cashflow and callback results agree with tenor-aware
+  convexity and the full key-rate matrix sum. For `[5, 5, 105]` at `[1, 2, 3]`
+  under `Yield.Constant(Periodic(0.04, 1))`, convexity changes from **11.26 to 8.40**.
+  Scalars and explicit `Rate` inputs retain their compounding conventions.
+  See [Convexity Conventions](@ref) for formulas and examples.
+- **Dollar risk preserves position sign and zero-value exposure.** DV01, IR01,
+  and CS01 use signed value derivatives. For `[-1, 1]` at `[0, 1]` under a zero
+  curve, they return `0.0001` instead of `NaN`. Contract sensitivity bundles also
+  retain dollar exposure at zero value. Normalized duration and convexity remain
+  undefined there.
+  **Migration:** sum signed asset and liability risk directly. Remove sign
+  corrections added to compensate for the former use of absolute value.
+- **Embedded cashflow times take precedence.** Analytic key-rate forms now accept
+  wrapped `Cashflow` objects with explicit times. Scalar, key-rate, and bundled
+  sensitivities use embedded payment times, as do legacy default grids and
+  Hull–White default horizons. Numeric amounts use the corresponding explicit
+  times. Explicit time vectors must cover the collection; trailing entries are ignored.
+  **Migration:** to change payment dates, construct updated `Cashflow` objects or
+  pass numeric amounts with the desired times.
+- Unmarked single-curve contract and portfolio DV01 and convexity default to
+  `Effective()`, matching duration. This includes `duration(DV01(), target, curve,
+  tenors)`. Use `Spread()` explicitly for spread risk.
+- Callback APIs accept callable structs. Scalar cashflow APIs accept arrays,
+  tuples, and finite generators. Arrays are flattened in column-major order;
+  generators are collected once before valuation.
+- Scalar tenor-aware convexity validates grids before valuation, including empty
+  streams and grids mutated after construction. Empty, non-finite, non-positive,
+  duplicate, or unsorted grids throw `ArgumentError`.
+- Named cashflow results own independent arrays for each duration role and
+  convexity block. Mutating one no longer changes another.
+- Hessian calculations reuse value and gradient results through DiffResults.
+  Contract duration bundles compute gradients without unused Hessians.
 
 ## v5.11.2 to v5.12.0
 

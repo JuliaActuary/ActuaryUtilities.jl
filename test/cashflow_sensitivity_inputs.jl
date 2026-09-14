@@ -45,8 +45,7 @@
             @test _same_sensitivity(f(wrapped, [fallback; 100.0]), expected)
             @test_throws DimensionMismatch f(wrapped, fallback[1:2])
         end
-        # The oracle prices numeric amounts at the embedded dates, independent
-        # of the analytic kernel and any cashflow-time normalization helpers.
+        # Price at embedded dates without using the normalization helpers.
         value(c) = sum(cfs[k] * FC.discount(c, times[k]) for k in eachindex(cfs))
         @test _same_sensitivity(sensitivities(kr, curve, wrapped, fallback), sensitivities(kr, value, curve))
         @test sum(convexity(kr, curve, wrapped, fallback)) ≈ convexity(curve, value)

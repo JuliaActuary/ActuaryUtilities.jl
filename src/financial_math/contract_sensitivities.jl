@@ -1,11 +1,6 @@
-## ── Contract / portfolio-aware, re-projecting duration & sensitivities ────────
-#
-# A contract (or a vector of contracts = a portfolio) is a "target": it is valued
-# by RE-PROJECTING under a bumped curve, so a floater's coupons re-fix automatically
-# (its projection reads the model) while a fixed bond's do not. `_contract_keys`
-# (empty vs not) is the only discriminator — no `ValuationStyle` trait. The risk
-# factor stays the familiar vocabulary: `Effective` (rate) / `Spread` (credit) /
-# `KeyRates`; units are the verb (`duration` yrs / `dv01` $ / `convexity`).
+## Contract and portfolio sensitivities
+# Reproject under each bumped curve so floating coupons reset. `_contract_keys`
+# identifies which contracts need a projection curve.
 
 _contract_keys(c::FinanceModels.Bond.Floating) = (c.key,)
 _contract_keys(c::FinanceCore.Composite) = (_contract_keys(c.a)..., _contract_keys(c.b)...)
@@ -17,18 +12,17 @@ const _Contractish = Union{FinanceCore.AbstractContract, AbstractVector{<:Financ
 """
     reproject(contract, index_curve)
 
-Wrap `contract` so its coupons are estimated off `index_curve`: returns the contract
-itself if it reads no model, else a `Projection` mapping the contract's keys to
-`index_curve`. Lets a multi-curve valuation avoid hand-writing the model `Dict`.
+Project coupons using `index_curve`. Return the contract unchanged if its
+cashflows are fixed; otherwise map its model keys to `index_curve` in a `Projection`.
 """
 reproject(c::FinanceCore.AbstractContract, index) =
     isempty(_contract_keys(c)) ? c :
     FinanceModels.Projection(c, Dict(k => index for k in _contract_keys(c)), FinanceModels.CashflowProjection())
 
-# value of a contract/portfolio under a single curve (coupons + discount = curve) …
+# Use one curve for coupon projection and discounting.
 _cvalue(c::FinanceCore.AbstractContract, curve) = FinanceCore.present_value(curve, reproject(c, curve))
 _cvalue(cs::AbstractVector{<:FinanceCore.AbstractContract}, curve) = sum(_cvalue(c, curve) for c in cs)
-# … and two curves: estimate coupons on `fwd`, discount on `credit`.
+# Project coupons on `fwd` and discount on `credit`.
 _cvalue2(c::FinanceCore.AbstractContract, fwd, credit) = FinanceCore.present_value(credit, reproject(c, fwd))
 _cvalue2(cs::AbstractVector{<:FinanceCore.AbstractContract}, fwd, credit) = sum(_cvalue2(c, fwd, credit) for c in cs)
 
@@ -36,10 +30,9 @@ _cvalue2(cs::AbstractVector{<:FinanceCore.AbstractContract}, fwd, credit) = sum(
     sensitivities(target, curve, tenors) -> NamedTuple
     sensitivities(target, forward, credit, tenors) -> NamedTuple
 
-One-AD-pass bundle for a (possibly curve-dependent) `target` — a `FinanceModels`
-contract or a vector of contracts (portfolio) — re-projecting cashflows under bumped
-curves. Coupons are estimated on `forward`, discounted on `credit` (pass a single
-`curve` for both). Returns, over the `tenors` key-rate grid:
+Calculate sensitivities for a contract or portfolio, reprojecting cashflows under
+bumped curves. Project coupons on `forward` and discount on `credit`, or pass one
+`curve` for both. Return these results on the `tenors` grid:
 
   - `value`
   - `effective_duration` / `effective_dv01` / `effective_key_rate` — bump both curves
@@ -49,19 +42,17 @@ curves. Coupons are estimated on `forward`, discounted on `credit` (pass a singl
   - `forward_duration` / `forward_dv01` / `forward_key_rate` — bump the index only;
     `effective = forward + spread` (first order).
 
-Durations in years; DV01s in dollars per 1bp. Dollar DV01s differentiate the signed value
-directly and remain defined at zero present value; the normalized durations and key-rate
-vectors are undefined there. For a fixed bond `effective == spread ==`
-the modified duration and `forward == 0`. See [`duration`](@ref) with [`Effective`](@ref)/
+Durations are in years; DV01s are in dollars per basis point. Dollar risk uses
+signed value derivatives and remains defined at zero value, where normalized
+duration is undefined. For a fixed bond, effective and spread duration equal its
+continuous-zero duration; forward duration is zero. See [`duration`](@ref) with [`Effective`](@ref)/
 [`Spread`](@ref), [`dv01`](@ref), [`zspread`](@ref), [`locked_floater`](@ref).
 """
 function sensitivities(target::_Contractish, forward::AYM, credit::AYM, tenors)
     r = _ncurve_ad(c -> _cvalue2(target, c.forward, c.credit), (; forward, credit), tenors; order = 1)
     v = r.value
     gf, gc = r.gradient.forward, r.gradient.credit
-    # Dollar risk differentiates the signed value directly, so it stays defined at
-    # zero present value (an at-market swap, a hedged asset/liability pair) where
-    # the normalized durations below are not.
+    # Use signed derivatives to retain dollar exposure at zero present value.
     forward_dv01 = -sum(gf) / 10_000
     spread_dv01 = -sum(gc) / 10_000
     effective_dv01 = forward_dv01 + spread_dv01
@@ -114,17 +105,14 @@ end
 duration(::Spread, target::_Contractish, curve::AYM, tenors) = duration(Spread(), target, curve, curve, tenors)
 duration(::Effective, kr::KeyRates, target::_Contractish, curve::AYM) = sensitivities(target, curve, kr.tenors).effective_key_rate
 duration(::Spread, kr::KeyRates, target::_Contractish, curve::AYM) = sensitivities(target, curve, kr.tenors).spread_key_rate
-# default (no marker) on a contract/portfolio = effective
+# Unmarked contract and portfolio calls use Effective().
 duration(target::_Contractish, curve::AYM, tenors::AbstractVector) = duration(Effective(), target, curve, tenors)
 duration(kr::KeyRates, target::_Contractish, curve::AYM) = duration(Effective(), kr, target, curve)
 duration(::DV01, target::_Contractish, curve::AYM, tenors::AbstractVector) = dv01(Effective(), target, curve, tenors)
 convexity(target::_Contractish, curve::AYM, tenors::AbstractVector) = convexity(Effective(), target, curve, tenors)
 
-# Effective convexity: parallel-shift second derivative of the contract's
-# present value under a continuous-rate shock. Routes through the O(1) scalar
-# callback path, which is numerically
-# equivalent to the prior `sum(convexity(KeyRates(tenors), …))` matrix-sum form
-# under partition of unity but avoids the O(N²) Hessian.
+# Parallel convexity equals the full key-rate matrix sum. The scalar callback
+# computes it directly while reprojecting coupons under each curve shock.
 function convexity(::Effective, target::_Contractish, curve::AYM, tenors)
     _validate_tenors(tenors)
     return convexity(curve, c -> _cvalue(target, c))
@@ -133,11 +121,9 @@ end
 """
     dv01(args...)
 
-Dollar value of a 1bp move. `dv01(args...)` ≡ `duration(DV01(), args...)` for the
-cashflow/curve forms, with `dv01(Effective()/Spread(), target, [forward, credit,] tenors)`
-giving the floating-rate dollar durations (years × value ÷ 10⁴).
-For a contract or portfolio, `dv01(target, curve, tenors)` and
-`duration(DV01(), target, curve, tenors)` default to `Effective()`.
+Return signed dollar risk `-∂V/∂r / 10000`. Cashflow and callback forms alias
+`duration(DV01(), args...)`. Contract forms accept `Effective()` or `Spread()`;
+unmarked single-curve contract and portfolio calls default to `Effective()`.
 """
 function dv01(metric::Effective, target::_Contractish, forward::AYM, credit::AYM, tenors)
     return -_contract_parallel(metric, target, forward, credit, tenors).derivative / 10_000
@@ -186,17 +172,13 @@ end
 """
     locked_floater(fl::FinanceModels.Bond.Floating, current_coupon, next_reset)
 
-Model an in-force floater whose current coupon is LOCKED at `current_coupon` (the
-per-period amount fixed at the last reset) until `next_reset`, after which it floats.
-A `Composite` of a coupon-only stub at `next_reset` plus a forward-starting floater for
-the remainder (principal rides the forward leg). Gives the conventional rate duration
-≈ time to next reset; without it the idealized effective duration is ≈ 0 at a reset.
+Pay the fixed coupon amount `current_coupon` at `next_reset`, then resume floating
+coupons. Return a `Composite` of that coupon and a forward-starting floater carrying
+the principal. Effective duration is approximately the time to the next reset.
 
-The remaining term `fl.maturity - next_reset` must be an integer number of coupon
-periods. Otherwise the forward-starting leg would carry a stub first coupon whose
-fix-in-advance reference rate looks back before time zero — a quietly mispriced
-quantity on curves that extrapolate below ``t = 0`` and a `DomainError` on
-`ZeroRateCurve` — so non-commensurate inputs throw an `ArgumentError`.
+The remaining term `fl.maturity - next_reset` must contain a whole number of coupon
+periods. Otherwise throw `ArgumentError`: a stub coupon would require a reference
+rate before time zero.
 """
 function locked_floater(fl::FinanceModels.Bond.Floating, current_coupon, next_reset)
     freq = fl.frequency.frequency
