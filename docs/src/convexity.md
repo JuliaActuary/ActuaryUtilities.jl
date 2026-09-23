@@ -11,8 +11,9 @@ Plain scalar inputs use annual compounding; explicit `Rate` inputs use their
 specified compounding. A curve's initial discount factors are preserved.
 
 In v6.0, scalar convexity changes for every yield-model type. Both
-`convexity(curve, cfs, times)` and `convexity(curve, valuation_function)` agree
-with the tenor-aware form and the sum of the full key-rate matrix.
+`convexity(curve, cfs, times)` and `convexity(curve, valuation_function)` equal
+the sum of the full key-rate convexity matrix. See [Shock coordinates](@ref) for
+the coordinate each input uses.
 
 ## Why the analytic formula contains t²
 
@@ -64,12 +65,11 @@ julia> kr = KeyRates(times);
 
 julia> results = (convexity(curve, cfs, times),       # analytic fast path
                  convexity(curve, valuation),       # scalar AutoDiff
-                 convexity(curve, times, cfs, times),
                  sum(convexity(kr, curve, cfs, times)),
                  sum(convexity(kr, valuation, curve)));
 
 julia> round.(results; digits=6)
-(8.400872, 8.400872, 8.400872, 8.400872, 8.400872)
+(8.400872, 8.400872, 8.400872, 8.400872)
 ```
 
 For this example, with ``y=0.04`` and the same present-value weights:

@@ -1,81 +1,161 @@
-# Key Rate Sensitivities
+# Interest-Rate Sensitivities
 
-Calculate key-rate durations, DV01s, and convexities for any FinanceModels
-[`AbstractYieldModel`](https://github.com/JuliaActuary/FinanceModels.jl).
-
-Sensitivities measure triangular continuous-zero bumps on the original curve.
+Calculate durations, DV01s, and convexities for scalar rates, FinanceCore `Rate`s,
+FinanceModels [`AbstractYieldModel`](https://github.com/JuliaActuary/FinanceModels.jl)
+curves, and contracts. Scalar measures describe a parallel shift. Key-rate measures
+decompose risk by tenor with triangular continuous-zero bumps on the original curve.
 Callbacks use ForwardDiff through `Yield.TenorShift`; fixed cashflows use analytic
 derivatives. See the [autodiff ALM chapter](https://modernfinancialmodeling.com/autodiff_alm)
 for background.
-
-## API shape: curve + explicit KRD knots
-
-Every key-rate API takes the **curve** and an **explicit `tenors` vector**:
-
-```julia
-duration(KeyRates(knots), curve, cfs, times)
-```
-
-Choose the risk grid independently of the curve's own knots. For a `ZeroRateCurve`,
-you can use `zrc.tenors`; otherwise choose the buckets your reporting requires.
-
-**Requirements on `tenors`**: nonempty, finite, sorted ascending, distinct, and strictly positive. The `KeyRates` constructor validates these requirements, and calculations revalidate the grid in case it has been mutated.
 
 Explicit cashflow inputs that are empty or have all-zero amounts return zero value
 and risk without evaluating the curve. Nonzero amounts that offset to zero present
 value retain their dollar exposures and undefined normalized risk. See
 [Zero cashflow streams](@ref) for numeric types and portfolio aggregation.
 
-**Endpoint extrapolation:** the first and last bumps stay constant beyond the
-grid. Sensitivity after the last tenor belongs to its bucket. Extend the grid
-to separate exposures at longer maturities.
+## Shock coordinates
 
-## Basic Usage
+A one-basis-point shift must move some rate, and the dollar result depends on which
+one. Each input is shocked in its own native form:
+
+| Input | What moves by `s` | Modified duration | Convexity weight |
+|:------|:------------------|:------------------|:-----------------|
+| `Real` `y` (annual effective) | `y` | Macaulay / (1 + y) | `t(t+1) / (1+y)²` |
+| `Periodic(y, m)` | the nominal rate `y` | Macaulay / (1 + y/m) | `t(t+1/m) / (1+y/m)²` |
+| `Continuous(y)` | `y` | Macaulay | `t²` |
+| Any `AbstractYieldModel`, including `Yield.Constant` | every continuous zero rate, in parallel | Macaulay | `t²` |
+| `KeyRates(tenors)` | continuous zero rates, through a triangular bump at each tenor | per tenor | per tenor pair |
+| `IR01`/`CS01` with fixed cashflows | the combined rate `base + spread`, in its own coordinate | — | — |
+| Contracts with `Effective()`/`Spread()` | continuous zero rates of the projection and/or discount curve | — | — |
+
+DV01 is `-∂V/∂s / 10000` in the same coordinate and keeps the position's sign: a
+net liability has negative DV01. Scalar curve risk equals the sum of the
+corresponding key-rate results, including convexity cross terms (see
+[Convexity Conventions](@ref)).
+
+Wrapping a scalar in `Yield.Constant` keeps its discount factors but changes what
+moves, so duration and DV01 change by a factor of `1 + y`:
 
 ```@example sensitivities
 using ActuaryUtilities, FinanceModels, FinanceCore
 
+cfs   = [5.0, 5.0, 5.0, 5.0, 105.0]
+times = [1.0, 2.0, 3.0, 4.0, 5.0]
+
+(scalar_dv01 = duration(DV01(), 0.03, cfs, times),
+ curve_dv01  = duration(DV01(), Yield.Constant(0.03), cfs, times),
+ ratio       = duration(DV01(), Yield.Constant(0.03), cfs, times) / duration(DV01(), 0.03, cfs, times))
+```
+
+To measure a scalar yield in the curve coordinate, pass the equivalent continuous
+rate:
+
+```@example sensitivities
+duration(DV01(), Continuous(log1p(0.03)), cfs, times) ≈ duration(DV01(), Yield.Constant(0.03), cfs, times)
+```
+
+## Scalar Measures
+
+Without a `KeyRates` marker, duration, DV01, and convexity return parallel risk.
+No tenor grid is involved:
+
+```@example sensitivities
 rates  = [0.03, 0.03, 0.03, 0.03, 0.03]
 tenors = [1.0, 2.0, 3.0, 4.0, 5.0]
 zrc    = ZeroRateCurve(rates, tenors)
 
-cfs = [5.0, 5.0, 5.0, 5.0, 105.0]
-
-# Scalar modified duration (sum of KRDs)
-dur = duration(zrc, tenors, cfs, tenors)
+(duration  = duration(zrc, cfs, times),
+ macaulay  = duration(Macaulay(), zrc, cfs, times),
+ dv01      = duration(DV01(), zrc, cfs, times),
+ convexity = convexity(zrc, cfs, times))
 ```
+
+For a flat curve, the scalar measures match an explicitly continuous rate at the
+same zero-rate level:
 
 ```@example sensitivities
-# Scalar DV01
-dv01_scalar = duration(DV01(), zrc, tenors, cfs, tenors)
+(zrc_dur   = duration(zrc, cfs, times),
+ rate_dur  = duration(Continuous(0.03), cfs, times),
+ zrc_conv  = convexity(zrc, cfs, times),
+ rate_conv = convexity(Continuous(0.03), cfs, times))
 ```
+
+### Two curves: IR01 and CS01
+
+Fixed cashflows discounted at `base + credit` have equal IR01, CS01, and DV01 of the
+combined curve: a one-basis-point move in either component is a one-basis-point move
+in the combined rate.
 
 ```@example sensitivities
-# Scalar convexity
-conv = convexity(zrc, tenors, cfs, tenors)
+base   = ZeroRateCurve([0.03, 0.03, 0.03, 0.03, 0.03], tenors)
+credit = ZeroRateCurve([0.02, 0.02, 0.02, 0.02, 0.02], tenors)
+
+(ir01 = duration(IR01(), base, credit, cfs, times),
+ cs01 = duration(CS01(), base, credit, cfs, times),
+ dv01 = duration(DV01(), base + credit, cfs, times))
 ```
 
-To get the full key-rate decomposition (vectors/matrices), use `KeyRates(tenors)`:
+The measures separate when the curves play different roles. Pass a callback that
+receives `(base, credit)`; each measure applies a parallel shift to one curve:
+
+```@example sensitivities
+spread_margin = 0.02
+floating_value(b, c) = sum(1:5) do t
+    df_prev = t == 1 ? 1.0 : b(t - 1.0)
+    coupon  = 100 * (df_prev / b(Float64(t)) - 1 + spread_margin)   # resets on the base curve
+    (coupon + (t == 5 ? 100 : 0)) * b(Float64(t)) * c(Float64(t))
+end
+
+(ir01 = duration(IR01(), floating_value, base, credit),
+ cs01 = duration(CS01(), floating_value, base, credit))
+```
+
+Two-curve convexity returns the parallel `base`, `credit`, and `cross` blocks:
+
+```@example sensitivities
+(fixed    = convexity(base, credit, cfs, times),
+ floating = convexity(floating_value, base, credit))
+```
+
+## Key-Rate Decomposition
+
+Pass `KeyRates(tenors)` to decompose risk by tenor. Choose the grid independently of
+the curve's own knots, for example the buckets your reporting requires. The grid must
+be nonempty, finite, positive, and strictly increasing. The `KeyRates` constructor
+validates these requirements, and calculations revalidate the grid in case it has
+been mutated.
+
+The first and last bumps stay constant beyond the grid, so sensitivity after the
+last tenor belongs to its bucket. Extend the grid to separate exposures at longer
+maturities.
 
 ```@example sensitivities
 # Key rate durations (modified): vector of -∂V/∂rᵢ / V
-krds = duration(KeyRates(tenors), zrc, cfs, tenors)
+krds = duration(KeyRates(tenors), zrc, cfs, times)
 ```
 
 ```@example sensitivities
 # Key rate DV01s: vector of -∂V/∂rᵢ / 10000
-dv01s = duration(DV01(), KeyRates(tenors), zrc, cfs, tenors)
+dv01s = duration(DV01(), KeyRates(tenors), zrc, cfs, times)
 ```
 
 ```@example sensitivities
 # Key rate convexity matrix: ∂²V/∂rᵢ∂rⱼ / V
-conv_matrix = convexity(KeyRates(tenors), zrc, cfs, tenors)
+conv_matrix = convexity(KeyRates(tenors), zrc, cfs, times)
+```
+
+The scalar measures equal the sums of the decomposition:
+
+```@example sensitivities
+(duration(zrc, cfs, times) ≈ sum(krds),
+ duration(DV01(), zrc, cfs, times) ≈ sum(dv01s),
+ convexity(zrc, cfs, times) ≈ sum(conv_matrix))
 ```
 
 Use `sensitivities` to calculate value, duration or DV01, and convexity together:
 
 ```@example sensitivities
-result = sensitivities(KeyRates(tenors), zrc, cfs, tenors)
+result = sensitivities(KeyRates(tenors), zrc, cfs, times)
 # result.value       — present value
 # result.durations   — key rate durations (modified) — vector
 # result.convexities — cross-convexity matrix — matrix
@@ -84,12 +164,28 @@ result
 
 ```@example sensitivities
 # For DV01s instead of durations:
-dv01_result = sensitivities(DV01(), KeyRates(tenors), zrc, cfs, tenors)
+dv01_result = sensitivities(DV01(), KeyRates(tenors), zrc, cfs, times)
 # dv01_result.value       — present value
 # dv01_result.dv01s       — key rate DV01s — vector
 # dv01_result.convexities — cross-convexity matrix — matrix
 dv01_result
 ```
+
+Two-curve key-rate forms return per-tenor IR01s and CS01s and per-pair convexity
+matrices:
+
+```@example sensitivities
+(ir01s = duration(IR01(), KeyRates(tenors), base, credit, cfs, times),
+ cs01s = duration(CS01(), KeyRates(tenors), base, credit, cfs, times))
+```
+
+```@example sensitivities
+twocurve_result = sensitivities(KeyRates(tenors), base, credit, cfs, times)
+twocurve_result.base_durations
+```
+
+The fixed-cashflow valuation is `V = Σ cf × base(t) × credit(t)`: discount factors
+multiply, so continuously compounded zero rates add.
 
 ## Callable Valuations
 
@@ -118,8 +214,8 @@ Yield-model cashflow methods accept `Vector{Cashflow}` directly:
 cfs_obj = Cashflow.([5.0, 5.0, 5.0, 5.0, 105.0], [1.0, 2.0, 3.0, 4.0, 5.0])
 
 # These are equivalent:
-a = duration(zrc, tenors, cfs_obj)                                                            # using Cashflow objects
-b = duration(zrc, tenors, [5.0, 5.0, 5.0, 5.0, 105.0], [1.0, 2.0, 3.0, 4.0, 5.0])  # using amounts + times
+a = duration(zrc, cfs_obj)                                                            # using Cashflow objects
+b = duration(zrc, [5.0, 5.0, 5.0, 5.0, 105.0], [1.0, 2.0, 3.0, 4.0, 5.0])  # using amounts + times
 (a, b, a ≈ b)
 ```
 
@@ -135,8 +231,7 @@ duration(KeyRates(tenors), zrc, cfs_obj, fallback_times) ≈
     duration(KeyRates(tenors), zrc, cfs_obj)
 ```
 
-Legacy default key-rate grids and Hull–White default simulation horizons also use
-these resolved payment times. To change payment dates, construct new `Cashflow`
+Hull–White default simulation horizons also use these resolved payment times. To change payment dates, construct new `Cashflow`
 objects or pass numeric amounts with the desired times.
 
 ## Other yield models
@@ -152,62 +247,6 @@ ns_result.durations
 ```
 
 The Nelson-Siegel parameters stay fixed; only the layered zero-rate bumps move under AD.
-
-## Scalar vs Key-Rate Decomposition
-
-Without `KeyRates`, duration, DV01, and convexity return scalar parallel risk.
-
-For an `AbstractYieldModel`, scalar duration and convexity use an additive
-parallel shift in continuously compounded zero-rate space. This is the same
-shock coordinate used by the tenor-aware and key-rate forms. Plain scalar and
-explicit `Rate` inputs continue to use their own compounding conventions.
-
-Scalar convexity equals the sum of **all** key-rate matrix entries, including
-cross terms. See [Convexity Conventions](@ref) for the derivation and examples.
-
-To obtain the per-tenor decomposition, pass `KeyRates(tenors)` as the first argument:
-
-```@example sensitivities
-# Scalar (default) — same as sum of key-rate decomposition
-scalar_dur   = duration(zrc, tenors, cfs, tenors)
-scalar_dv01  = duration(DV01(), zrc, tenors, cfs, tenors)
-scalar_conv  = convexity(zrc, tenors, cfs, tenors)
-
-# Key-rate decomposition
-vector_dur   = duration(KeyRates(tenors), zrc, cfs, tenors)
-vector_dv01  = duration(DV01(), KeyRates(tenors), zrc, cfs, tenors)
-matrix_conv  = convexity(KeyRates(tenors), zrc, cfs, tenors)
-
-(scalar_dur, sum(vector_dur))
-```
-
-The scalar value equals the sum of the key-rate decomposition:
-
-```@example sensitivities
-duration(zrc, tenors, cfs, tenors) ≈ sum(duration(KeyRates(tenors), zrc, cfs, tenors))
-convexity(zrc, cfs, tenors) ≈ convexity(zrc, tenors, cfs, tenors)
-convexity(zrc, tenors, cfs, tenors) ≈ sum(convexity(KeyRates(tenors), zrc, cfs, tenors))
-```
-
-For a flat curve, the scalar measures match an explicitly continuous rate at
-the same zero-rate level:
-
-```@example sensitivities
-flat_cfs    = [5.0, 5.0, 5.0, 5.0, 105.0]
-flat_tenors = [1.0, 2.0, 3.0, 4.0, 5.0]
-flat_zrc    = ZeroRateCurve(fill(0.03, 5), flat_tenors)
-
-(zrc_dur   = duration(flat_zrc, flat_cfs, flat_tenors),
- rate_dur  = duration(Continuous(0.03), flat_cfs, flat_tenors),
- zrc_conv  = convexity(flat_zrc, flat_cfs, flat_tenors),
- rate_conv = convexity(Continuous(0.03), flat_cfs, flat_tenors))
-```
-
-Request Macaulay duration with its marker:
-
-```@example sensitivities
-duration(Macaulay(), 0.03, flat_cfs, flat_tenors)
-```
 
 ## Interest-Sensitive Instruments
 
@@ -233,52 +272,16 @@ end
 
 The function receives a curve object and must return a scalar value. ForwardDiff differentiates through the entire valuation, capturing any rate-dependent optionality.
 
-## Two-Curve Decomposition
+## Two-Curve Key Rates
 
-Decompose sensitivities into base (risk-free) and credit spread components using `IR01` and `CS01`:
-
-```@example sensitivities
-base   = ZeroRateCurve([0.03, 0.03, 0.03, 0.03, 0.03], tenors)
-credit = ZeroRateCurve([0.02, 0.02, 0.02, 0.02, 0.02], tenors)
-
-# Scalar IR01 and CS01
-ir01 = duration(IR01(), base, credit, tenors, cfs, tenors)
-cs01 = duration(CS01(), base, credit, tenors, cfs, tenors)
-(ir01, cs01)
-```
-
-```@example sensitivities
-# Key-rate decomposition (vectors)
-ir01s = duration(IR01(), KeyRates(tenors), base, credit, cfs, tenors)
-cs01s = duration(CS01(), KeyRates(tenors), base, credit, cfs, tenors)
-(ir01s, cs01s)
-```
-
-```@example sensitivities
-# Two-curve convexity — scalars by default
-conv_2c = convexity(base, credit, tenors, cfs, tenors)
-# conv_2c.base, conv_2c.credit, conv_2c.cross (all scalars)
-```
-
-```@example sensitivities
-# Key-rate decomposition (matrices)
-conv_2c_kr = convexity(KeyRates(tenors), base, credit, cfs, tenors)
-# conv_2c_kr.base, conv_2c_kr.credit, conv_2c_kr.cross (all matrices)
-```
-
-```@example sensitivities
-# Full two-curve sensitivities (always key-rate decomposition)
-twocurve_result = sensitivities(KeyRates(tenors), base, credit, cfs, tenors)
-twocurve_result.base_durations
-```
-
-The fixed-cashflow valuation is `V = Σ cf × base(t) × credit(t)`: discount factors
-multiply, so continuously compounded zero rates add.
+The two-curve callback forms also accept `KeyRates`. The callback receives the
+bumped `(base, credit)` curves.
 
 ### Example: Credit-Risky Floating Rate Bond
 
-Fixed cashflows have equal IR01 and CS01 under this discount composition. For a
-floater, base-rate changes also reset coupons, so the sensitivities can differ:
+Fixed cashflows have equal IR01 and CS01 under multiplicative discount composition.
+For a floater, base-rate changes also reset coupons, so the sensitivities differ
+bucket by bucket:
 
 ```@example sensitivities
 credit_spread = 0.02
@@ -319,18 +322,21 @@ The marker selects the risk:
 using FinanceModels: Bond
 floater = Bond.Floating(0.015, Periodic(1), 5.0, "SOFR")   # SOFR + 150bp, 5y annual
 
-duration(Effective(), floater, zrc, tenors)   # rate duration, yrs — small
-duration(Spread(),    floater, zrc, tenors)   # spread duration, yrs — ≈ maturity
-dv01(Effective(),     floater, zrc, tenors)   # effective DV01, $/bp
+(effective = duration(Effective(), floater, zrc),   # rate duration, yrs — small
+ spread    = duration(Spread(),    floater, zrc),   # spread duration, yrs — ≈ maturity
+ dv01      = dv01(Effective(),     floater, zrc))   # effective DV01, $/bp
 ```
 
-Single-curve calls without a marker default to `Effective()` for all three verbs,
-including portfolios. Request spread risk explicitly with `Spread()`.
+Calls without a marker default to `Effective()` for all three verbs, including
+portfolios. Request spread risk explicitly with `Spread()`. Two-curve forms take
+`(forward, credit)`: coupons project on `forward` and discount on `credit`. The
+parallel measures take no tenor grid; use `KeyRates(tenors)` or `sensitivities`
+for a key-rate decomposition.
 
 ```@example sensitivities
-(duration(floater, zrc, tenors) ≈ duration(Effective(), floater, zrc, tenors),
- dv01(floater, zrc, tenors) ≈ dv01(Effective(), floater, zrc, tenors),
- convexity(floater, zrc, tenors) ≈ convexity(Effective(), floater, zrc, tenors))
+(duration(floater, zrc) ≈ duration(Effective(), floater, zrc),
+ dv01(floater, zrc) ≈ dv01(Effective(), floater, zrc),
+ convexity(floater, zrc) ≈ convexity(Effective(), floater, zrc))
 ```
 
 `sensitivities` returns effective, spread, and forward risk together:
@@ -343,7 +349,7 @@ s = sensitivities(floater, zrc, tenors)
 For a fixed bond `effective == spread ==` the modified duration. For an **in-force** floater whose current coupon is already fixed, [`locked_floater`](@ref) gives the conventional rate duration ≈ time to next reset:
 
 ```@example sensitivities
-duration(Effective(), locked_floater(floater, 0.04, 1.0), zrc, tenors)   # ≈ 1y, not ≈ 5
+duration(Effective(), locked_floater(floater, 0.04, 1.0), zrc)   # ≈ 1y, not ≈ 5
 ```
 
 ### Portfolios
@@ -353,7 +359,7 @@ before normalizing risk:
 
 ```@example sensitivities
 portfolio = [floater, Bond.Fixed(0.03, Periodic(1), 7.0)]
-duration(portfolio, zrc, tenors)
+duration(portfolio, zrc)
 ```
 
 ### Multi-curve: risk-free + credit + ILP + index

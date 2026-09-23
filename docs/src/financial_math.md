@@ -24,7 +24,7 @@ See [Convexity Conventions](@ref) for rate-shock definitions and worked examples
     Use `Macaulay` and `Modified` for fixed cashflows. Pass contracts or portfolios
     directly to reproject coupons under curve shocks. `Effective()` selects rate
     risk; `Spread()` selects spread risk. `sensitivities` returns both in one
-    calculation. See [Key Rate Sensitivities](@ref) for examples and multiple curves.
+    calculation. See [Interest-Rate Sensitivities](@ref) for examples and multiple curves.
 
 
 ## Zero cashflow streams

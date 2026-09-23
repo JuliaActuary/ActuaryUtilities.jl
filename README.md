@@ -28,8 +28,9 @@ A collection of common functions/manipulations used in Actuarial Calculations.
 ### Financial Maths
 
 - `duration`:
-  - Calculate the `Macaulay`, `Modified`, or `DV01` durations for a set of cashflows
-  - Calculate the `KeyRate(time)` (a.k.a. `KeyRateZero`) duration or `KeyRatePar(time)` duration
+  - Calculate the `Macaulay`, `Modified`, or signed `DV01` durations for a set of cashflows
+  - Calculate `IR01`/`CS01` and `Effective`/`Spread` risk for curves, contracts, and portfolios
+  - Decompose risk by tenor with `KeyRates(tenors)`
 - `convexity` for price sensitivity
 - Flexible interest rate models via the [`FinanceModels.jl`](https://github.com/JuliaActuary/FinanceModels.jl) package.
 - `internal_rate_of_return` or `irr` to calculate the IRR given cashflows (including at timepoints like Excel's `XIRR`)
@@ -72,7 +73,7 @@ hw_result = sensitivities(KeyRates(tenors), hw, cfs, tenors; n_scenarios=1000, r
 hw_result.durations   # key rate durations under stochastic dynamics
 ```
 
-See the [Key Rate Sensitivities documentation](https://docs.juliaactuary.org/ActuaryUtilities/stable/sensitivities/) for details.
+See the [Interest-Rate Sensitivities documentation](https://docs.juliaactuary.org/ActuaryUtilities/stable/sensitivities/) for details.
 
 ### Risk Measures
 
