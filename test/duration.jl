@@ -244,7 +244,7 @@ end
 
 @testset "Scalar do-block on ZRC uses continuous curve shocks" begin
     # No-tenor do-block calls use the same continuous-zero parallel shift as
-    # the tenor-aware and key-rate APIs.
+    # the cashflow and key-rate APIs.
     rates = [0.04, 0.04, 0.04, 0.04, 0.04]
     tenors = [1.0, 2.0, 3.0, 4.0, 5.0]
     zrc = FM.ZeroRateCurve(rates, tenors, FM.Spline.Linear())
@@ -255,11 +255,13 @@ end
         sum(cf * curve(t) for (cf, t) in zip(cfs, times))
     end
     @test vf_dur isa Real
-    @test vf_dur ≈ duration(zrc, tenors, cfs, times) atol = 1.0e-12
+    @test vf_dur ≈ duration(zrc, cfs, times) atol = 1.0e-12
+    @test vf_dur ≈ sum(duration(KeyRates(tenors), zrc, cfs, times)) atol = 1.0e-12
 
     vf_conv = convexity(zrc) do curve
         sum(cf * curve(t) for (cf, t) in zip(cfs, times))
     end
     @test vf_conv isa Real
-    @test vf_conv ≈ convexity(zrc, tenors, cfs, times) atol = 1.0e-12
+    @test vf_conv ≈ convexity(zrc, cfs, times) atol = 1.0e-12
+    @test vf_conv ≈ sum(convexity(KeyRates(tenors), zrc, cfs, times)) atol = 1.0e-10
 end

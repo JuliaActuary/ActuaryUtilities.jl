@@ -1,95 +1,26 @@
-@testset "Key Rate Durations" begin
-    default_shift = 0.001
-
-    @test KeyRate(5) == KeyRateZero(5)
-    @test KeyRate(5) == KeyRateZero(5, default_shift)
-    @test KeyRatePar(5) == KeyRatePar(5, default_shift)
-
-    c = FM.Yield.Constant(FC.Periodic(0.04, 2))
-
-    cp = FinancialMath._krd_new_curve(KeyRatePar(5), c, 1:10)
-    cz = FinancialMath._krd_new_curve(KeyRateZero(5), c, 1:10)
-
-    # test some relationships between par and zero curve
-    @test FM.par(cp, 5) ≈ FM.par(c, 5) + default_shift atol = 0.0002 # 0.001 is the default shift
-    @test FM.par(cp, 4) ≈ FC.Periodic(0.04, 2) atol = 0.0001
-    @test zero(cp, 5) > FM.par(cp, 5)
-    @test zero(cp, 6) < FM.par(cp, 6)
-
-    @testset "FEH123" begin
-        # http://www.financialexamhelp123.com/key-rate-duration/
-
-        #test some curve properties
-
-
-        bond = (
-            cfs = [0.02 for t in 1:10],
-            times = collect(0.5:0.5:5),
-        )
-        bond.cfs[end] += 1.0
-
-        @test duration(KeyRatePar(1), c, bond.cfs, bond.times) ≈ 0.0 atol = 0.01
-        @test duration(KeyRatePar(2), c, bond.cfs, bond.times) ≈ 0.0 atol = 0.01
-        @test duration(KeyRatePar(3), c, bond.cfs, bond.times) ≈ 0.0 atol = 0.01
-        @test duration(KeyRatePar(4), c, bond.cfs, bond.times) ≈ 0.0 atol = 0.01
-        @test duration(KeyRatePar(5), c, bond.cfs, bond.times) ≈ 4.45 atol = 0.05
-
-        bond = (times = [1, 2, 3, 4, 5], cfs = [0, 0, 0, 0, 100])
-        c = FC.Continuous(0.05)
-        @test duration(KeyRateZero(1), c, bond.cfs, bond.times) ≈ 0.0 atol = 1.0e-10
-        @test duration(KeyRateZero(2), c, bond.cfs, bond.times) ≈ 0.0 atol = 1.0e-10
-        @test duration(KeyRateZero(3), c, bond.cfs, bond.times) ≈ 0.0 atol = 1.0e-10
-        @test duration(KeyRateZero(4), c, bond.cfs, bond.times) ≈ 0.0 atol = 1.0e-10
-        @test duration(KeyRateZero(5), c, bond.cfs, bond.times) ≈ duration(c, bond.cfs, bond.times) atol = 0.1
-
-        cfo = FC.Cashflow.(bond.cfs, bond.times)
-        @test duration(KeyRateZero(5), c, cfo) ≈ duration(c, bond.cfs, bond.times) atol = 0.1
-
-
-    end
-end
-
-@testset "KeyRateZero TenorShift" begin
-    krd_points = 1:10
-    shift = 0.001
-
-    # Interior point: triangle bump at τ=5
-    bump_fn = FinancialMath._tent_bump(shift, 5, krd_points)
-    base_z = FC.Continuous(0.05)
-    @test bump_fn(base_z, 5).continuous_value ≈ 0.05 + shift       # peak
-    @test bump_fn(base_z, 4).continuous_value ≈ 0.05               # left neighbor
-    @test bump_fn(base_z, 6).continuous_value ≈ 0.05               # right neighbor
-    @test bump_fn(base_z, 4.5).continuous_value ≈ 0.05 + shift / 2 # midpoint of ramp
-
-    # First point: flat left, ramp right
-    bump_first = FinancialMath._tent_bump(shift, 1, krd_points)
-    @test bump_first(base_z, 0.5).continuous_value ≈ 0.05 + shift  # flat left
-    @test bump_first(base_z, 1.0).continuous_value ≈ 0.05 + shift  # at τ
-    @test bump_first(base_z, 2.0).continuous_value ≈ 0.05          # right neighbor
-    @test bump_first(base_z, 1.5).continuous_value ≈ 0.05 + shift / 2
-
-    # Last point: ramp left, flat right
-    bump_last = FinancialMath._tent_bump(shift, 10, krd_points)
-    @test bump_last(base_z, 9.0).continuous_value ≈ 0.05           # left neighbor
-    @test bump_last(base_z, 10.0).continuous_value ≈ 0.05 + shift  # at τ
-    @test bump_last(base_z, 11.0).continuous_value ≈ 0.05 + shift  # flat right
-
-    # Returns TenorShift type
+@testset "Key rate durations of a zero-coupon bond" begin
+    # http://www.financialexamhelp123.com/key-rate-duration/ (zero-rate portion)
+    bond = (times = [1, 2, 3, 4, 5], cfs = [0, 0, 0, 0, 100])
     c = FM.Yield.Constant(FC.Continuous(0.05))
-    cz = FinancialMath._krd_new_curve(KeyRateZero(5), c, krd_points)
-    @test cz isa FM.Yield.TenorShift
+    krds = duration(KeyRates(1:5), c, bond.cfs, bond.times)
+    # A payment at the last knot loads only that knot's hat.
+    @test krds[1:4] ≈ zeros(4) atol = 1.0e-12
+    @test krds[5] ≈ 5.0
+    @test sum(krds) ≈ duration(c, bond.cfs, bond.times)
 
-    # Rate input properly wrapped in Constant
-    cz_rate = FinancialMath._krd_new_curve(KeyRateZero(5), FC.Continuous(0.05), krd_points)
-    @test cz_rate isa FM.Yield.TenorShift
+    cfo = FC.Cashflow.(bond.cfs, bond.times)
+    @test duration(KeyRates(1:5), c, cfo) ≈ krds
 
-    # Sum of KRDs ≈ total modified duration (flat curve sanity check)
-    bond_cfs = [3.0, 3.0, 3.0, 3.0, 103.0]
-    bond_times = [1.0, 2.0, 3.0, 4.0, 5.0]
-    flat = FM.Yield.Constant(FC.Continuous(0.05))
-    krd_sum = sum(duration(KeyRateZero(t), flat, bond_cfs, bond_times, 1:5) for t in 1:5)
-    mod_dur = duration(flat, bond_cfs, bond_times)
-    @test krd_sum ≈ mod_dur atol = 0.01
+    # Hat shape: flat before the first knot, triangular between knots, and flat
+    # after the last knot.
+    tenors = 1:10
+    bumps(i) = [k == i ? 0.001 : 0.0 for k in tenors]
+    @test FinancialMath._hat_bump(tenors, bumps(5), 5.0) ≈ 0.001
+    @test FinancialMath._hat_bump(tenors, bumps(5), 4.5) ≈ 0.0005
+    @test FinancialMath._hat_bump(tenors, bumps(5), 6.0) ≈ 0.0 atol = 1.0e-16
+    @test FinancialMath._hat_bump(tenors, bumps(1), 0.5) ≈ 0.001
+    @test FinancialMath._hat_bump(tenors, bumps(10), 11.0) ≈ 0.001
+    @test sum(FinancialMath._hat_bump(tenors, bumps(i), 4.25) for i in tenors) ≈ 0.001
 end
 
 @testset "ZeroRateCurve duration" begin
@@ -153,9 +84,9 @@ end
 
         asset_scalar = duration(DV01(), rate, asset_cfs, times)
         liability_scalar = duration(DV01(), rate, liability_cfs, times)
-        liability_curve = duration(DV01(), curve, times, liability_cfs, times)
+        liability_curve = duration(DV01(), curve, liability_cfs, times)
         liability_key_rates = duration(DV01(), KeyRates(times), curve, liability_cfs, times)
-        liability_do_block = duration(DV01(), curve, times) do c
+        liability_do_block = duration(DV01(), curve) do c
             FC.present_value(c, liability_cfs, times)
         end
 
@@ -219,24 +150,19 @@ end
         @test conv[2, 3] ≈ 0.0 atol = 1.0e-6
     end
 
-    @testset "scalar convexity(curve, tenors, ...) ≡ sum(KRD Hessian) (POU regression guard)" begin
+    @testset "scalar curve convexity ≡ sum(KRD Hessian) (POU regression guard)" begin
         # Under partition of unity of the KRD hat functions, the continuous-
         # shock parallel-shift scalar convexity equals the sum of the N×N
-        # key-rate Hessian by the chain rule. The scalar entry points now
-        # route through `_parallel_continuous_convexity` (TenorShift + two
-        # nested ForwardDiff.derivatives), avoiding the Hessian build entirely.
-        # Locks the equivalence in.
+        # key-rate Hessian by the chain rule. Locks the equivalence in.
         rates = [0.02, 0.025, 0.03, 0.035, 0.04]
         tenors = [1.0, 2.0, 3.0, 5.0, 7.0]
         zrc = FM.ZeroRateCurve(rates, tenors, FM.Spline.Linear())
         cfs = [5.0, 5.0, 5.0, 5.0, 105.0]
         times = [1.0, 2.0, 3.0, 4.0, 5.0]
 
-        scalar_form = convexity(zrc, tenors, cfs, times)
         no_tenor_form = convexity(zrc, cfs, times)
         matrix_sum = sum(convexity(KeyRates(tenors), zrc, cfs, times))
-        @test no_tenor_form ≈ scalar_form atol = 1.0e-12
-        @test scalar_form ≈ matrix_sum atol = 1.0e-8
+        @test no_tenor_form ≈ matrix_sum atol = 1.0e-8
 
         # Independent central-difference oracle: curve inputs are bumped in
         # continuously compounded zero-rate space in both directions.
@@ -247,18 +173,16 @@ end
         finite_difference = (value(up) + value(down) - 2value(zrc)) / (value(zrc) * Δ^2)
         @test no_tenor_form ≈ finite_difference atol = 1.0e-6
 
-        vf_scalar = convexity(c -> sum(cf * FC.discount(c, t) for (cf, t) in zip(cfs, times)), zrc, tenors)
         vf_no_tenor = convexity(zrc) do c
             sum(cf * FC.discount(c, t) for (cf, t) in zip(cfs, times))
         end
         vf_matrix = sum(convexity(KeyRates(tenors), c -> sum(cf * FC.discount(c, t) for (cf, t) in zip(cfs, times)), zrc))
-        @test vf_no_tenor ≈ vf_scalar atol = 1.0e-12
-        @test vf_scalar ≈ vf_matrix atol = 1.0e-8
+        @test vf_no_tenor ≈ no_tenor_form atol = 1.0e-12
+        @test vf_no_tenor ≈ vf_matrix atol = 1.0e-8
 
         # Cashflow-vector form
         cashflows = [FC.Cashflow(cfs[k], times[k]) for k in eachindex(cfs)]
-        @test convexity(zrc, cashflows) ≈ scalar_form atol = 1.0e-12
-        @test convexity(zrc, tenors, cashflows) ≈ matrix_sum atol = 1.0e-8
+        @test convexity(zrc, cashflows) ≈ no_tenor_form atol = 1.0e-12
     end
 
     @testset "two-curve IR01/CS01" begin
@@ -296,27 +220,27 @@ end
         @test conv.cross ≈ conv.base atol = 1.0e-10
     end
 
-    @testset "scalar return: duration(zrc, ...) returns sum of KeyRates" begin
+    @testset "scalar curve measures equal sums of KeyRates results" begin
         rates = [0.04, 0.04, 0.04, 0.04, 0.04]
         tenors = [1.0, 2.0, 3.0, 4.0, 5.0]
         zrc = FM.ZeroRateCurve(rates, tenors, FM.Spline.Linear())
         cfs = [5.0, 5.0, 5.0, 5.0, 105.0]
 
         # duration scalar = sum of KeyRates vector
-        scalar_dur = duration(zrc, tenors, cfs, tenors)
+        scalar_dur = duration(zrc, cfs, tenors)
         krds = duration(KeyRates(tenors), zrc, cfs, tenors)
         @test scalar_dur isa Real
         @test !(scalar_dur isa AbstractArray)
         @test scalar_dur ≈ sum(krds) atol = 1.0e-12
 
         # DV01 scalar = sum of KeyRates DV01 vector
-        scalar_dv01 = duration(DV01(), zrc, tenors, cfs, tenors)
+        scalar_dv01 = duration(DV01(), zrc, cfs, tenors)
         dv01_vec = duration(DV01(), KeyRates(tenors), zrc, cfs, tenors)
         @test scalar_dv01 isa Real
         @test scalar_dv01 ≈ sum(dv01_vec) atol = 1.0e-12
 
         # convexity scalar = sum of KeyRates convexity matrix
-        scalar_conv = convexity(zrc, tenors, cfs, tenors)
+        scalar_conv = convexity(zrc, cfs, tenors)
         conv_mat = convexity(KeyRates(tenors), zrc, cfs, tenors)
         @test scalar_conv isa Real
         @test scalar_conv ≈ sum(conv_mat) atol = 1.0e-12
@@ -337,19 +261,27 @@ end
         cfs = [5.0, 5.0, 5.0, 5.0, 105.0]
 
         # IR01 scalar = sum of KeyRates IR01 vector
-        scalar_ir01 = duration(IR01(), base, credit, tenors, cfs, tenors)
+        scalar_ir01 = duration(IR01(), base, credit, cfs, tenors)
         ir01_vec = duration(IR01(), KeyRates(tenors), base, credit, cfs, tenors)
         @test scalar_ir01 isa Real
         @test scalar_ir01 ≈ sum(ir01_vec) atol = 1.0e-12
 
         # CS01 scalar = sum of KeyRates CS01 vector
-        scalar_cs01 = duration(CS01(), base, credit, tenors, cfs, tenors)
+        scalar_cs01 = duration(CS01(), base, credit, cfs, tenors)
         cs01_vec = duration(CS01(), KeyRates(tenors), base, credit, cfs, tenors)
         @test scalar_cs01 isa Real
         @test scalar_cs01 ≈ sum(cs01_vec) atol = 1.0e-12
 
+        # Callback forms bump one curve role with a parallel shift.
+        pv2(b, c) = FC.present_value(b + c, cfs, tenors)
+        @test duration(IR01(), pv2, base, credit) ≈ sum(duration(IR01(), KeyRates(tenors), pv2, base, credit)) atol = 1.0e-12
+        @test duration(CS01(), pv2, base, credit) ≈ sum(duration(CS01(), KeyRates(tenors), pv2, base, credit)) atol = 1.0e-12
+        @test duration(IR01(), base, credit) do b, c
+            pv2(b, c)
+        end ≈ scalar_ir01 atol = 1.0e-12
+
         # Two-curve convexity: scalars = sums of matrices
-        scalar_conv = convexity(base, credit, tenors, cfs, tenors)
+        scalar_conv = convexity(base, credit, cfs, tenors)
         mat_conv = convexity(KeyRates(tenors), base, credit, cfs, tenors)
         @test scalar_conv.base isa Real
         @test scalar_conv.base ≈ sum(mat_conv.base) atol = 1.0e-12
@@ -568,13 +500,13 @@ end
     cfs = FC.Cashflow.(amounts, tenors)
 
     # single-curve duration
-    @test duration(zrc, tenors, cfs) ≈ duration(zrc, tenors, amounts, tenors)
+    @test duration(zrc, cfs) ≈ duration(zrc, amounts, tenors)
     @test duration(KeyRates(tenors), zrc, cfs) ≈ duration(KeyRates(tenors), zrc, amounts, tenors)
-    @test duration(DV01(), zrc, tenors, cfs) ≈ duration(DV01(), zrc, tenors, amounts, tenors)
+    @test duration(DV01(), zrc, cfs) ≈ duration(DV01(), zrc, amounts, tenors)
     @test duration(DV01(), KeyRates(tenors), zrc, cfs) ≈ duration(DV01(), KeyRates(tenors), zrc, amounts, tenors)
 
     # single-curve convexity
-    @test convexity(zrc, tenors, cfs) ≈ convexity(zrc, tenors, amounts, tenors)
+    @test convexity(zrc, cfs) ≈ convexity(zrc, amounts, tenors)
     @test convexity(KeyRates(tenors), zrc, cfs) ≈ convexity(KeyRates(tenors), zrc, amounts, tenors)
 
     # single-curve sensitivities
@@ -595,14 +527,14 @@ end
     base = FM.ZeroRateCurve(base_rates, tenors, FM.Spline.Linear())
     credit = FM.ZeroRateCurve(credit_rates, tenors, FM.Spline.Linear())
 
-    @test duration(IR01(), base, credit, tenors, cfs) ≈ duration(IR01(), base, credit, tenors, amounts, tenors)
+    @test duration(IR01(), base, credit, cfs) ≈ duration(IR01(), base, credit, amounts, tenors)
     @test duration(IR01(), KeyRates(tenors), base, credit, cfs) ≈ duration(IR01(), KeyRates(tenors), base, credit, amounts, tenors)
-    @test duration(CS01(), base, credit, tenors, cfs) ≈ duration(CS01(), base, credit, tenors, amounts, tenors)
+    @test duration(CS01(), base, credit, cfs) ≈ duration(CS01(), base, credit, amounts, tenors)
     @test duration(CS01(), KeyRates(tenors), base, credit, cfs) ≈ duration(CS01(), KeyRates(tenors), base, credit, amounts, tenors)
 
     # two-curve convexity
-    conv_cf = convexity(base, credit, tenors, cfs)
-    conv_raw = convexity(base, credit, tenors, amounts, tenors)
+    conv_cf = convexity(base, credit, cfs)
+    conv_raw = convexity(base, credit, amounts, tenors)
     @test conv_cf.base ≈ conv_raw.base
     @test conv_cf.credit ≈ conv_raw.credit
     @test conv_cf.cross ≈ conv_raw.cross
@@ -633,7 +565,7 @@ end
         semi_amounts = [2.5, 2.5, 2.5, 2.5, 2.5, 102.5]
         semi_cfs = FC.Cashflow.(semi_amounts, semi_times)
 
-        @test duration(zrc, tenors, semi_cfs) ≈ duration(zrc, tenors, semi_amounts, semi_times)
+        @test duration(zrc, semi_cfs) ≈ duration(zrc, semi_amounts, semi_times)
         @test duration(KeyRates(tenors), zrc, semi_cfs) ≈ duration(KeyRates(tenors), zrc, semi_amounts, semi_times)
     end
 end

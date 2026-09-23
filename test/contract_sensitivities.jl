@@ -7,9 +7,9 @@
     fb = FM.Bond.Fixed(0.04, FC.Periodic(1), 5.0)
 
     @testset "par floater: effective ≈ 0, spread ≈ maturity" begin
-        @test duration(Effective(), fl0, curve, tenors) ≈ 0.0 atol = 1.0e-8
-        @test duration(Spread(), fl0, curve, tenors) > 4.0
-        @test convexity(Effective(), fl0, curve, tenors) ≈ 0.0 atol = 1.0e-6
+        @test duration(Effective(), fl0, curve) ≈ 0.0 atol = 1.0e-8
+        @test duration(Spread(), fl0, curve) > 4.0
+        @test convexity(Effective(), fl0, curve) ≈ 0.0 atol = 1.0e-6
     end
 
     @testset "bundle: effective = forward + spread; sums; dollar <-> year" begin
@@ -22,7 +22,7 @@
 
     @testset "fixed bond: effective == spread == modified, forward == 0" begin
         s = sensitivities(fb, curve, tenors)
-        modified = duration(curve, tenors, collect(FM.Projection(fb, curve, FM.CashflowProjection())))
+        modified = duration(curve, collect(FM.Projection(fb, curve, FM.CashflowProjection())))
         @test s.effective_duration ≈ modified atol = 1.0e-8
         @test s.spread_duration ≈ modified atol = 1.0e-8
         @test s.forward_duration ≈ 0.0 atol = 1.0e-8
@@ -31,7 +31,7 @@
     @testset "floater: effective convexity (dynamic cashflows under reproject)" begin
         # Reproject coupons under each shock; scalar and matrix-sum risk must agree.
         _cvalue_flm(c) = FC.present_value(c, ActuaryUtilities.reproject(flm, c))
-        @test convexity(Effective(), flm, curve, tenors) ≈
+        @test convexity(Effective(), flm, curve) ≈
             sum(convexity(KeyRates(tenors), _cvalue_flm, curve)) atol = 1.0e-10
     end
 
@@ -39,32 +39,35 @@
         # The hats sum to one, so contract, scalar, and full matrix risk agree.
         cfs = collect(FM.Projection(fb, curve, FM.CashflowProjection()))
         amts = FC.amount.(cfs); times = FC.timepoint.(cfs)
-        @test convexity(Effective(), fb, curve, tenors) ≈
+        @test convexity(Effective(), fb, curve) ≈
             sum(convexity(KeyRates(tenors), curve, amts, times)) atol = 1.0e-8
         @test convexity(curve, cfs) ≈
-            convexity(Effective(), fb, curve, tenors) atol = 1.0e-8
+            convexity(Effective(), fb, curve) atol = 1.0e-8
     end
 
     @testset "default duration & dv01 verb" begin
         for target in (fb, flm, [fb, flm])
-            @test duration(target, curve, tenors) ≈ duration(Effective(), target, curve, tenors)
-            @test dv01(target, curve, tenors) ≈ dv01(Effective(), target, curve, tenors)
-            @test duration(DV01(), target, curve, tenors) ≈ dv01(Effective(), target, curve, tenors)
-            @test convexity(target, curve, tenors) ≈ convexity(Effective(), target, curve, tenors)
+            @test duration(target, curve) ≈ duration(Effective(), target, curve)
+            @test dv01(target, curve) ≈ dv01(Effective(), target, curve)
+            @test duration(DV01(), target, curve) ≈ dv01(Effective(), target, curve)
+            @test convexity(target, curve) ≈ convexity(Effective(), target, curve)
+            # The parallel measures equal the sums of the key-rate bundle.
+            s = sensitivities(target, curve, tenors)
+            @test duration(target, curve) ≈ s.effective_duration atol = 1.0e-12
+            @test duration(Spread(), target, curve) ≈ s.spread_duration atol = 1.0e-12
+            @test dv01(Spread(), target, curve) ≈ s.spread_dv01 atol = 1.0e-12
         end
-        @test (@inferred dv01(fb, curve, tenors)) isa Float64
-        @test (@inferred convexity(fb, curve, tenors)) isa Float64
-        @test_throws ArgumentError dv01(fb, curve, [2.0, 1.0])
-        @test_throws ArgumentError convexity(fb, curve, [2.0, 1.0])
-        @test dv01(Effective(), flm, curve, tenors) ≈ sensitivities(flm, curve, tenors).effective_dv01
+        @test (@inferred dv01(fb, curve)) isa Float64
+        @test (@inferred convexity(fb, curve)) isa Float64
+        @test dv01(Effective(), flm, curve) ≈ sensitivities(flm, curve, tenors).effective_dv01
         @test dv01(0.05, [5.0, 5.0, 105.0]) ≈ duration(DV01(), 0.05, [5.0, 5.0, 105.0])   # cashflow fallback
     end
 
     @testset "portfolio: one-pass == value-weighted" begin
         port = [flm, fb]
-        dport = duration(port, curve, tenors)
+        dport = duration(port, curve)
         vfl = FC.present_value(curve, reproject(flm, curve)); vfb = FC.present_value(curve, fb)
-        dfl = duration(flm, curve, tenors); dfb = duration(fb, curve, tenors)
+        dfl = duration(flm, curve); dfb = duration(fb, curve)
         @test dport ≈ (vfl * dfl + vfb * dfb) / (vfl + vfb) atol = 1.0e-8
     end
 
@@ -89,7 +92,7 @@
         @test z.zspread > 0.0
         reprice = FC.present_value(curve + ((zz, t) -> zz + FC.Continuous(z.zspread)), reproject(flm, curve))
         @test reprice ≈ pvm - 0.03 atol = 1.0e-10
-        @test duration(Effective(), locked_floater(fl0, 0.05, 1.0), curve, tenors) ≈ 1.0 atol = 0.1
+        @test duration(Effective(), locked_floater(fl0, 0.05, 1.0), curve) ≈ 1.0 atol = 0.1
     end
 
     @testset "effective: AD == central finite difference (re-projecting)" begin
@@ -97,7 +100,7 @@
         up = curve + ((z, t) -> z + FC.Continuous(+Δ)); dn = curve + ((z, t) -> z + FC.Continuous(-Δ))
         rj(crv) = FC.present_value(crv, reproject(flm, crv))
         eff_fd = (rj(dn) - rj(up)) / (2Δ * rj(curve))
-        @test duration(Effective(), flm, curve, tenors) ≈ eff_fd atol = 1.0e-4
+        @test duration(Effective(), flm, curve) ≈ eff_fd atol = 1.0e-4
     end
 end
 
@@ -163,8 +166,8 @@ end
     @testset "IR01 ⇒ Effective, CS01 ⇒ Spread (vs eq.(3)+(4) 1bp bump)" begin
         @test s.effective_dv01 ≈ ir01_ref rtol = 1.0e-4
         @test s.spread_dv01 ≈ cs01_ref rtol = 1.0e-4
-        @test dv01(Effective(), fl, rf, credit, tenors) ≈ ir01_ref rtol = 1.0e-4   # public verbs
-        @test dv01(Spread(), fl, rf, credit, tenors) ≈ cs01_ref rtol = 1.0e-4
+        @test dv01(Effective(), fl, rf, credit) ≈ ir01_ref rtol = 1.0e-4   # public verbs
+        @test dv01(Spread(), fl, rf, credit) ≈ cs01_ref rtol = 1.0e-4
         @test s.effective_dv01 ≈ s.forward_dv01 + s.spread_dv01 atol = 1.0e-12      # eff = fwd + spr
         @test s.effective_dv01 ≈ -2.381601e-6 rtol = 1.0e-5            # regression anchors
         @test s.spread_dv01 ≈ 4.585068e-4 rtol = 1.0e-5

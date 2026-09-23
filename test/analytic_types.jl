@@ -83,10 +83,10 @@ FC.discount(::EmptyCashflowTestCurve, t) = error("empty streams must not evaluat
         @test duration(CS01(), kr, curve, curve, cfs, times) == z
         @test convexity(kr, curve, cfs, times) == zz
         @test convexity(kr, curve, curve, cfs, times) == (; base = zz, credit = zz, cross = zz)
-        @test iszero(duration(curve, tenors, cfs, times))
-        @test iszero(duration(DV01(), curve, tenors, cfs, times))
-        @test iszero(convexity(curve, tenors, cfs, times))
-        @test convexity(curve, curve, tenors, cfs, times) == (; base = 0.0, credit = 0.0, cross = 0.0)
+        @test iszero(duration(curve, cfs, times))
+        @test iszero(duration(DV01(), curve, cfs, times))
+        @test iszero(convexity(curve, cfs, times))
+        @test convexity(curve, curve, cfs, times) == (; base = 0.0, credit = 0.0, cross = 0.0)
 
         single = sensitivities(kr, curve, cfs, times)
         @test single == (; value = 0.0, durations = z, convexities = zz)
@@ -119,7 +119,7 @@ FC.discount(::EmptyCashflowTestCurve, t) = error("empty streams must not evaluat
         @test duration(kr, curve, cfs) == z
         @test convexity(kr, curve, cfs) == zz
         @test sensitivities(kr, curve, cfs) == (; value = 0.0, durations = z, convexities = zz)
-        @test iszero(convexity(curve, tenors, cfs))
+        @test iszero(convexity(curve, cfs))
     end
 
     # Zero net value alone does not imply an empty portfolio or zero exposure.

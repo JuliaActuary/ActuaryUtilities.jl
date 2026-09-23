@@ -21,7 +21,6 @@
     @test ad_reference ≈ continuous
     @test convexity(curve, cfs, times) ≈ ad_reference # constant-curve analytic path
     @test convexity(curve, valuation) ≈ ad_reference # scalar nested AD
-    @test convexity(curve, times, cfs, times) ≈ ad_reference
     @test sum(convexity(KeyRates(times), curve, cfs, times)) ≈ ad_reference
     @test sum(convexity(KeyRates(times), valuation, curve)) ≈ ad_reference
 

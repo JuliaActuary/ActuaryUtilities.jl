@@ -43,15 +43,15 @@ end
             (Spread(), bundle.spread_duration, bundle.spread_dv01),
         )
         empty!(c.depths)
-        @test duration(metric, c, base, tenors) ≈ dur
-        @test dv01(metric, c, base, tenors) ≈ dollars
+        @test duration(metric, c, base) ≈ dur
+        @test dv01(metric, c, base) ≈ dollars
         @test maximum(c.depths) == 1
     end
     floater = FM.Bond.Floating(0.005, FC.Periodic(2), 5.0, :index)
     sb = sensitivities(floater, base, base + credit, tenors)
-    @test duration(Effective(), floater, base, base + credit, tenors) ≈ sb.effective_duration atol = 1.0e-12
-    @test duration(Spread(), floater, base, base + credit, tenors) ≈ sb.spread_duration
-    @test dv01(Effective(), floater, base, base + credit, tenors) ≈ sb.effective_dv01 atol = 1.0e-12
+    @test duration(Effective(), floater, base, base + credit) ≈ sb.effective_duration atol = 1.0e-12
+    @test duration(Spread(), floater, base, base + credit) ≈ sb.spread_duration
+    @test dv01(Effective(), floater, base, base + credit) ≈ sb.effective_dv01 atol = 1.0e-12
 
     for bad in (Float64[], [2.0, 1.0], [1.0, 1.0], [0.0, 1.0], [1.0, Inf], [1.0, NaN])
         @test_throws ArgumentError KeyRates(bad)

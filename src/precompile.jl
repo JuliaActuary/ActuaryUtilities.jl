@@ -23,7 +23,6 @@
             duration(Macaulay(), v, cfs)
             duration(DV01(), v, cfs)
             duration(Modified(), v, cfs)
-            # duration(KeyRate(5),v,cfs)
 
             breakeven(v, [-10, 1, 2, 3, 4, 8])
 

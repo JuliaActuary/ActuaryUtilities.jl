@@ -68,8 +68,7 @@ function sensitivities(target::_Contractish, forward::AYM, credit::AYM, tenors)
 end
 sensitivities(target::_Contractish, curve::AYM, tenors) = sensitivities(target, curve, curve, tenors)
 
-function _contract_parallel(metric, target, forward, credit, tenors)
-    _validate_tenors(tenors)
+function _contract_parallel(metric, target, forward, credit)
     f(s) = _contract_parallel_value(metric, target, forward, credit, s)
     return (; value = f(0.0), derivative = ForwardDiff.derivative(f, 0.0))
 end
@@ -79,60 +78,50 @@ _contract_parallel_value(::Spread, target, forward, credit, s) =
     _cvalue2(target, forward, _parallel_bumped(credit, s))
 
 """
-    duration(Effective(), target, curve, tenors)          # rate duration, yrs
-    duration(Spread(),    target, curve, tenors)          # spread duration, yrs
+    duration(Effective(), target, curve)                   # rate duration, yrs
+    duration(Spread(),    target, curve)                   # spread duration, yrs
+    duration(Effective(), target, forward, credit)         # two-curve forms
     duration(Effective(), KeyRates(tenors), target, curve) # key-rate vector
-    dv01(Effective()/Spread(), target, curve, tenors)     # the dollar versions
-    duration(target, curve, tenors)                     # defaults to Effective()
-    dv01(target, curve, tenors)                         # defaults to Effective()
-    convexity(target, curve, tenors)                    # defaults to Effective()
+    dv01(Effective()/Spread(), target, curve)              # the dollar versions
+    duration(target, curve)                                # defaults to Effective()
+    dv01(target, curve)                                    # defaults to Effective()
+    convexity(target, curve)                               # defaults to Effective()
 
 Effective (rate) and spread (credit) duration / DV01 for a contract or portfolio,
-re-projecting cashflows under bumped curves. Two-curve forms take `(forward, credit)`.
-Unmarked single-curve contract and portfolio calls use `Effective()` for duration,
-DV01, and convexity; spread risk requires an explicit `Spread()` marker.
-See [`sensitivities`](@ref) for the full one-pass bundle.
+re-projecting cashflows under continuous-zero parallel shifts. Two-curve forms
+project coupons on `forward` and discount on `credit`. Unmarked contract and
+portfolio calls use `Effective()` for duration, DV01, and convexity; spread risk
+requires an explicit `Spread()` marker. Parallel measures take no tenor grid; use
+`KeyRates(tenors)` or [`sensitivities`](@ref) for key-rate decompositions.
 """
-function duration(metric::Effective, target::_Contractish, forward::AYM, credit::AYM, tenors)
-    r = _contract_parallel(metric, target, forward, credit, tenors)
+function duration(metric::Union{Effective, Spread}, target::_Contractish, forward::AYM, credit::AYM)
+    r = _contract_parallel(metric, target, forward, credit)
     return -r.derivative / r.value
 end
-duration(::Effective, target::_Contractish, curve::AYM, tenors) = duration(Effective(), target, curve, curve, tenors)
-function duration(metric::Spread, target::_Contractish, forward::AYM, credit::AYM, tenors)
-    r = _contract_parallel(metric, target, forward, credit, tenors)
-    return -r.derivative / r.value
-end
-duration(::Spread, target::_Contractish, curve::AYM, tenors) = duration(Spread(), target, curve, curve, tenors)
+duration(metric::Union{Effective, Spread}, target::_Contractish, curve::AYM) = duration(metric, target, curve, curve)
 duration(::Effective, kr::KeyRates, target::_Contractish, curve::AYM) = sensitivities(target, curve, kr.tenors).effective_key_rate
 duration(::Spread, kr::KeyRates, target::_Contractish, curve::AYM) = sensitivities(target, curve, kr.tenors).spread_key_rate
 # Unmarked contract and portfolio calls use Effective().
-duration(target::_Contractish, curve::AYM, tenors::AbstractVector) = duration(Effective(), target, curve, tenors)
+duration(target::_Contractish, curve::AYM) = duration(Effective(), target, curve)
 duration(kr::KeyRates, target::_Contractish, curve::AYM) = duration(Effective(), kr, target, curve)
-duration(::DV01, target::_Contractish, curve::AYM, tenors::AbstractVector) = dv01(Effective(), target, curve, tenors)
-convexity(target::_Contractish, curve::AYM, tenors::AbstractVector) = convexity(Effective(), target, curve, tenors)
+duration(::DV01, target::_Contractish, curve::AYM) = dv01(Effective(), target, curve)
+convexity(target::_Contractish, curve::AYM) = convexity(Effective(), target, curve)
 
 # Parallel convexity equals the full key-rate matrix sum. The scalar callback
 # computes it directly while reprojecting coupons under each curve shock.
-function convexity(::Effective, target::_Contractish, curve::AYM, tenors)
-    _validate_tenors(tenors)
-    return convexity(curve, c -> _cvalue(target, c))
-end
+convexity(::Effective, target::_Contractish, curve::AYM) = convexity(curve, c -> _cvalue(target, c))
 
 """
     dv01(args...)
 
 Return signed dollar risk `-∂V/∂r / 10000`. Cashflow and callback forms alias
 `duration(DV01(), args...)`. Contract forms accept `Effective()` or `Spread()`;
-unmarked single-curve contract and portfolio calls default to `Effective()`.
+unmarked contract and portfolio calls default to `Effective()`.
 """
-function dv01(metric::Effective, target::_Contractish, forward::AYM, credit::AYM, tenors)
-    return -_contract_parallel(metric, target, forward, credit, tenors).derivative / 10_000
+function dv01(metric::Union{Effective, Spread}, target::_Contractish, forward::AYM, credit::AYM)
+    return -_contract_parallel(metric, target, forward, credit).derivative / 10_000
 end
-dv01(::Effective, target::_Contractish, curve::AYM, tenors) = dv01(Effective(), target, curve, curve, tenors)
-function dv01(metric::Spread, target::_Contractish, forward::AYM, credit::AYM, tenors)
-    return -_contract_parallel(metric, target, forward, credit, tenors).derivative / 10_000
-end
-dv01(::Spread, target::_Contractish, curve::AYM, tenors) = dv01(Spread(), target, curve, curve, tenors)
+dv01(metric::Union{Effective, Spread}, target::_Contractish, curve::AYM) = dv01(metric, target, curve, curve)
 dv01(args...; kwargs...) = duration(DV01(), args...; kwargs...)
 
 function sensitivities(target::_Contractish, tenors::AbstractVector; discount::NamedTuple, index)

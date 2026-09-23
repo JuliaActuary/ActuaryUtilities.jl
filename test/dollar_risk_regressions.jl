@@ -81,27 +81,27 @@ end
     for sign in (-1, 1)
         port = [FC.Cashflow(sign * A, 1.0), FC.Cashflow(-sign * B, 5.0)]
         @test abs(FC.present_value(curve, port)) < 1.0e-10
-        expected = duration(DV01(), curve, tenors, sign .* [A, -B], [1.0, 5.0])
+        expected = duration(DV01(), curve, sign .* [A, -B], [1.0, 5.0])
         @test abs(expected) > 1.0e-3
         r = sensitivities(port, curve, tenors)
         @test r.effective_dv01 ≈ expected
-        @test r.effective_dv01 ≈ dv01(Effective(), port, curve, tenors)
-        @test dv01(port, curve, tenors) ≈ expected
-        @test duration(DV01(), port, curve, tenors) ≈ expected
-        @test r.spread_dv01 ≈ dv01(Spread(), port, curve, tenors)
+        @test r.effective_dv01 ≈ dv01(Effective(), port, curve)
+        @test dv01(port, curve) ≈ expected
+        @test duration(DV01(), port, curve) ≈ expected
+        @test r.spread_dv01 ≈ dv01(Spread(), port, curve)
         @test r.forward_dv01 ≈ 0 atol = 1.0e-12
         @test !isfinite(r.effective_duration)
         @test !isfinite(r.spread_duration)
         # Two-curve form: the discount role carries the whole exposure for fixed cashflows.
         r2 = sensitivities(port, curve, credit, tenors)
-        @test r2.spread_dv01 ≈ dv01(Spread(), port, curve, credit, tenors)
-        @test r2.effective_dv01 ≈ dv01(Effective(), port, curve, credit, tenors)
+        @test r2.spread_dv01 ≈ dv01(Spread(), port, curve, credit)
+        @test r2.effective_dv01 ≈ dv01(Effective(), port, curve, credit)
         @test r2.forward_dv01 ≈ 0 atol = 1.0e-12
     end
     # Nonzero-value positions are unchanged.
     fb = FM.Bond.Fixed(0.05, FC.Periodic(1), 3.0)
     r = sensitivities(fb, curve, tenors)
-    @test r.effective_dv01 ≈ dv01(Effective(), fb, curve, tenors)
-    @test r.spread_dv01 ≈ dv01(Spread(), fb, curve, tenors)
+    @test r.effective_dv01 ≈ dv01(Effective(), fb, curve)
+    @test r.spread_dv01 ≈ dv01(Spread(), fb, curve)
     @test r.effective_dv01 ≈ r.effective_duration * r.value / 10_000
 end

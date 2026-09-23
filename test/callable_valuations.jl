@@ -32,14 +32,11 @@ _same_sensitivity(a::NamedTuple, b::NamedTuple) =
             @test convexity(yield, value) ≈ convexity(yield, closure)
             @test duration(DV01(), yield, value) ≈ duration(DV01(), yield, closure)
         end
-        @test duration(value, curve, tenors) ≈ duration(closure, curve, tenors)
-        @test convexity(value, curve, tenors) ≈ convexity(closure, curve, tenors)
-        @test duration(DV01(), value, curve, tenors) ≈ duration(DV01(), closure, curve, tenors)
         for metric in (IR01(), CS01())
-            @test duration(metric, value, curve, credit, tenors) ≈ duration(metric, pair, curve, credit, tenors)
+            @test duration(metric, value, curve, credit) ≈ duration(metric, pair, curve, credit)
             @test duration(metric, kr, value, curve, credit) ≈ duration(metric, kr, pair, curve, credit)
         end
-        @test _same_sensitivity(convexity(value, curve, credit, tenors), convexity(pair, curve, credit, tenors))
+        @test _same_sensitivity(convexity(value, curve, credit), convexity(pair, curve, credit))
         for f in (duration, convexity, sensitivities)
             @test _same_sensitivity(f(kr, value, curve), f(kr, closure, curve))
         end
@@ -57,7 +54,7 @@ _same_sensitivity(a::NamedTuple, b::NamedTuple) =
         amounts = cashflows isa AbstractVector{<:FC.Cashflow} ? FC.amount.(cashflows) : cashflows
         @test duration(curve, cashflows) ≈ duration(curve, cashflows, times)
         @test convexity(curve, cashflows) ≈ convexity(curve, cashflows, times)
-        for metric in (Macaulay(), Modified(), DV01(), KeyRate(1), kr)
+        for metric in (Macaulay(), Modified(), DV01(), kr)
             @test duration(metric, curve, cashflows) ≈ duration(metric, curve, amounts, times)
         end
     end

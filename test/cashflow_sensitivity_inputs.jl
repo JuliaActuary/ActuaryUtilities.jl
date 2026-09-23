@@ -15,21 +15,16 @@
         layers = (; base = curve, credit, liquidity = credit)
         calls = (
             (cf, ts) -> duration(curve, cf, ts),
-            (cf, ts) -> duration(curve, tenors, cf, ts),
             (cf, ts) -> duration(DV01(), curve, cf, ts),
-            (cf, ts) -> duration(DV01(), curve, tenors, cf, ts),
             (cf, ts) -> duration(kr, curve, cf, ts),
             (cf, ts) -> duration(DV01(), kr, curve, cf, ts),
             (cf, ts) -> duration(IR01(), curve, credit, cf, ts),
             (cf, ts) -> duration(CS01(), curve, credit, cf, ts),
-            (cf, ts) -> duration(IR01(), curve, credit, tenors, cf, ts),
-            (cf, ts) -> duration(CS01(), curve, credit, tenors, cf, ts),
             (cf, ts) -> duration(IR01(), kr, curve, credit, cf, ts),
             (cf, ts) -> duration(CS01(), kr, curve, credit, cf, ts),
             (cf, ts) -> convexity(curve, cf, ts),
-            (cf, ts) -> convexity(curve, tenors, cf, ts),
             (cf, ts) -> convexity(kr, curve, cf, ts),
-            (cf, ts) -> convexity(curve, credit, tenors, cf, ts),
+            (cf, ts) -> convexity(curve, credit, cf, ts),
             (cf, ts) -> convexity(kr, curve, credit, cf, ts),
             (cf, ts) -> convexity(kr, layers, cf, ts),
             (cf, ts) -> sensitivities(kr, curve, cf, ts),
@@ -62,7 +57,7 @@ end
     wrapped = FC.Cashflow.([5.0, 5.0, 105.0], times)
     @test (@inferred duration(kr, flat, wrapped, fallback)) ≈ duration(kr, flat, wrapped)
     @test _same_sensitivity((@inferred sensitivities(kr, flat, wrapped, fallback)), sensitivities(kr, flat, wrapped))
-    @test (@inferred convexity(flat, kr.tenors, wrapped, fallback)) ≈ convexity(flat, wrapped)
+    @test (@inferred convexity(flat, wrapped, fallback)) ≈ convexity(flat, wrapped)
     big_wrapped = FC.Cashflow.(BigFloat[5, 5, 105], big.(times))
     result = sensitivities(kr, flat, big_wrapped, fallback)
     @test result.value isa BigFloat
@@ -82,10 +77,9 @@ end
     @test _same_sensitivity(sensitivities(kr, flat, mixed, [7.0, 1.5, 9.0]), sensitivities(kr, flat, wrapped))
     zero_curve = ZeroCashflowTestCurve()
     for cfs in (FC.Cashflow{Float64, Float64}[], FC.Cashflow.([0.0, -0.0, 0.0], times))
-        @test iszero(convexity(zero_curve, kr.tenors, cfs, fallback))
+        @test iszero(convexity(zero_curve, cfs, fallback))
         @test all(iszero, duration(kr, zero_curve, cfs, fallback))
         @test all(iszero, sensitivities(kr, zero_curve, cfs, fallback).convexities)
-        @test_throws ArgumentError convexity(zero_curve, [2.0, 1.0], cfs, fallback)
     end
 end
 
@@ -95,14 +89,6 @@ end
     times = [0.0, 1.5, 3.5]
     wrapped = FC.Cashflow.(cfs, times)
     fallback = [0.0, 0.25, 0.5]
-    for metric in (KeyRateZero(3.0), KeyRatePar(3.0))
-        @test duration(metric, curve, wrapped, fallback) ≈ duration(metric, curve, cfs, times)
-        @test duration(metric, curve, wrapped, [7.0, 8.0, 9.0]) ≈ duration(metric, curve, wrapped)
-    end
-    for metric in (KeyRateZero(0.5), KeyRatePar(0.5))
-        @test_throws ArgumentError duration(metric, curve, [FC.Cashflow(100.0, 0.5)], [5.0])
-    end
-
     hw = FM.ShortRate.HullWhite(0.1, 0.01, curve)
     kr = KeyRates([1.0, 2.0, 5.0])
     for args in ((kr, hw), (DV01(), kr, hw)), supplied in (fallback, [7.0, 8.0, 9.0, 100.0])

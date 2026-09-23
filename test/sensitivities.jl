@@ -170,7 +170,7 @@ FC.discount(c::CompositeTwoFlatYield, t) = FC.discount(c.base, t) * FC.discount(
     pv(c) = sum(cf * FC.discount(c, t) for (cf, t) in zip(cfs, times))
 
     @testset "scalar duration matches sum of KRDs" begin
-        sd = duration(pv, curve, tenors)
+        sd = duration(curve, pv)
         krds = duration(KeyRates(tenors), pv, curve)
         @test sd ≈ sum(krds) atol = 1.0e-10
     end
@@ -189,11 +189,11 @@ FC.discount(c::CompositeTwoFlatYield, t) = FC.discount(c.base, t) * FC.discount(
         dfs = [exp(-rate * t) for t in times]
         V = sum(cf * df for (cf, df) in zip(cfs, dfs))
         mac = sum(t * cf * df for (t, cf, df) in zip(times, cfs, dfs)) / V
-        @test duration(pv, curve, tenors) ≈ mac atol = 1.0e-6
+        @test duration(curve, pv) ≈ mac atol = 1.0e-6
     end
 
     @testset "DV01" begin
-        dv01 = duration(DV01(), pv, curve, tenors)
+        dv01 = duration(DV01(), curve, pv)
         krd_dv01 = duration(DV01(), KeyRates(tenors), pv, curve)
         @test dv01 ≈ sum(krd_dv01) atol = 1.0e-10
         @test all(krd_dv01 .≥ 0)
@@ -204,9 +204,9 @@ FC.discount(c::CompositeTwoFlatYield, t) = FC.discount(c.base, t) * FC.discount(
         # alone, credit alone, or the composite all shift the total zero rate
         # by 1bp — so IR01 ≈ CS01 ≈ DV01 individually.
         pv2c(b, c) = sum(cf * FC.discount(b, t) * FC.discount(c, t) for (cf, t) in zip(cfs, times))
-        ir01 = duration(IR01(), pv2c, base, spread, tenors)
-        cs01 = duration(CS01(), pv2c, base, spread, tenors)
-        dv01 = duration(DV01(), pv, curve, tenors)
+        ir01 = duration(IR01(), pv2c, base, spread)
+        cs01 = duration(CS01(), pv2c, base, spread)
+        dv01 = duration(DV01(), curve, pv)
         @test ir01 ≈ cs01 atol = 1.0e-10
         @test ir01 ≈ dv01 atol = 1.0e-10
     end
@@ -214,14 +214,14 @@ FC.discount(c::CompositeTwoFlatYield, t) = FC.discount(c.base, t) * FC.discount(
     @testset "convexity matrix symmetric, scalar = sum" begin
         cmat = convexity(KeyRates(tenors), pv, curve)
         @test cmat ≈ cmat' atol = 1.0e-10
-        @test convexity(pv, curve, tenors) ≈ sum(cmat) atol = 1.0e-10
+        @test convexity(curve, pv) ≈ sum(cmat) atol = 1.0e-10
     end
 
     @testset "sensitivities bundle" begin
         r = sensitivities(KeyRates(tenors), curve, cfs, times)
         @test r.value ≈ pv(curve) atol = 1.0e-10        # exact baseline; no resampling
         @test r.durations ≈ duration(KeyRates(tenors), pv, curve) atol = 1.0e-10
-        @test sum(r.durations) ≈ duration(pv, curve, tenors) atol = 1.0e-10
+        @test sum(r.durations) ≈ duration(curve, pv) atol = 1.0e-10
         @test r.convexities ≈ r.convexities' atol = 1.0e-10
 
         r_dv01 = sensitivities(DV01(), KeyRates(tenors), curve, cfs, times)
@@ -252,7 +252,7 @@ FC.discount(c::CompositeTwoFlatYield, t) = FC.discount(c.base, t) * FC.discount(
         flat_spr = FM.Yield.Constant(FC.Continuous(0.012))
         curve_nf = CompositeTwoFlatYield(ns_base, flat_spr)
         krds_nf = duration(KeyRates(tenors), pv, curve_nf)
-        @test sum(krds_nf) ≈ duration(pv, curve_nf, tenors) atol = 1.0e-10
+        @test sum(krds_nf) ≈ duration(curve_nf, pv) atol = 1.0e-10
         @test argmax(krds_nf) == lastindex(tenors)   # sensitivity peaks at the long end
     end
 end
