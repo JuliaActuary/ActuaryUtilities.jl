@@ -19,6 +19,7 @@ export irr, internal_rate_of_return, spread,
 include("financial_math/scalar_measures.jl")
 include("financial_math/key_rate_sensitivities.jl")
 include("financial_math/contract_sensitivities.jl")
+include("financial_math/quote_sensitivities.jl")
 include("financial_math/scenario_sensitivities.jl")
 
 end

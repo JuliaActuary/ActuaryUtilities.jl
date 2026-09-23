@@ -542,24 +542,28 @@ sensitivities(vf::Function, kr::KeyRates, base::AYM, credit::AYM) = sensitivitie
 sensitivities(vf::Function, ::DV01, kr::KeyRates, base::AYM, credit::AYM) = sensitivities(DV01(), kr, vf, base, credit)
 
 """
-    sensitivities(valuation, curves::NamedTuple; tenors) -> (; value, duration, dv01, key_rate)
+    sensitivities(valuation, curves::NamedTuple; tenors) -> (; value, duration, dv01, key_rate, key_rate_dv01)
     sensitivities(target, tenors; discount::NamedTuple, index) -> same
 
-Differentiate `valuation(curves)` with respect to each named curve. Return value
-and per-role duration, DV01, and key-rate vectors. The contract form sums the
-`discount` layers and projects coupons using `index`. For example,
-`discount = (; rf, credit, ilp)` produces separate risk-free, credit, liquidity,
-and index sensitivities.
+Differentiate `valuation(curves)` with respect to each named curve. Return value,
+per-role parallel duration and DV01, and per-role key-rate duration and DV01
+vectors on the `tenors` grid. The contract form sums the `discount` layers and
+projects coupons using `index`. For example, `discount = (; rf, credit, ilp)`
+produces separate risk-free, credit, liquidity, and index sensitivities.
+
+Every named value must be an `AbstractYieldModel`. To differentiate with respect
+to market inputs that the valuation turns into curves, pass named input vectors
+instead: `sensitivities(valuation, inputs::NamedTuple)`.
 """
-function sensitivities(valuation::F, curves::NamedTuple; tenors) where {F}
+function sensitivities(valuation::F, curves::NamedTuple{roles, <:Tuple{AYM, Vararg{AYM}}}; tenors) where {F, roles}
     r = _ncurve_ad(valuation, curves, tenors; order = 1)
     v, grads = r.value, r.gradient
-    roles = keys(curves)
     return (;
         value = v,
         duration = NamedTuple{roles}(map(g -> -sum(g) / v, values(grads))),
         dv01 = NamedTuple{roles}(map(g -> -sum(g) / 10_000, values(grads))),
         key_rate = NamedTuple{roles}(map(g -> -g ./ v, values(grads))),
+        key_rate_dv01 = NamedTuple{roles}(map(g -> -g ./ 10_000, values(grads))),
     )
 end
-sensitivities(curves::NamedTuple, valuation::Function; tenors) = sensitivities(valuation, curves; tenors)  # do-block form
+sensitivities(curves::NamedTuple{roles, <:Tuple{AYM, Vararg{AYM}}}, valuation::Function; tenors) where {roles} = sensitivities(valuation, curves; tenors)  # do-block form

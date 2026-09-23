@@ -166,6 +166,7 @@ include("convexity_conventions.jl")
 include("stochastic_sensitivities.jl")
 include("contract_sensitivities.jl")
 include("parallel_measures.jl")
+include("market_inputs.jl")
 
 using Aqua
 @testset "Aqua.jl" begin

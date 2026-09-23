@@ -187,6 +187,28 @@ twocurve_result.base_durations
 The fixed-cashflow valuation is `V = Σ cf × base(t) × credit(t)`: discount factors
 multiply, so continuously compounded zero rates add.
 
+## Market Inputs
+
+When the valuation builds its own curves from market data, differentiate with
+respect to named input vectors instead of curve bumps. Each input element is bumped
+in the units you pass in:
+
+```@example sensitivities
+linear_curve(z) = ZeroRateCurve(z, tenors, Spline.Linear())
+
+inputs = sensitivities((; zeros = [0.02, 0.025, 0.03, 0.035, 0.04], spread = [0.01])) do m
+    curve = linear_curve(m.zeros) + Yield.Constant(Continuous(only(m.spread)))
+    pv(curve, cfs, times)
+end
+
+(value         = inputs.value,
+ zero_dv01s    = inputs.key_rate_dv01.zeros,   # per input element
+ spread_dv01   = inputs.dv01.spread)           # parallel shift of the whole input
+```
+
+With linear zero-rate interpolation, the per-element results equal the `KeyRates`
+decomposition on the same knots.
+
 ## Callable Valuations
 
 A valuation can be a function or a callable struct that holds its input data:
