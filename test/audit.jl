@@ -1,10 +1,14 @@
 # Regression and equivalence tests from the 2026-06 ecosystem audit
 @testset "analytic fast paths match the generic AD path" begin
-    # the generic scalar path: nested ForwardDiff through `i + yield`
+    # The generic scalar path uses the input's own compounding convention for
+    # rates and a continuous-zero shift for yield models.
     generic_duration(yield, cfs, times) = duration(yield, i -> ActuaryUtilities.FinancialMath.price(i, cfs, times))
+    parallel_bump(yield, x) = yield + x
+    parallel_bump(yield::FM.Yield.AbstractYieldModel, x) =
+        FM.Yield.TenorShift(yield, (z, t) -> FC.Continuous(x) + z)
     function generic_convexity(yield, cfs, times)
         vf = i -> ActuaryUtilities.FinancialMath.price(i, cfs, times)
-        v(x) = abs(vf(yield + x))
+        v(x) = abs(vf(parallel_bump(yield, x)))
         ForwardDiff.derivative(y -> ForwardDiff.derivative(v, y), 0.0) / v(0.0)
     end
 
@@ -25,6 +29,7 @@
         FM.Yield.Constant(0.03),
         FM.Yield.Constant(FC.Continuous(0.03)),
         FM.Yield.Constant(FC.Periodic(0.04, 2)),
+        PeriodicZeroSensitivityCurve(0.04),
     ]
     @testset "yield=$y" for y in yields
         for (cfs, times) in cases
@@ -161,6 +166,21 @@ end
     @test FC.pv(y + s2, cfs) ≈ FC.pv(y + 0.01, cfs) rtol = 1.0e-12
 end
 
+@testset "spread solves do not depend on notional" begin
+    base = FM.Yield.Constant(FC.Continuous(0.03))
+    for n in (1.0e-12, 1.0, 1.0e10)
+        # a two-year payment priced at a 5% force is 2% over the 3% base
+        z = zspread(FC.Cashflow(n, 2.0), base, n * exp(-0.1))
+        @test z.zspread ≈ 0.02 atol = 1.0e-14
+        @test z.zspread_dv01 ≈ n * 2 * exp(-0.1) / 10_000 rtol = 1.0e-12
+        @test FC.rate(spread(0.04, 0.05, n .* fill(10.0, 10))) ≈ 0.01 atol = 1.0e-14
+        # zero price, mixed signs: 100 at 1 and -95 at 2 have zero value at a force of log(0.95)
+        mixed = FM.Composite(FC.Cashflow(100n, 1.0), FC.Cashflow(-95n, 2.0))
+        @test zspread(mixed, base, 0.0).zspread ≈ log(0.95) - 0.03 atol = 1.0e-14
+        @test FC.rate(spread(0.03, -0.05, n .* [100.0, -95.0], [1.0, 2.0])) ≈ -0.08 atol = 1.0e-14
+    end
+end
+
 @testset "moic degenerate input errors" begin
     @test moic([-10, 20, 30]) ≈ 5.0
     @test_throws ArgumentError moic([10, 20, 30])
@@ -171,18 +191,6 @@ end
     liability(i) = -100 / (1 + i)^5
     @test duration(0.03, liability) ≈ duration(0.03, i -> 100 / (1 + i)^5)
     @test convexity(0.03, liability) ≈ convexity(0.03, i -> 100 / (1 + i)^5)
-end
-
-@testset "legacy KeyRateDuration conveniences" begin
-    rf_curve = FM.fit(FM.Spline.Cubic(), FM.ZCBYield.([0.04, 0.05, 0.055, 0.06, 0.062], 1:5), FM.Fit.Bootstrap())
-    cfs_real = fill(10.0, 5)
-    cfs_cf = FC.Cashflow.(fill(10.0, 5), [1.0, 2.0, 3.0, 4.0, 5.0])
-    # a Cashflow vector uses embedded times for the krd grid, equal to the plain form
-    @test duration(KeyRate(2), rf_curve, cfs_cf) ≈ duration(KeyRate(2), rf_curve, cfs_real, 1:5)
-    # all-sub-1-year cashflows have an empty default grid: loud error, not a crash
-    @test_throws ArgumentError duration(KeyRate(0.5), rf_curve, [10.0], [0.5])
-    # a shifted timepoint outside the krd grid is a loud error, not a MethodError
-    @test_throws ArgumentError duration(KeyRate(7), rf_curve, cfs_cf)
 end
 
 @testset "mismatched cfs/times lengths error loudly" begin
@@ -212,13 +220,12 @@ end
 @testset "two-curve scalar convexity matches the AD path" begin
     base = FM.Yield.Constant(0.03)
     credit = FM.Yield.Constant(0.015)
-    tenors = [1.0, 2.0, 5.0]
     cfs = [5.0, 5.0, 105.0]
     times = [1.0, 2.0, 3.0]
-    an = convexity(base, credit, tenors, cfs, times)
-    # the AD do-block form computes the same blocks via a (2n)² Hessian
+    an = convexity(base, credit, cfs, times)
+    # the AD callback form computes the same blocks from a 2×2 parallel Hessian
     vf2 = (b, c) -> sum(cf * b(t) * c(t) for (cf, t) in zip(cfs, times))
-    ad = convexity(vf2, base, credit, tenors)
+    ad = convexity(vf2, base, credit)
     @test an.base ≈ ad.base rtol = 1.0e-10
     @test an.credit ≈ ad.credit rtol = 1.0e-10
     @test an.cross ≈ ad.cross rtol = 1.0e-10

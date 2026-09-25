@@ -1,6 +1,92 @@
 # Version Upgrade Guide
 
-## Unreleased
+## v5.12.0 to v6.0.0
+
+v6 shocks each input in its native form and measures parallel risk without tenor
+grids. See [Shock coordinates](@ref) for the full rule.
+
+- **Curve convexity uses continuous-zero shocks.** This changes scalar convexity
+  for every yield model, including constant curves, ZeroRateCurve, Nelson–Siegel,
+  and custom models. Cashflow and callback results equal the sum of the full
+  key-rate convexity matrix. For `[5, 5, 105]` at `[1, 2, 3]` under
+  `Yield.Constant(Periodic(0.04, 1))`, convexity changes from **11.26 to 8.40**.
+  Scalars and explicit `Rate` inputs retain their compounding conventions.
+  See [Convexity Conventions](@ref) for formulas and examples.
+- **Dollar risk preserves position sign and zero-value exposure.** DV01, IR01,
+  and CS01 use signed value derivatives, so **a net liability now has negative
+  DV01, IR01, and CS01**. For `[-1, 1]` at `[0, 1]` under a zero curve, they return
+  `0.0001` instead of `NaN`. Contract sensitivity bundles also retain dollar
+  exposure at zero value. Normalized duration and convexity remain undefined there.
+  **Migration:** aggregate `asset_dv01 + liability_dv01`, not
+  `asset_dv01 - liability_dv01`. Remove sign corrections added to compensate for
+  the former use of absolute value.
+- **Scalar IR01 and CS01 measure the combined rate.** For fixed cashflows,
+  `duration(IR01(), base, spread, cfs, times)` and the matching CS01 both equal
+  `duration(DV01(), base + spread, cfs, times)`, shocked in the combined rate's
+  coordinate. Values change when the inputs mix types: a yield-model component
+  makes the sum a yield model with a continuous-zero shock (previously a scalar
+  spread was shocked as an annual rate, so CS01 was about IR01 / (1 + spread)), and a
+  mixed-compounding `Rate` sum takes the left operand's compounding. Scalar-only
+  inputs are unchanged. Use the callback forms
+  `duration(IR01(), (b, c) -> ..., base, credit)` when the curves play different roles.
+- **Tenor grids appear only where results have a tenor dimension.** Parallel
+  measures no longer accept a `tenors` argument; the grid never changed their
+  values, and its position let swapped arguments return wrong numbers silently.
+  The old calls now throw `MethodError`:
+
+  | v5 call | v6 replacement |
+  |:--|:--|
+  | `duration(curve, tenors, cfs, times)`, `duration(curve, tenors, cashflows)` | `duration(curve, cfs, times)`, `duration(curve, cashflows)` |
+  | `duration(DV01(), curve, tenors, cfs, times)` | `duration(DV01(), curve, cfs, times)` |
+  | `duration(IR01(), base, credit, tenors, cfs, times)` (and `CS01`) | `duration(IR01(), base, credit, cfs, times)` |
+  | `convexity(curve, tenors, cfs, times)` | `convexity(curve, cfs, times)` |
+  | `convexity(base, credit, tenors, cfs, times)` | `convexity(base, credit, cfs, times)` |
+  | `duration(valuation, curve, tenors)` | `duration(curve, valuation)` or `duration(curve) do c ... end` |
+  | `duration(DV01(), valuation, curve, tenors)` | `duration(DV01(), curve, valuation)` or `duration(DV01(), curve) do c ... end` |
+  | `duration(IR01(), valuation, base, credit, tenors)` (and `CS01`) | `duration(IR01(), valuation, base, credit)` or `duration(IR01(), base, credit) do b, c ... end` |
+  | `convexity(valuation, curve, tenors)` | `convexity(curve, valuation)` |
+  | `convexity(valuation, base, credit, tenors)` | `convexity(valuation, base, credit)` |
+  | `duration(Effective(), target, curve, tenors)`, `duration(Spread(), ...)` | `duration(Effective(), target, curve)`, `duration(Spread(), target, curve)` |
+  | `dv01(target, curve, tenors)`, `duration(target, curve, tenors)`, `convexity(target, curve, tenors)` | `dv01(target, curve)`, `duration(target, curve)`, `convexity(target, curve)` |
+  | two-curve contract forms `(target, forward, credit, tenors)` | `(target, forward, credit)` |
+
+  `KeyRates(tenors)` forms and `sensitivities(...)` bundles keep their grids.
+- **The finite-difference `KeyRateDuration` API is removed.** `KeyRate`,
+  `KeyRateZero`, `KeyRatePar`, and `krd_points` are gone.
+  `duration(KeyRateZero(t), curve, cfs, times, grid)` is the `t` entry of
+  `duration(KeyRates(grid), curve, cfs, times)`, which applies the same triangular
+  continuous-zero bumps with exact derivatives. Pass the grid explicitly; the former
+  default grid of annual knots from year 1 is no longer implied.
+- **Embedded cashflow times take precedence.** Analytic key-rate forms now accept
+  wrapped `Cashflow` objects with explicit times. Scalar, key-rate, and bundled
+  sensitivities use embedded payment times, as do Hull–White default horizons.
+  Numeric amounts use the corresponding explicit times. Explicit time vectors must
+  cover the collection; trailing entries are ignored.
+  **Migration:** to change payment dates, construct updated `Cashflow` objects or
+  pass numeric amounts with the desired times.
+- Unmarked contract and portfolio duration, DV01, and convexity default to
+  `Effective()`, including `duration(DV01(), target, curve)`. Use `Spread()`
+  explicitly for spread risk.
+- New parallel forms without tenor grids: `duration(DV01(), curve) do c ... end`,
+  two-curve callback IR01/CS01, and two-curve convexity blocks
+  `(; base, credit, cross)` for callbacks and fixed cashflows.
+- Yield-model modified duration and DV01 for fixed cashflows use analytic
+  continuous-zero formulas instead of automatic differentiation.
+- Callback APIs accept callable structs. Scalar cashflow APIs accept arrays,
+  tuples, and finite generators. Arrays are flattened in column-major order;
+  generators are collected once before valuation.
+- Named cashflow results own independent arrays for each duration role and
+  convexity block. Mutating one no longer changes another.
+- Hessian calculations reuse value and gradient results through DiffResults.
+- **`spread` and `zspread` stop on the Newton step, not the price residual.** Their
+  `tol` keyword now bounds the final Newton step in rate units (default `1e-12`)
+  instead of the remaining price difference in currency. Results no longer depend on
+  the notional: at a notional of `1e-10`, a true 2% z-spread previously came back as
+  about 1.96%. A zero `market_price` is also handled. Pass `tol` as a rate if you
+  set it explicitly.
+  Contract duration bundles compute gradients without unused Hessians.
+
+## v5.11.2 to v5.12.0
 
 - ForwardDiff **1.x is now required**. Version 1.0 made Dual comparisons account
   for partials, which the exact zero-stream check needs to preserve cashflow-amount

@@ -11,6 +11,7 @@ import QuadGK
 const FM = ActuaryUtilities.FinanceModels
 const FC = ActuaryUtilities.FinanceCore
 
+include("sensitivity_fixtures.jl")
 
 include("risk_measures.jl")
 include("optimal_transport.jl")
@@ -154,10 +155,18 @@ end
 include("duration.jl")
 include("key_rate_durations.jl")
 include("sensitivities.jl")
+include("sensitivity_engine.jl")
+include("callable_valuations.jl")
 include("analytic_types.jl")
 include("zero_cashflows.jl")
+include("sensitivity_regressions.jl")
+include("cashflow_sensitivity_inputs.jl")
+include("dollar_risk_regressions.jl")
+include("convexity_conventions.jl")
 include("stochastic_sensitivities.jl")
 include("contract_sensitivities.jl")
+include("parallel_measures.jl")
+include("market_inputs.jl")
 
 using Aqua
 @testset "Aqua.jl" begin

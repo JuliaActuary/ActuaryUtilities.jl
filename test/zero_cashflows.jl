@@ -33,12 +33,6 @@ FC.discount(::ZeroCashflowTestCurve, t) = error("zero cashflows do not require a
                 @test positive_zero(duration(measure, curve, curve, cfs, times))
                 @test positive_zero(duration(measure, curve, curve, cfs))
             end
-            for measure in (KeyRateZero(1), KeyRatePar(1))
-                @test positive_zero(duration(measure, curve, cfs))
-                @test positive_zero(duration(measure, curve, cfs, times))
-                @test positive_zero(duration(measure, curve, cfs, times, tenors))
-                @test_throws ArgumentError duration(measure, curve, cfs, times, [3.0, 7.0])
-            end
             @test isequal(present_values(curve, cfs, times), zeros(length(cfs)))
         end
     end
@@ -52,8 +46,9 @@ FC.discount(::ZeroCashflowTestCurve, t) = error("zero cashflows do not require a
             @test isequal(duration(CS01(), kr, curve, curve, cfs, times), z)
             @test isequal(convexity(kr, curve, cfs, times), zz)
             @test isequal(convexity(kr, curve, curve, cfs, times), (; base = zz, credit = zz, cross = zz))
-            @test positive_zero(duration(curve, tenors, cfs, times))
-            @test positive_zero(convexity(curve, tenors, cfs, times))
+            @test positive_zero(duration(curve, cfs, times))
+            @test positive_zero(convexity(curve, cfs, times))
+            @test isequal(convexity(curve, curve, cfs, times), (; base = 0.0, credit = 0.0, cross = 0.0))
             @test isequal(sensitivities(kr, curve, cfs, times), (; value = 0.0, durations = z, convexities = zz))
             @test isequal(sensitivities(DV01(), kr, curve, cfs, times), (; value = 0.0, dv01s = z, convexities = zz))
             two = sensitivities(kr, curve, curve, cfs, times)
@@ -91,7 +86,7 @@ FC.discount(::ZeroCashflowTestCurve, t) = error("zero cashflows do not require a
         @test duration(curve, Real[0, big"0.0"], [1.0, 2.0]) isa BigFloat
         bigcurve = FM.Yield.Constant(FC.Continuous(big"0.04"))
         @test sensitivities(kr, bigcurve, zeros(2), [1.0, 2.0]).value isa Float64
-        for measure in (Macaulay(), Modified(), DV01(), KeyRateZero(1), KeyRatePar(1))
+        for measure in (Macaulay(), Modified(), DV01())
             @test_throws DimensionMismatch duration(measure, curve, [0.0], Float64[])
         end
         @test_throws DimensionMismatch convexity(curve, [0.0], Float64[])
@@ -165,16 +160,13 @@ end
         @test_throws DimensionMismatch duration(measure, curve, flat, cfs, [1.0])
         @test duration(measure, kr, curve, flat, cfs, extra) == duration(measure, kr, curve, flat, cfs, times)
     end
-    for measure in (KeyRateZero(1), KeyRatePar(1))
-        @test duration(measure, flat, cfs, extra) ≈ duration(measure, flat, cfs, times)
-        @test duration(measure, flat, cfs, extra, tenors) ≈ duration(measure, flat, cfs, times, tenors)
-    end
     for args in ((kr, curve), (DV01(), kr, curve), (kr, curve, flat), (DV01(), kr, curve, flat), (kr, (; base = curve, credit = flat)))
         @test isequal(sensitivities(args..., cfs, extra), sensitivities(args..., cfs, times))
         @test_throws DimensionMismatch sensitivities(args..., cfs, [1.0])
     end
     @test convexity(kr, curve, cfs, extra) == convexity(kr, curve, cfs, times)
-    @test convexity(curve, tenors, cfs, extra) == convexity(curve, tenors, cfs, times)
+    @test convexity(curve, cfs, extra) == convexity(curve, cfs, times)
+    @test convexity(curve, flat, cfs, extra) == convexity(curve, flat, cfs, times)
 
     # A trailing time must not extend the inferred horizon or change RNG use.
     hw = FM.ShortRate.HullWhite(0.1, 0.01, flat)
