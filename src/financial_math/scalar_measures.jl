@@ -643,7 +643,10 @@ end
 Find the constant spread to add to `curve1` so the cashflows have the same present
 value as under `curve2`.
 
-The spread is found via a damped Newton iteration on the pricing residual and is solved to machine precision; an `ErrorException` is thrown if the solve does not converge within `maxiter` iterations.
+The spread is found via a damped Newton iteration on the pricing residual. It stops once the
+undamped Newton step is smaller than `tol` in rate units (not currency), so the result does not
+depend on the size of the cashflows; an `ErrorException` is thrown if that does not happen within
+`maxiter` iterations.
 
 !!! note
     For mixed-sign cashflows the pricing residual can have more than one exact root (e.g. a duration-neutral asset/liability pair); the root reached from a starting spread of zero is returned.
@@ -663,25 +666,20 @@ function spread(curve1, curve2, cashflows, times = eachindex(cashflows); tol = 1
     # Dampen Newton steps: mixed-sign cashflows can have nearly zero price
     # derivatives, producing steps outside the valid spread domain s > -1.
     f(s) = FinanceCore.pv(curve1 + FinanceCore.Periodic(s, 1), cashflows, times) - pv2
-    ftol = tol * max(one(pv2), abs(pv2))
     max_step = 0.25
     s = 0.0
-    fs = f(s)
-    converged = abs(fs) < ftol
-    iters = 0
-    while !converged && iters < maxiter
-        d = ForwardDiff.derivative(f, s)
-        step = fs / d
-        if !isfinite(step) || abs(step) > max_step
-            step = isnan(step) ? max_step : copysign(max_step, step)
-        end
-        s = max(s - step, -0.999)
+    newton = NaN
+    for _ in 1:maxiter
         fs = f(s)
-        converged = abs(fs) < ftol
-        iters += 1
+        iszero(fs) && return FinanceCore.Periodic(s, 1)
+        newton = fs / ForwardDiff.derivative(f, s)
+        # converged on the undamped step in rate units, which, unlike a price residual,
+        # does not scale with the cashflows
+        isfinite(newton) && abs(newton) < tol && return FinanceCore.Periodic(s - newton, 1)
+        step = !isfinite(newton) || abs(newton) > max_step ? (isnan(newton) ? max_step : copysign(max_step, newton)) : newton
+        s = max(s - step, -0.999)
     end
-    converged || throw(ErrorException("spread did not converge in $maxiter iterations (last residual = $fs)"))
-    return FinanceCore.Periodic(s, 1)
+    throw(ErrorException("spread did not converge in $maxiter iterations (last Newton step = $newton)"))
 end
 
 """

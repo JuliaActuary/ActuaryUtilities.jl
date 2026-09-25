@@ -166,6 +166,21 @@ end
     @test FC.pv(y + s2, cfs) ≈ FC.pv(y + 0.01, cfs) rtol = 1.0e-12
 end
 
+@testset "spread solves do not depend on notional" begin
+    base = FM.Yield.Constant(FC.Continuous(0.03))
+    for n in (1.0e-12, 1.0, 1.0e10)
+        # a two-year payment priced at a 5% force is 2% over the 3% base
+        z = zspread(FC.Cashflow(n, 2.0), base, n * exp(-0.1))
+        @test z.zspread ≈ 0.02 atol = 1.0e-14
+        @test z.zspread_dv01 ≈ n * 2 * exp(-0.1) / 10_000 rtol = 1.0e-12
+        @test FC.rate(spread(0.04, 0.05, n .* fill(10.0, 10))) ≈ 0.01 atol = 1.0e-14
+        # zero price, mixed signs: 100 at 1 and -95 at 2 have zero value at a force of log(0.95)
+        mixed = FM.Composite(FC.Cashflow(100n, 1.0), FC.Cashflow(-95n, 2.0))
+        @test zspread(mixed, base, 0.0).zspread ≈ log(0.95) - 0.03 atol = 1.0e-14
+        @test FC.rate(spread(0.03, -0.05, n .* [100.0, -95.0], [1.0, 2.0])) ≈ -0.08 atol = 1.0e-14
+    end
+end
+
 @testset "moic degenerate input errors" begin
     @test moic([-10, 20, 30]) ≈ 5.0
     @test_throws ArgumentError moic([10, 20, 30])

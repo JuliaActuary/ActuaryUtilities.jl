@@ -78,6 +78,12 @@ grids. See [Shock coordinates](@ref) for the full rule.
 - Named cashflow results own independent arrays for each duration role and
   convexity block. Mutating one no longer changes another.
 - Hessian calculations reuse value and gradient results through DiffResults.
+- **`spread` and `zspread` stop on the Newton step, not the price residual.** Their
+  `tol` keyword now bounds the final Newton step in rate units (default `1e-12`)
+  instead of the remaining price difference in currency. Results no longer depend on
+  the notional: at a notional of `1e-10`, a true 2% z-spread previously came back as
+  about 1.96%. A zero `market_price` is also handled. Pass `tol` as a rate if you
+  set it explicitly.
   Contract duration bundles compute gradients without unused Hessians.
 
 ## v5.11.2 to v5.12.0

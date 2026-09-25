@@ -137,6 +137,10 @@ end
 Constant continuously-compounded spread `s` on the `credit` (discount) curve such that
 the model price equals `market_price`, with coupons estimated on `forward` (held fixed).
 Returns the spread and its sensitivity (\\\$/1bp parallel move of `credit + s`). Newton + AD.
+
+The solve stops once a Newton step is smaller than `tol` in rate units (not currency), so the
+result does not depend on the contract's notional and is defined for a zero `market_price`.
+An `ErrorException` is thrown if that does not happen within `maxiter` steps.
 """
 function zspread(contract::FinanceCore.AbstractContract, credit::AYM, market_price; forward::AYM = credit, s0 = 0.0, tol = 1.0e-12, maxiter = 100)
     ks = _contract_keys(contract)
@@ -145,17 +149,19 @@ function zspread(contract::FinanceCore.AbstractContract, credit::AYM, market_pri
             FinanceCore.present_value(disc, FinanceModels.Projection(contract, Dict(k => forward for k in ks), FinanceModels.CashflowProjection()))
     end
     f(s) = pvs(s) - market_price
+    result(s) = (; zspread = s, zspread_dv01 = -ForwardDiff.derivative(pvs, s) / 10_000)
     s = float(s0)
-    converged = false
+    step = oftype(s, NaN)
     for _ in 1:maxiter
         fs = f(s)
-        (abs(fs) < tol) && (converged = true; break)
-        d = ForwardDiff.derivative(f, s)
-        iszero(d) && break
-        s -= fs / d
+        iszero(fs) && return result(s)
+        step = fs / ForwardDiff.derivative(f, s)
+        isfinite(step) || break
+        s -= step
+        # a Newton step in rate units, unlike a price residual, does not scale with the notional
+        abs(step) < tol && return result(s)
     end
-    converged || throw(ErrorException("zspread did not converge (last residual = $(f(s)))"))
-    return (; zspread = s, zspread_dv01 = -ForwardDiff.derivative(pvs, s) / 10_000)
+    throw(ErrorException("zspread did not converge (last Newton step = $step, residual = $(f(s)))"))
 end
 
 """
