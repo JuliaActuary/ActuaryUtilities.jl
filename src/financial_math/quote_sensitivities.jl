@@ -21,7 +21,8 @@ vector. The valuation receives views of the same shapes. For each named input th
 result contains:
 
 - `duration`: `-∂V/∂s / V` for a parallel shift `s` added to every element
-- `dv01`: `-∂V/∂s / 10000`, the signed value change for a 0.0001 increase in every element
+- `dv01`: `-∂V/∂s / 10000`, the signed value loss for a 0.0001 increase in every element
+  (negative when the value rises)
 - `key_rate`: the per-element vector `-∂V/∂xᵢ / V`
 - `key_rate_dv01`: the per-element vector `-∂V/∂xᵢ / 10000`
 
@@ -30,8 +31,15 @@ point, and they keep the position's sign. They remain defined at zero value, whe
 the normalized measures are not. The bump coordinate is the one in which the inputs
 are expressed: an annual quoted rate is bumped as an annual rate.
 
-The valuation must be differentiable with ForwardDiff. Up to 64 input elements are
-evaluated in one forward pass, so a valuation that refits a curve refits once.
+`duration` and `dv01` sum the per-element derivatives. They equal the derivative of a
+parallel shift only where the valuation is differentiable, which excludes interpolation
+kinks such as a flat `Spline.MonotoneConvex` interval (see FinanceModels'
+[Sensitivities Through Calibration](https://docs.juliaactuary.org/FinanceModels/stable/calibration_sensitivities/)).
+
+The valuation must be differentiable with ForwardDiff. It runs once for the value and
+once more for the derivatives, which takes one forward pass per 64 input elements. A
+valuation that fits a curve therefore fits it twice (once more per additional 64
+elements), not once per input.
 
 See also [`KeyRates`](@ref) for sensitivities to bumps of a given curve.
 """
