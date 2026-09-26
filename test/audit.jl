@@ -203,6 +203,31 @@ end
     end
 end
 
+@testset "spread and zspread are scale-equivariant" begin
+    # Scaling every cashflow by k scales values and dollar sensitivities by k and leaves the
+    # spreads unchanged. Each case is also checked against an independent closed form.
+    base = FM.Yield.Constant(FC.Continuous(0.03))
+    curve = FM.Yield.Constant(0.03)
+    cfs, times = [5.0, 5.0, 105.0], [1.0, 2.0, 3.0]
+    stream(k) = FM.Composite(FM.Composite(FC.Cashflow(k * cfs[1], times[1]), FC.Cashflow(k * cfs[2], times[2])), FC.Cashflow(k * cfs[3], times[3]))
+    price = sum(c * exp(-0.05 * t) for (c, t) in zip(cfs, times))   # priced at a 5% force
+    dv01 = sum(c * t * exp(-0.05 * t) for (c, t) in zip(cfs, times)) / 10_000
+    unit_z = zspread(stream(1.0), base, price)
+    unit_s = spread(curve, curve + 0.01, cfs, times)
+    for k in (1.0e-12, 1.0, 1.0e10)
+        z = zspread(stream(k), base, k * price)
+        @test z.zspread ≈ 0.02 atol = 1.0e-14
+        @test z.zspread ≈ unit_z.zspread atol = 1.0e-15
+        @test z.zspread_dv01 ≈ k * dv01 rtol = 1.0e-12
+        @test z.zspread_dv01 ≈ k * unit_z.zspread_dv01 rtol = 1.0e-12
+        # `curve + 0.01` adds an annual 1%, so the spread over `curve` is exactly 0.01
+        s = spread(curve, curve + 0.01, k .* cfs, times)
+        @test FC.rate(s) ≈ 0.01 atol = 1.0e-14
+        @test FC.rate(s) ≈ FC.rate(unit_s) atol = 1.0e-15
+        @test FC.pv(curve + s, k .* cfs, times) ≈ k * FC.pv(curve + 0.01, cfs, times) rtol = 1.0e-12
+    end
+end
+
 @testset "moic degenerate input errors" begin
     @test moic([-10, 20, 30]) ≈ 5.0
     @test_throws ArgumentError moic([10, 20, 30])
