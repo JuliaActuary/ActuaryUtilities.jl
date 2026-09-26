@@ -158,7 +158,10 @@ function zspread(contract::FinanceCore.AbstractContract, credit::AYM, market_pri
         step = fs / ForwardDiff.derivative(f, s)
         isfinite(step) || break
         s -= step
-        # a Newton step in rate units, unlike a price residual, does not scale with the notional
+        # A Newton step in rate units, unlike a price residual, does not scale with the notional.
+        # In continuous coordinates |f′| ≤ t_max ⋅ Σ|terms|, so a small step bounds the residual
+        # locally: |f|/Σ|terms| ≤ |step| ⋅ t_max at this iterate. That assumes positive discount
+        # factors and finite terms; it is not a global guarantee about other roots.
         abs(step) < tol && return result(s)
     end
     throw(ErrorException("zspread did not converge (last Newton step = $step, residual = $(f(s)))"))

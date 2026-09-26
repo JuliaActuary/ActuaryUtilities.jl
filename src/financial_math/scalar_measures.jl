@@ -643,10 +643,16 @@ end
 Find the constant spread to add to `curve1` so the cashflows have the same present
 value as under `curve2`.
 
-The spread is found via a damped Newton iteration on the pricing residual. It stops once the
-undamped Newton step is smaller than `tol` in rate units (not currency), so the result does not
-depend on the size of the cashflows; an `ErrorException` is thrown if that does not happen within
-`maxiter` iterations.
+The spread is found via a damped Newton iteration on the pricing residual. A candidate is accepted
+once the undamped Newton step is smaller than `tol` in rate units (not currency) **and** the
+candidate reprices the cashflows: its pricing residual must be within `sqrt(eps)` of the gross
+discounted value `Σ|cfᵢ|⋅dfᵢ` under each curve. Both tests are unchanged by scaling the cashflows,
+and the gross scale is nonzero for zero-price and mixed-sign streams. A small step alone is not
+enough: near a combined annual rate of -100% the price derivative is so large that the step is tiny
+far from the root. Steps never go more than halfway to the edge of the spread's domain (the spread
+itself must exceed -1, and so must the combined rate when a periodic base is added nominally). An
+`ErrorException` is thrown if the valuation or its derivative is `NaN`, or if no candidate is
+accepted within `maxiter` iterations.
 
 !!! note
     For mixed-sign cashflows the pricing residual can have more than one exact root (e.g. a duration-neutral asset/liability pair); the root reached from a starting spread of zero is returned.
@@ -662,25 +668,51 @@ function spread(curve1, curve2, cashflows, times = eachindex(cashflows); tol = 1
     times = FinanceCore.timepoint.(cashflows, times)
     cashflows = FinanceCore.amount.(cashflows)
     pv2 = FinanceCore.pv(curve2, cashflows, times)
+    gross2 = sum(abs(cf) * FinanceCore.discount(curve2, t) for (cf, t) in zip(cashflows, times))
 
-    # Dampen Newton steps: mixed-sign cashflows can have nearly zero price
-    # derivatives, producing steps outside the valid spread domain s > -1.
-    f(s) = FinanceCore.pv(curve1 + FinanceCore.Periodic(s, 1), cashflows, times) - pv2
+    combined(s) = curve1 + FinanceCore.Periodic(s, 1)
+    f(s) = FinanceCore.pv(combined(s), cashflows, times) - pv2
+    gross1(s) = sum(abs(cf) * FinanceCore.discount(combined(s), t) for (cf, t) in zip(cashflows, times))
+    # Dampen Newton steps: mixed-sign cashflows can have nearly zero price derivatives, and
+    # near the domain edge a full step would leave it.
     max_step = 0.25
+    floor = _spread_floor(curve1)
     s = 0.0
     newton = NaN
     for _ in 1:maxiter
         fs = f(s)
         iszero(fs) && return FinanceCore.Periodic(s, 1)
         newton = fs / ForwardDiff.derivative(f, s)
-        # converged on the undamped step in rate units, which, unlike a price residual,
-        # does not scale with the cashflows
-        isfinite(newton) && abs(newton) < tol && return FinanceCore.Periodic(s - newton, 1)
-        step = !isfinite(newton) || abs(newton) > max_step ? (isnan(newton) ? max_step : copysign(max_step, newton)) : newton
-        s = max(s - step, -0.999)
+        isnan(_primal(newton)) && throw(
+            ErrorException("spread: the valuation or its derivative is NaN at spread $(_primal(s))")
+        )
+        # Convergence is decided on primal values; the returned candidate keeps any partials.
+        if isfinite(_primal(newton)) && abs(_primal(newton)) < tol
+            c = s - newton
+            residual, scale = _primal(f(c)), _primal(gross1(c) + gross2)
+            isfinite(residual) && isfinite(scale) &&
+                abs(residual) <= sqrt(eps(float(typeof(residual)))) * scale &&
+                return FinanceCore.Periodic(c, 1)
+        end
+        step = !isfinite(newton) || abs(newton) > max_step ? copysign(max_step, newton) : newton
+        s = max(s - step, (s + floor) / 2)
     end
     throw(ErrorException("spread did not converge in $maxiter iterations (last Newton step = $newton)"))
 end
+
+# The lowest spread `s` for which `curve1 + Periodic(s, 1)` is a valid rate. `Periodic(s, 1)` needs
+# s > -1. A periodic base `r` compounded `n` times adds the spread nominally in its own convention,
+# so the combined rate `r + n((1 + s)^(1/n) - 1)` must also exceed -n. A bare number is an annual rate.
+_spread_floor(base::Real) = _periodic_spread_floor(_primal(base), 1)
+function _spread_floor(base::FinanceCore.Rate)
+    base.compounding isa FinanceCore.Periodic || return -1.0
+    return _periodic_spread_floor(_primal(FinanceCore.rate(base)), base.compounding.frequency)
+end
+_spread_floor(base) = -1.0
+_periodic_spread_floor(r, n) = max(-1.0, float(max(-r / n, zero(r)))^n - 1)
+
+_primal(x) = x
+_primal(x::ForwardDiff.Dual) = _primal(ForwardDiff.value(x))
 
 """
     moic(cashflows<:AbstractArray)

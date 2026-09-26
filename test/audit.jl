@@ -166,6 +166,28 @@ end
     @test FC.pv(y + s2, cfs) ≈ FC.pv(y + 0.01, cfs) rtol = 1.0e-12
 end
 
+@testset "spread near the edge of its domain" begin
+    # Near a combined annual rate of -100% the price derivative is so large that the
+    # Newton step is tiny far from the root: a small step alone must not be accepted.
+    for base in (-0.99, -0.999999, -1 + 1.0e-10, -1 + 1.0e-13)
+        s = spread(base, 0.05, [1.0], [1.0])
+        @test FC.rate(s) ≈ 0.05 - base rtol = 1.0e-12
+        @test FC.pv(base + s, [1.0], [1.0]) ≈ FC.pv(0.05, [1.0], [1.0]) rtol = 1.0e-12
+    end
+    # Steps stop halfway to the domain edge, so spreads close to it are reachable: the
+    # combined rate must exceed -1 (base -0.5) and so must the spread itself (base 0).
+    @test FC.rate(spread(-0.5, -0.99, [1.0], [1.0])) ≈ -0.49 rtol = 1.0e-12
+    @test FC.rate(spread(0.0, -0.9999, [1.0], [1.0])) ≈ -0.9999 rtol = 1.0e-12
+    # a semiannual base adds the spread in its own convention: 2((1 + s)^(1/2) - 1) = -0.05
+    @test FC.rate(spread(FC.Periodic(-1.9, 2), FC.Periodic(-1.95, 2), [1.0], [1.0])) ≈ 0.975^2 - 1 rtol = 1.0e-12
+
+    @test ForwardDiff.derivative(y -> FC.rate(spread(0.04, y, fill(10.0, 10))), 0.05) ≈ 1 rtol = 1.0e-10
+    @test_throws "NaN" spread(0.03, 0.04, [NaN, 1.0])
+    @test_throws ErrorException spread(0.03, 0.04, fill(10.0, 10); maxiter = 1)
+    base = FM.Yield.Constant(FC.Continuous(0.03))
+    @test_throws ErrorException zspread(FC.Cashflow(1.0, 2.0), base, exp(-0.1); maxiter = 1)
+end
+
 @testset "spread solves do not depend on notional" begin
     base = FM.Yield.Constant(FC.Continuous(0.03))
     for n in (1.0e-12, 1.0, 1.0e10)
