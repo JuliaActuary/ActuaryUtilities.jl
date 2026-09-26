@@ -78,6 +78,13 @@ grids. See [Shock coordinates](@ref) for the full rule.
 - Named cashflow results own independent arrays for each duration role and
   convexity block. Mutating one no longer changes another.
 - Hessian calculations reuse value and gradient results through DiffResults.
+- **Zero cashflow streams take the type of a nonempty result.** Empty and all-zero
+  streams still return exact zeros without valuing any payment, but their numeric
+  type now includes the rate or curve: it is the type the same measure returns for a
+  nonempty stream. The rate or curve is queried once, at time zero, for this. An
+  untyped empty collection (`Any[]`, `Cashflow[]`, `()`) takes its type from the rate
+  or curve instead of falling back to `Float64`. For example, a zero stream under a
+  `BigFloat` curve now returns `BigFloat`, not `Float64`.
 - **`spread` and `zspread` stop on the Newton step, not the price residual.** Their
   `tol` keyword now bounds the final Newton step in rate units (default `1e-12`)
   instead of the remaining price difference in currency. Results no longer depend on
@@ -109,7 +116,8 @@ grids. See [Shock coordinates](@ref) for the full rule.
 - Zero streams do not evaluate the curve or run simulations. Their numeric types come
   from the amounts and times, plus the tenor grid for key-rate results, **without the
   curve's numeric type**; nonzero streams still promote from discounted cashflows.
-  Abstractly typed empty inputs fall back to `Float64`.
+  Abstractly typed empty inputs fall back to `Float64`. (v6.0 adds the curve's type
+  and drops the `Float64` fallback; see above.)
 - Skipping Hull–White simulation for zero streams leaves the RNG unchanged. In a
   batch using one shared RNG, subsequent contracts therefore receive different
   draws than in prior versions. Use independently assigned RNG streams when

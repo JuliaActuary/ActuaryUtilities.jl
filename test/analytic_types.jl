@@ -58,8 +58,9 @@
     end
 end
 
+# Empty streams query the curve only at time zero, for their result's numeric type.
 struct EmptyCashflowTestCurve <: FM.Yield.AbstractYieldModel end
-FC.discount(::EmptyCashflowTestCurve, t) = error("empty streams must not evaluate the curve")
+FC.discount(::EmptyCashflowTestCurve, t) = iszero(t) ? one(float(t)) : error("empty streams do not value payments")
 
 @testset "Empty key-rate cashflows have zero value and risk" begin
     kernel = ActuaryUtilities.FinancialMath._ncurve_analytic

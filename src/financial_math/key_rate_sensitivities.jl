@@ -124,16 +124,16 @@ end
     _validate_tenors(tenors)
     _check_cashflow_times(cfs, times)
     n = length(tenors)
+    disc(t) = prod(c -> FinanceCore.discount(c, t), values(curves))
     zero_stream = _iszero_cashflow_stream(cfs)
     if zero_stream
-        value = _zero_cashflow_value(cfs, times)
+        value = _zero_cashflow_value(disc, cfs, times)
         T = promote_type(typeof(value), eltype(tenors))
         gradient = zeros(T, n)
         return order >= 2 ? (; value, gradient, hessian = zeros(T, n, n), zero_stream) : (; value, gradient, zero_stream)
     end
     # Seed from a discounted payment to preserve curve numeric types and AD.
     # Its type must accommodate later terms, including payments at t=0.
-    disc(t) = prod(c -> FinanceCore.discount(c, t), values(curves))
     k0 = firstindex(cfs)
     t0 = FinanceCore.timepoint(cfs[k0], times[k0])
     cfd0 = _cf_value(cfs[k0]) * disc(t0)
@@ -197,7 +197,7 @@ Each `rᵢ` is a triangular continuous-zero bump at `kr.tenors[i]`. The base cur
 is used directly, without resampling or refitting.
 
 Empty collections and collections whose amounts are all exactly zero return zero
-key-rate durations by convention, with one entry per tenor and no curve evaluation.
+key-rate durations by convention, with one entry per tenor, without valuing any payment.
 Every cashflow needs a time; unused trailing times are ignored.
 Wrapped `Cashflow` objects use their embedded amounts and payment times, including
 when explicit `times` are supplied. Numeric amounts use the explicit times.
@@ -329,7 +329,7 @@ scalar parallel convexity, use `convexity(curve, cfs, times)` or
 
 Empty collections and collections whose amounts are all exactly zero return zero
 convexity by convention, retaining the usual scalar, matrix, or named-block shape
-without evaluating the curve. Nonzero amounts that offset to zero present value
+without valuing any payment. Nonzero amounts that offset to zero present value
 still have undefined normalized convexity (`NaN`/`Inf`).
 
 For the `NamedTuple` form, every named curve must be a discount-role layer
@@ -425,9 +425,10 @@ position sign; dollar DV01s change sign with the position.
 Empty collections and collections whose amounts are all exactly zero have zero
 value and dollar risk; normalized duration and convexity are zero by convention.
 Every cashflow needs a time; unused trailing times are ignored.
-Shapes are preserved without evaluating the curve. Zero-stream result types come
-from the amounts, times, and tenor grid; abstractly typed empty inputs fall back
-to `Float64`. The zero check includes automatic-differentiation partials.
+Shapes are preserved without valuing any payment. Zero-stream results have the
+numeric type a nonempty stream's would: amounts, times, tenor grid, and the curve,
+which is queried once at time zero. An untyped empty collection takes its type from
+the curve. The zero check includes automatic-differentiation partials.
 
 Nonzero amounts that offset to zero present value retain dollar exposures and have
 undefined normalized risk (`NaN`/`Inf`). For portfolio risk, sum values and dollar

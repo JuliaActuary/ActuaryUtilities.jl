@@ -1,5 +1,7 @@
+# Zero streams query the curve once, at time zero, for their result's numeric type; they
+# never value a payment.
 struct ZeroCashflowTestCurve <: FM.Yield.AbstractYieldModel end
-FC.discount(::ZeroCashflowTestCurve, t) = error("zero cashflows do not require a curve query")
+FC.discount(::ZeroCashflowTestCurve, t) = iszero(t) ? one(float(t)) : error("zero cashflows do not value payments")
 
 @testset "Zero cashflow streams" begin
     curve = ZeroCashflowTestCurve()
@@ -84,8 +86,10 @@ FC.discount(::ZeroCashflowTestCurve, t) = error("zero cashflows do not require a
         end
         @test duration(curve, FC.Cashflow{BigFloat, Float64}[]) isa BigFloat
         @test duration(curve, Real[0, big"0.0"], [1.0, 2.0]) isa BigFloat
+        # a zero stream's result has the type a nonempty stream's would: the curve counts
         bigcurve = FM.Yield.Constant(FC.Continuous(big"0.04"))
-        @test sensitivities(kr, bigcurve, zeros(2), [1.0, 2.0]).value isa Float64
+        @test sensitivities(kr, bigcurve, zeros(2), [1.0, 2.0]).value isa BigFloat
+        @test sensitivities(kr, bigcurve, [1.0, 0.0], [1.0, 2.0]).value isa BigFloat
         for measure in (Macaulay(), Modified(), DV01())
             @test_throws DimensionMismatch duration(measure, curve, [0.0], Float64[])
         end
@@ -178,4 +182,47 @@ end
         @test rand(rng_short) == rand(rng_long)
         @test_throws DimensionMismatch sensitivities(args..., cfs, [1.0])
     end
+end
+
+@testset "Zero streams take the type of a nonempty result" begin
+    # Linearity forces the value zero. Its type is a convention: the type the same measure
+    # gives for a nonempty stream of the same amount, time and rate types. When the element
+    # type says nothing (`Any[]`, `Cashflow[]`, `()`), the rate or curve sets it.
+    kr = KeyRates([1.0, 5.0])
+    yields = (
+        0.03, 0.03f0, big"0.03", FC.Periodic(0.03f0, 1), FC.Continuous(0.03f0), FC.Periodic(0.03, 2),
+        FM.Yield.Constant(0.03), FM.Yield.Constant(big"0.03"),
+    )
+    for y in yields, amounts in ([1.0, 2.0], Float32[1, 2], [1, 2]), times in (Float32[1, 2], [1.0, 2.0])
+        measures = Any[
+            (a, t) -> duration(Macaulay(), y, a, t), (a, t) -> duration(y, a, t),
+            (a, t) -> duration(DV01(), y, a, t), (a, t) -> convexity(y, a, t), (a, t) -> present_values(y, a, t),
+        ]
+        if y isa FM.Yield.AbstractYieldModel
+            push!(measures, (a, t) -> duration(kr, y, a, t), (a, t) -> duration(DV01(), kr, y, a, t))
+        end
+        for m in measures
+            T = typeof(m(amounts, times))
+            @test typeof(m(zero(amounts), times)) == T
+            @test typeof(m(similar(amounts, 0), similar(times, 0))) == T
+        end
+    end
+    for (y, T) in ((0.03, Float64), (big"0.03", BigFloat), (FC.Continuous(0.03f0), Float32), (FM.Yield.Constant(big"0.03"), BigFloat))
+        for cfs in (Any[], FC.Cashflow[], ())
+            @test duration(Macaulay(), y, cfs) isa T
+            @test isequal(duration(Macaulay(), y, cfs), zero(T))
+        end
+    end
+    @test duration(kr, FM.Yield.Constant(big"0.03"), Any[], Float64[]) isa Vector{BigFloat}
+    # the zero is exact even where the origin query is not finite
+    @test isequal(duration(Macaulay(), FC.Continuous(Inf), Float64[], Float64[]), 0.0)
+
+    # a dual-number rate gives dual zeros, with a zero derivative
+    types = Ref{Any}()
+    d = ForwardDiff.derivative(0.03) do r
+        types[] = (typeof(duration(DV01(), r, [1.0, 2.0], [1.0, 2.0])), typeof(duration(DV01(), r, Float64[], Float64[])))
+        duration(DV01(), r, Float64[], Float64[])
+    end
+    @test iszero(d)
+    @test types[][1] == types[][2]
 end

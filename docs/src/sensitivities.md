@@ -9,7 +9,7 @@ derivatives. See the [autodiff ALM chapter](https://modernfinancialmodeling.com/
 for background.
 
 Explicit cashflow inputs that are empty or have all-zero amounts return zero value
-and risk without evaluating the curve. Nonzero amounts that offset to zero present
+and risk without valuing any payment. Nonzero amounts that offset to zero present
 value retain their dollar exposures and undefined normalized risk. See
 [Zero cashflow streams](@ref) for numeric types and portfolio aggregation.
 

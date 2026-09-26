@@ -26,18 +26,44 @@ end
 # simulation horizons must use the same embedded payment times as valuation.
 _maximum_cashflow_time(cfs, times) = maximum(k -> FinanceCore.timepoint(cfs[k], times[k]), eachindex(cfs))
 
-# Zero streams do not require a curve query. Concrete input types determine the
-# value type; abstractly typed empty collections have no values to promote.
-_cashflow_amount_type(::Type{T}) where {T} = T
-_cashflow_amount_type(::Type{<:FinanceCore.Cashflow{T}}) where {T} = T
-function _zero_cashflow_value(cfs, times)
-    C = _cashflow_amount_type(eltype(cfs))
-    if !isconcretetype(C) && !isempty(cfs)
-        C = mapreduce(cf -> typeof(float(_cf_value(cf))), promote_type, cfs)
-    end
-    T = promote_type(C, eltype(times))
-    return zero(isconcretetype(T) && T <: Real ? float(T) : Float64)
+# Zero streams return exact zeros without valuing each payment; linearity forces the value.
+# Its type is a convention: the type a nonempty stream's result would have, the promotion of
+# the amount, time and discount types. The discount type comes from one query at time zero
+# (`disc(t)` is the discount factor), so the rate or curve sets the type when the element
+# type says nothing, as for `Any[]` or `Cashflow[]`. Taking `zero` of that product gives a
+# positive zero of its type even when a factor is not finite, and zero partials under AD.
+function _zero_cashflow_value(disc, cfs, times)
+    t = _zero_stream_time(cfs, times)
+    return zero(disc(t) * _zero_amount(cfs) * one(t))
 end
+_zero_stream_time(cfs, times) = _zero_time(eltype(times)) + _zero_cashflow_time(eltype(cfs))
+
+# The zero-stream value for a single rate, number or curve.
+_zero_stream_value(yield, cfs, times) = _zero_cashflow_value(t -> FinanceCore.discount(yield, t), cfs, times)
+# The same for a statistic Σ weight(t)⋅cf⋅d / divisor, so it has the nonempty formula's type.
+_zero_weighted(yield, weight, cfs, times, divisor = 1) =
+    zero(weight(_zero_stream_time(cfs, times)) * _zero_stream_value(yield, cfs, times) / divisor)
+# The same for a measure the nonempty path differentiates at a `Float64` shift of 0.0.
+_zero_shifted(yield, cfs, times, divisor = 1) = zero(_zero_stream_value(yield, cfs, times) * 0.0 / divisor)
+
+# An all-zero stream in an abstractly typed collection uses the amounts present.
+function _zero_amount(cfs)
+    E = eltype(cfs)
+    isconcretetype(E) || isempty(cfs) || return zero(mapreduce(cf -> typeof(_cf_value(cf)), promote_type, cfs))
+    return _zero_amount_of(E)
+end
+# An element type that says nothing about amounts contributes `false`, which every
+# numeric type absorbs under promotion.
+_zero_amount_of(::Type) = false
+_zero_amount_of(::Type{Union{}}) = false
+_zero_amount_of(::Type{T}) where {T <: Real} = zero(T)
+_zero_amount_of(::Type{<:FinanceCore.Cashflow{A}}) where {A <: Real} = zero(A)
+_zero_time(::Type) = false
+_zero_time(::Type{Union{}}) = false
+_zero_time(::Type{T}) where {T <: Real} = zero(T)
+_zero_cashflow_time(::Type) = false
+_zero_cashflow_time(::Type{Union{}}) = false
+_zero_cashflow_time(::Type{<:FinanceCore.Cashflow{A, T}}) where {A, T <: Real} = zero(T)
 
 # The same normalization handles scalars and arrays. Signs stay inside the
 # broadcast, and zero streams return positive typed zeros before any division.

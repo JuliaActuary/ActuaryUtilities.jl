@@ -73,11 +73,13 @@ The zero check uses exact `iszero` on amounts, including AD partials. Both `0.0`
 and `-0.0` count as zero; tiny nonzero amounts do not. Assigned zero duration is a
 convention, not the limit as amounts shrink. Explicit tenor grids are still validated.
 
-Zero streams skip curve evaluation and Hull–White simulation. Result types come
-from amounts and times, plus the tenor grid for key-rate risk. Abstractly typed
-empty inputs fall back to `Float64`. Nonzero streams also incorporate the curve's
-numeric type, so a zero stream may return a different type. Derive batch and AD
-buffer types from the calculation's inputs rather than the first result.
+Zero streams value no payments and skip Hull–White simulation. Linearity forces
+their value, zero. Its numeric type is a convention: the type the same measure
+returns for a nonempty stream with the same amount, time, and rate or curve types
+(plus the tenor grid for key-rate risk). The rate or curve is queried once, at time
+zero, for that type, so a curve that cannot be evaluated at time zero cannot value a
+zero stream either. An untyped empty collection (`Any[]`, `Cashflow[]`, `()`) takes
+its type from the rate or curve.
 
 Skipping Hull–White simulation leaves the RNG unchanged, so a shared-RNG batch
 uses different subsequent draws than versions that simulated zero streams.

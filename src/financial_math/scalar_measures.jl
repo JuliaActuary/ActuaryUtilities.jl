@@ -5,8 +5,9 @@ Return the value of remaining cashflows before each payment period.
 Entry `k` values cashflows `k:end` at `timepoints[k-1]`, or time zero for `k = 1`.
 
 Empty collections return an empty vector. Collections whose amounts are all
-exactly zero return a vector of positive zeros without evaluating the curve;
-the element type comes from the amounts and timepoints.
+exactly zero return a vector of positive zeros without valuing any payment; the
+element type is the one a nonempty stream's result would have (see
+[Zero cashflow streams](@ref)).
 Every cashflow requires a time; additional trailing times are ignored.
 
 # Examples
@@ -28,7 +29,7 @@ julia> present_values(0.05, [10,10,110], [1,2,3])
 function present_values(interest, cashflows, times = eachindex(cashflows))
     _check_cashflow_times(cashflows, times)
     n = length(cashflows)
-    _iszero_cashflow_stream(cashflows) && return zeros(typeof(_zero_cashflow_value(cashflows, times)), n)
+    _iszero_cashflow_stream(cashflows) && return zeros(typeof(_zero_stream_value(interest, cashflows, times)), n)
     # Discount backward in one pass; derive the accumulator type from valuation.
     acc = zero(FinanceCore.discount(interest, first(times)) * first(cashflows))
     pvs = Vector{typeof(acc)}(undef, n)
@@ -216,9 +217,9 @@ const _CashflowCollection = Union{AbstractArray, Tuple, Base.Generator}
 # Indexed kernels share one representation; materialize generators before AD
 # reevaluates a valuation, including generators backed by a stateful iterator.
 _cashflow_vector(cfs::AbstractArray) = vec(cfs)
-# Empty tuples collect to Union{}[], whose element type also matches Cashflow.
-# Use the zero-stream fallback type before dispatch derives embedded times.
-_cashflow_vector(::AbstractArray{Union{}}) = Float64[]
+# Empty tuples collect to Union{}[], whose element type also matches Cashflow. Treat them as
+# an untyped empty collection before dispatch derives embedded times.
+_cashflow_vector(::AbstractArray{Union{}}) = Any[]
 _cashflow_vector(cfs::Union{Tuple, Base.Generator}) = _cashflow_vector(collect(cfs))
 
 """
@@ -245,7 +246,7 @@ Relative duration is unchanged when the position sign reverses; dollar DV01,
 IR01, and CS01 reverse sign with the position.
 
 Empty collections and collections whose amounts are all exactly zero return zero
-risk without evaluating the curve. Every cashflow needs a time; unused trailing
+risk without valuing any payment. Every cashflow needs a time; unused trailing
 times are ignored. See [Zero cashflow streams](@ref) for the normalization convention,
 numeric types, and zero-net-value portfolios. Dollar sensitivities differentiate
 the signed value directly, including at zero present value; normalized duration
@@ -329,7 +330,7 @@ duration(d::Modified, yield::_YieldInput, cfs::_CashflowCollection, times) =
 
 function duration(::Modified, yield::_YieldInput, cfs::AbstractVector, times)
     times = _cashflow_times(cfs, times)
-    _iszero_cashflow_stream(cfs) && return _zero_cashflow_value(cfs, times)
+    _iszero_cashflow_stream(cfs) && return _zero_shifted(yield, cfs, times)
     D(i) = price(i, cfs, times)
     return duration(yield, D)
 end
@@ -394,7 +395,7 @@ end
 function duration(::DV01, yield::_YieldInput, cfs::_CashflowCollection, times)
     cfs = _cashflow_vector(cfs)
     times = _cashflow_times(cfs, times)
-    _iszero_cashflow_stream(cfs) && return _zero_cashflow_value(cfs, times)
+    _iszero_cashflow_stream(cfs) && return _zero_shifted(yield, cfs, times, 10_000)
     return duration(DV01(), yield, i -> FinanceCore.present_value(i, cfs, times))
 end
 function duration(d::Duration, yield::_YieldInput, cfs::_CashflowCollection)
@@ -406,7 +407,7 @@ end
 function duration(::DV01, yield::FinanceModels.Yield.AbstractYieldModel, cfs::_CashflowCollection, times)
     cfs = _cashflow_vector(cfs)
     times = _cashflow_times(cfs, times)
-    _iszero_cashflow_stream(cfs) && return _zero_cashflow_value(cfs, times)
+    _iszero_cashflow_stream(cfs) && return _zero_weighted(yield, identity, cfs, times, 10_000)
     # -∂V/∂s under a continuous-zero shift is Σ t·cf·d; do not divide by V so
     # dollar exposure remains defined at zero present value.
     _, Vt = _weighted_sums(yield, identity, cfs, times)
@@ -520,7 +521,7 @@ curve convexity equals the sum of the full key-rate convexity matrix. See
 [Shock coordinates](@ref).
 
 Empty collections and collections whose amounts are all exactly zero return zero
-by convention, without evaluating the curve. Every cashflow needs a time; unused
+by convention, without valuing any payment. Every cashflow needs a time; unused
 trailing times are ignored. See [Zero cashflow streams](@ref) for numeric types and
 zero-net-value portfolios.
 
@@ -559,7 +560,7 @@ convexity(yield::_YieldInput, cfs::_CashflowCollection, times) =
 
 function convexity(yield::_YieldInput, cfs::AbstractVector, times)
     times = _cashflow_times(cfs, times)
-    _iszero_cashflow_stream(cfs) && return _zero_cashflow_value(cfs, times)
+    _iszero_cashflow_stream(cfs) && return _zero_shifted(yield, cfs, times)
     return convexity(yield, i -> price(i, cfs, times))
 end
 
@@ -605,7 +606,7 @@ end
 # `weight` is only forwarded here, so type it to keep this method specialized.
 function _weighted_ratio(yield, weight::W, cfs, times; divisor = 1) where {W}
     _check_cashflow_times(cfs, times)
-    _iszero_cashflow_stream(cfs) && return _zero_cashflow_value(cfs, times)
+    _iszero_cashflow_stream(cfs) && return _zero_weighted(yield, weight, cfs, times, divisor)
     V, Vw = _weighted_sums(yield, weight, cfs, times)
     return _risk_ratio(Vw, V; divisor)
 end
