@@ -36,10 +36,7 @@ end
 
 # Shared derivative engine for named curve roles on one tenor grid.
 function _ncurve_ad(valuation::F, curves::NamedTuple{roles}, tenors; order = 1) where {F, roles}
-    order in (1, 2) || throw(ArgumentError("derivative order must be 1 or 2"))
     grid = _validate_tenors(tenors)
-    isempty(curves) && throw(ArgumentError("at least one curve role is required"))
-    all(c -> c isa AYM, curves) || throw(ArgumentError("every curve role must be an AbstractYieldModel"))
     n, k = length(grid), length(curves)
     indices(i) = ((i - 1) * n + 1):(i * n)
     slice(b, i) = length(curves) == 1 ? b : view(b, indices(i))

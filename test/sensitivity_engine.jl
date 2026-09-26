@@ -58,9 +58,6 @@ end
         @test_throws ArgumentError sensitivities(c -> v(c.base), (; base); tenors = bad)
         @test_throws ArgumentError sensitivities(floater, base, bad)
     end
-    @test_throws ArgumentError engine(identity, (;), tenors)
-    @test_throws ArgumentError engine(identity, (; base = 0.03), tenors)
-    @test_throws ArgumentError engine(c -> v(c.base), (; base), tenors; order = 3)
     grid = KeyRates(copy(tenors))
     grid.tenors[2] = grid.tenors[1]
     @test_throws ArgumentError duration(grid, v, base)

@@ -31,12 +31,12 @@ See [Convexity Conventions](@ref) for rate-shock definitions and worked examples
 
 Empty and all-zero cashflow collections return zero value and risk. Normalized
 duration and convexity are zero by convention. This applies to scalar, key-rate,
-legacy, and Hull–White cashflow sensitivities. `present_values` returns an empty
+and Hull–White cashflow sensitivities. `present_values` returns an empty
 vector or a vector of zeros.
 
 Every cashflow needs a corresponding time, but the time grid may be longer.
-Unused trailing times are ignored, including when deriving a legacy key-rate grid
-or a Hull–White simulation horizon. Too few times throws `DimensionMismatch`.
+Unused trailing times are ignored, including when deriving a Hull–White simulation
+horizon. Too few times throws `DimensionMismatch`.
 Empty cashflows are valid with either an empty or populated time grid.
 
 | Cashflow amounts | Value and dollar risk | Normalized risk |
