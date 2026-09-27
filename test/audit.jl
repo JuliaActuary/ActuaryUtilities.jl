@@ -244,6 +244,16 @@ end
     @test moic(Float32[-10, -20]) === 0.0f0
     @test moic(Float32[10]) === Inf32
     @test moic(FC.Cashflow.([-10.0, -5.0], [0.0, 1.0])) === 0.0
+    # no contributions is +Inf, not -Inf from a negated zero, including with floating-point amounts
+    @test moic([1.0]) === Inf
+    @test moic([-1.0, 0.0]) === 0.0
+    @test moic(FC.Cashflow.([10.0], [1.0])) === Inf
+    # abstractly typed streams
+    @test isnan(moic(Any[]))
+    @test moic(Any[-10, 20.0]) === 2.0
+    # the sums are type-stable for a concrete element type
+    @test @inferred(moic([-10.0, 20.0, 30.0])) === 5.0
+    @test @inferred(moic(FC.Cashflow.([-10.0, 20.0], [0.0, 1.0]))) === 2.0
 end
 
 @testset "duration with a negative-valued valuation function" begin

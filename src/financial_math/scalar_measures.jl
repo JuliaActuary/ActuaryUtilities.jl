@@ -736,10 +736,11 @@ julia> moic([-10,-20])
 
 """
 function moic(cfs::T) where {T <: AbstractArray}
-    # An empty sum is zero; `false` is the zero every amount type absorbs, so the result keeps the
-    # amounts' type.
-    returned = sum((FinanceCore.amount(cf) for cf in cfs if FinanceCore.amount(cf) > 0); init = false)
-    invested = -sum((FinanceCore.amount(cf) for cf in cfs if FinanceCore.amount(cf) < 0); init = false)
+    # An empty sum is zero, of the amounts' type when the element type says it (so the sums are
+    # type-stable). Contributions are negated before summing, so none gives +0 and a ratio of +Inf.
+    z = _zero_amount(cfs)
+    returned = sum((FinanceCore.amount(cf) for cf in cfs if FinanceCore.amount(cf) > 0); init = z)
+    invested = sum((-FinanceCore.amount(cf) for cf in cfs if FinanceCore.amount(cf) < 0); init = z)
     return returned / invested
 end
 
