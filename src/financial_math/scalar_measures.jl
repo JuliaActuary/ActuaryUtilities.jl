@@ -722,7 +722,7 @@ _primal(x::ForwardDiff.Dual) = _primal(ForwardDiff.value(x))
 
 The multiple on invested capital ("moic") is the un-discounted sum of distributions divided by the sum of the contributions. The function assumes that negative numbers in the array represent contributions and positive numbers represent distributions.
 
-A sum over no terms is zero, so the ratio is defined for any stream: a total loss (contributions only) has a moic of `0.0`, a stream with no contributions gives `Inf`, and an empty or all-zero stream gives `NaN` (0/0).
+A sum over no terms contributes zero, so a total loss (contributions only) has a moic of `0.0`. Without contributions the ratio divides by zero, and in floating-point arithmetic that gives `Inf` for positive distributions and `NaN` (an undefined ratio) when distributions are zero too, as for an empty or all-zero stream. Neither is a meaningful multiple.
 
 # Examples
 
