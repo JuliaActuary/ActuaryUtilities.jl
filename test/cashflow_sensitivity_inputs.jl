@@ -75,6 +75,24 @@ end
     # Numeric elements use fallback times even alongside wrapped elements.
     mixed = Any[wrapped[1], 5.0, wrapped[3]]
     @test _same_sensitivity(sensitivities(kr, flat, mixed, [7.0, 1.5, 9.0]), sensitivities(kr, flat, wrapped))
+    # Zero and empty wrapped streams take their time type from the embedded times, as valuation
+    # does, not from the supplied times it ignores.
+    curve32 = FM.Yield.Constant(FC.Continuous(0.04f0))
+    kr32 = KeyRates(Float32[1, 2])
+    supplied = Float64[9, 10]
+    nonzero32 = FC.Cashflow.(Float32[1, 2], Float32[1, 2])
+    for cfs in (FC.Cashflow.(Float32[0, 0], Float32[1, 2]), FC.Cashflow{Float32, Float32}[])
+        for measure in (Macaulay(), Modified())
+            @test typeof(duration(measure, curve32, cfs, supplied)) == typeof(duration(measure, curve32, nonzero32, supplied)) == Float32
+        end
+        @test typeof(convexity(curve32, cfs, supplied)) == typeof(convexity(curve32, nonzero32, supplied)) == Float32
+        zero_bundle = sensitivities(kr32, curve32, cfs, supplied)
+        bundle = sensitivities(kr32, curve32, nonzero32, supplied)
+        @test typeof(zero_bundle.value) == typeof(bundle.value) == Float32
+        @test eltype(zero_bundle.durations) == eltype(bundle.durations) == Float32
+        @test eltype(zero_bundle.convexities) == eltype(bundle.convexities) == Float32
+    end
+
     zero_curve = ZeroCashflowTestCurve()
     for cfs in (FC.Cashflow{Float64, Float64}[], FC.Cashflow.([0.0, -0.0, 0.0], times))
         @test iszero(convexity(zero_curve, cfs, fallback))

@@ -36,7 +36,12 @@ function _zero_cashflow_value(disc, cfs, times)
     t = _zero_stream_time(cfs, times)
     return zero(disc(t) * _zero_amount(cfs) * one(t))
 end
-_zero_stream_time(cfs, times) = _zero_time(eltype(times)) + _zero_cashflow_time(eltype(cfs))
+# The time type follows valuation: a numeric amount is paid at its supplied time, but a
+# `Cashflow` carries its own, so the supplied time does not count for it.
+_zero_stream_time(cfs, times) = _zero_stream_time(eltype(cfs), times)
+_zero_stream_time(::Type, times) = _zero_time(eltype(times))
+_zero_stream_time(::Type{Union{}}, times) = _zero_time(eltype(times))
+_zero_stream_time(::Type{E}, times) where {E <: FinanceCore.Cashflow} = _zero_cashflow_time(E)
 
 # The zero-stream value for a single rate, number or curve.
 _zero_stream_value(yield, cfs, times) = _zero_cashflow_value(t -> FinanceCore.discount(yield, t), cfs, times)
