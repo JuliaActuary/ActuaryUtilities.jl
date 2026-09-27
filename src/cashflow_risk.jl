@@ -37,8 +37,14 @@ function _zero_cashflow_value(disc, cfs, times)
     return zero(disc(t) * _zero_amount(cfs) * one(t))
 end
 # The time type follows valuation: a numeric amount is paid at its supplied time, but a
-# `Cashflow` carries its own, so the supplied time does not count for it.
-_zero_stream_time(cfs, times) = _zero_stream_time(eltype(cfs), times)
+# `Cashflow` carries its own, so the supplied time does not count for it. An abstractly typed
+# stream, such as `Cashflow[...]` or `Any[...]`, uses the times its payments are made at, as
+# `_zero_amount` uses the amounts present.
+function _zero_stream_time(cfs, times)
+    isconcretetype(eltype(cfs)) || isempty(cfs) ||
+        return zero(mapreduce(k -> typeof(FinanceCore.timepoint(cfs[k], times[k])), promote_type, eachindex(cfs)))
+    return _zero_stream_time(eltype(cfs), times)
+end
 _zero_stream_time(::Type, times) = _zero_time(eltype(times))
 _zero_stream_time(::Type{Union{}}, times) = _zero_time(eltype(times))
 _zero_stream_time(::Type{E}, times) where {E <: FinanceCore.Cashflow} = _zero_cashflow_time(E)

@@ -92,6 +92,27 @@ end
         @test eltype(zero_bundle.durations) == eltype(bundle.durations) == Float32
         @test eltype(zero_bundle.convexities) == eltype(bundle.convexities) == Float32
     end
+    # Abstractly typed streams take the time type from the times their payments use: a
+    # `Cashflow`'s own, a number's supplied one. Float32 amounts at BigFloat times value in BigFloat.
+    nonzero_big = FC.Cashflow[FC.Cashflow(1.0f0, big(1.0)), FC.Cashflow(2.0f0, big(2.0))]
+    zeros_big = FC.Cashflow[FC.Cashflow(0.0f0, big(1.0)), FC.Cashflow(0.0f0, big(2.0))]
+    for supplied_times in (supplied, [9, 10])
+        for measure in (Macaulay(), Modified())
+            @test typeof(duration(measure, curve32, zeros_big, supplied_times)) ==
+                typeof(duration(measure, curve32, nonzero_big, supplied_times)) == BigFloat
+        end
+        @test typeof(convexity(curve32, zeros_big, supplied_times)) ==
+            typeof(convexity(curve32, nonzero_big, supplied_times)) == BigFloat
+        @test typeof(duration(DV01(), curve32, Any[zeros_big...], supplied_times)) ==
+            typeof(duration(DV01(), curve32, Any[nonzero_big...], supplied_times))
+        # a number in the same collection is paid at its supplied time
+        @test typeof(duration(Macaulay(), curve32, Any[0.0f0, zeros_big[2]], supplied_times)) ==
+            typeof(duration(Macaulay(), curve32, Any[1.0f0, nonzero_big[2]], supplied_times))
+    end
+    zb = sensitivities(kr32, curve32, zeros_big, supplied)
+    nb = sensitivities(kr32, curve32, nonzero_big, supplied)
+    @test typeof(zb.value) == typeof(nb.value) == BigFloat
+    @test eltype(zb.durations) == eltype(nb.durations)
 
     zero_curve = ZeroCashflowTestCurve()
     for cfs in (FC.Cashflow{Float64, Float64}[], FC.Cashflow.([0.0, -0.0, 0.0], times))

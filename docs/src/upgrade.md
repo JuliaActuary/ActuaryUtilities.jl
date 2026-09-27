@@ -84,7 +84,9 @@ grids. See [Shock coordinates](@ref) for the full rule.
   nonempty stream. The rate or curve is queried once, at time zero, for this. An
   untyped empty collection (`Any[]`, `Cashflow[]`, `()`) takes its type from the rate
   or curve instead of falling back to `Float64`. For example, a zero stream under a
-  `BigFloat` curve now returns `BigFloat`, not `Float64`.
+  `BigFloat` curve now returns `BigFloat`, not `Float64`. An abstractly typed
+  nonempty stream (`Cashflow[...]`, `Any[...]`) takes its time type from the times its
+  payments use, as valuation does.
 - **`spread` and `zspread` stop on the Newton step, not the price residual.** Their
   `tol` keyword now bounds the final Newton step in rate units (default `1e-12`)
   instead of the remaining price difference in currency. Results no longer depend on
