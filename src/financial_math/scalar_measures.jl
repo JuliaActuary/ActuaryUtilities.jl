@@ -720,21 +720,26 @@ _primal(x::ForwardDiff.Dual) = _primal(ForwardDiff.value(x))
 """
     moic(cashflows<:AbstractArray)
 
-The multiple on invested capital ("moic") is the un-discounted sum of distributions divided by the sum of the contributions. The function assumes that negative numbers in the array represent contributions and positive numbers represent distributions. It needs at least one of each; otherwise the missing sum has no terms and throws an `ArgumentError`.
+The multiple on invested capital ("moic") is the un-discounted sum of distributions divided by the sum of the contributions. The function assumes that negative numbers in the array represent contributions and positive numbers represent distributions.
+
+A sum over no terms is zero, so the ratio is defined for any stream: a total loss (contributions only) has a moic of `0.0`, a stream with no contributions gives `Inf`, and an empty or all-zero stream gives `NaN` (0/0).
 
 # Examples
 
 ```julia-repl
 julia> moic([-10,20,30])
 5.0
+
+julia> moic([-10,-20])
+0.0
 ```
 
 """
 function moic(cfs::T) where {T <: AbstractArray}
-    # Without both a distribution and a contribution, one of these sums is over no terms
-    # and throws an `ArgumentError`.
-    returned = sum(FinanceCore.amount(cf) for cf in cfs if FinanceCore.amount(cf) > 0)
-    invested = -sum(FinanceCore.amount(cf) for cf in cfs if FinanceCore.amount(cf) < 0)
+    # An empty sum is zero; `false` is the zero every amount type absorbs, so the result keeps the
+    # amounts' type.
+    returned = sum((FinanceCore.amount(cf) for cf in cfs if FinanceCore.amount(cf) > 0); init = false)
+    invested = -sum((FinanceCore.amount(cf) for cf in cfs if FinanceCore.amount(cf) < 0); init = false)
     return returned / invested
 end
 

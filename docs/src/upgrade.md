@@ -87,6 +87,10 @@ grids. See [Shock coordinates](@ref) for the full rule.
   `BigFloat` curve now returns `BigFloat`, not `Float64`. An abstractly typed
   nonempty stream (`Cashflow[...]`, `Any[...]`) takes its time type from the times its
   payments use, as valuation does.
+- **`moic` is defined for one-sign and empty streams.** A sum over no terms is zero,
+  so a total loss (contributions only) returns `0.0`, a stream without contributions
+  returns `Inf`, and an empty or all-zero stream returns `NaN`. v5 threw an
+  `ArgumentError` for these.
 - **`spread` and `zspread` stop on the Newton step, not the price residual.** Their
   `tol` keyword now bounds the final Newton step in rate units (default `1e-12`)
   instead of the remaining price difference in currency. Results no longer depend on

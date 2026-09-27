@@ -232,10 +232,18 @@ end
     end
 end
 
-@testset "moic degenerate input errors" begin
+@testset "moic of one-sign and empty streams" begin
     @test moic([-10, 20, 30]) ≈ 5.0
-    @test_throws ArgumentError moic([10, 20, 30])
-    @test_throws ArgumentError moic([-10, -20])
+    # an empty sum is zero: a total loss is 0x, no contributions is x/0, nothing at all is 0/0
+    @test moic([-10, -20]) === 0.0
+    @test moic([10, 20, 30]) === Inf
+    @test isnan(moic(Float64[]))
+    @test isnan(moic([0, 0]))
+    # the amounts' type is kept
+    @test moic(Float32[-10, 20]) === 2.0f0
+    @test moic(Float32[-10, -20]) === 0.0f0
+    @test moic(Float32[10]) === Inf32
+    @test moic(FC.Cashflow.([-10.0, -5.0], [0.0, 1.0])) === 0.0
 end
 
 @testset "duration with a negative-valued valuation function" begin
