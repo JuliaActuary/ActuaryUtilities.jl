@@ -182,6 +182,10 @@ end
     @test FC.rate(spread(FC.Periodic(-1.9, 2), FC.Periodic(-1.95, 2), [1.0], [1.0])) ≈ 0.975^2 - 1 rtol = 1.0e-12
 
     @test ForwardDiff.derivative(y -> FC.rate(spread(0.04, y, fill(10.0, 10))), 0.05) ≈ 1 rtol = 1.0e-10
+    # where the solve is damped, the damping decision uses primal values and the root keeps
+    # its partials: the spread over the base is target - base
+    @test ForwardDiff.derivative(y -> FC.rate(spread(-0.5, y, [1.0], [1.0])), -0.99) ≈ 1 rtol = 1.0e-10
+    @test ForwardDiff.derivative(b -> FC.rate(spread(b, -0.99, [1.0], [1.0])), -0.5) ≈ -1 rtol = 1.0e-10
     @test_throws "NaN" spread(0.03, 0.04, [NaN, 1.0])
     @test_throws ErrorException spread(0.03, 0.04, fill(10.0, 10); maxiter = 1)
     base = FM.Yield.Constant(FC.Continuous(0.03))

@@ -695,7 +695,9 @@ function spread(curve1, curve2, cashflows, times = eachindex(cashflows); tol = 1
                 abs(residual) <= sqrt(eps(float(typeof(residual)))) * scale &&
                 return FinanceCore.Periodic(c, 1)
         end
-        step = !isfinite(newton) || abs(newton) > max_step ? copysign(max_step, newton) : newton
+        # the damping choice is discrete, so it uses the primal step; an undamped step keeps its partials
+        p = _primal(newton)
+        step = !isfinite(p) || abs(p) > max_step ? copysign(max_step, p) : newton
         s = max(s - step, (s + floor) / 2)
     end
     throw(ErrorException("spread did not converge in $maxiter iterations (last Newton step = $newton)"))
