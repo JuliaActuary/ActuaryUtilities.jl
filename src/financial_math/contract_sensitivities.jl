@@ -68,10 +68,7 @@ function sensitivities(target::_Contractish, forward::AYM, credit::AYM, tenors)
 end
 sensitivities(target::_Contractish, curve::AYM, tenors) = sensitivities(target, curve, curve, tenors)
 
-function _contract_parallel(metric, target, forward, credit)
-    f(s) = _contract_parallel_value(metric, target, forward, credit, s)
-    return (; value = f(0.0), derivative = ForwardDiff.derivative(f, 0.0))
-end
+# The value under a continuous-zero parallel shift `s` of the curves the metric moves.
 _contract_parallel_value(::Effective, target, forward, credit, s) =
     _cvalue2(target, _parallel_bumped(forward, s), _parallel_bumped(credit, s))
 _contract_parallel_value(::Spread, target, forward, credit, s) =
@@ -95,8 +92,8 @@ requires an explicit `Spread()` marker. Parallel measures take no tenor grid; us
 `KeyRates(tenors)` or [`sensitivities`](@ref) for key-rate decompositions.
 """
 function duration(metric::Union{Effective, Spread}, target::_Contractish, forward::AYM, credit::AYM)
-    r = _contract_parallel(metric, target, forward, credit)
-    return -r.derivative / r.value
+    value, derivative = _value_and_derivative(s -> _contract_parallel_value(metric, target, forward, credit, s), 0.0)
+    return -derivative / value
 end
 duration(metric::Union{Effective, Spread}, target::_Contractish, curve::AYM) = duration(metric, target, curve, curve)
 duration(::Effective, kr::KeyRates, target::_Contractish, curve::AYM) = sensitivities(target, curve, kr.tenors).effective_key_rate
@@ -119,7 +116,7 @@ Return signed dollar risk `-∂V/∂r / 10000`. Cashflow and callback forms alia
 unmarked contract and portfolio calls default to `Effective()`.
 """
 function dv01(metric::Union{Effective, Spread}, target::_Contractish, forward::AYM, credit::AYM)
-    return -_contract_parallel(metric, target, forward, credit).derivative / 10_000
+    return -ForwardDiff.derivative(s -> _contract_parallel_value(metric, target, forward, credit, s), 0.0) / 10_000
 end
 dv01(metric::Union{Effective, Spread}, target::_Contractish, curve::AYM) = dv01(metric, target, curve, curve)
 dv01(args...; kwargs...) = duration(DV01(), args...; kwargs...)
@@ -143,19 +140,15 @@ result does not depend on the contract's notional and is defined for a zero `mar
 An `ErrorException` is thrown if that does not happen within `maxiter` steps.
 """
 function zspread(contract::FinanceCore.AbstractContract, credit::AYM, market_price; forward::AYM = credit, s0 = 0.0, tol = 1.0e-12, maxiter = 100)
-    ks = _contract_keys(contract)
-    pvs(s) = let disc = credit + ((z, t) -> FinanceCore.Continuous(s) + z)
-        isempty(ks) ? FinanceCore.present_value(disc, contract) :
-            FinanceCore.present_value(disc, FinanceModels.Projection(contract, Dict(k => forward for k in ks), FinanceModels.CashflowProjection()))
-    end
+    pvs(s) = _contract_parallel_value(Spread(), contract, forward, credit, s)
     f(s) = pvs(s) - market_price
     result(s) = (; zspread = s, zspread_dv01 = -ForwardDiff.derivative(pvs, s) / 10_000)
     s = float(s0)
     step = oftype(s, NaN)
     for _ in 1:maxiter
-        fs = f(s)
+        fs, dfs = _value_and_derivative(f, s)
         iszero(fs) && return result(s)
-        step = fs / ForwardDiff.derivative(f, s)
+        step = fs / dfs
         isfinite(step) || break
         s -= step
         # A Newton step in rate units, unlike a price residual, does not scale with the notional.
