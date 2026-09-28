@@ -696,10 +696,8 @@ end
 # s > -1. A periodic base `r` compounded `n` times adds the spread nominally in its own convention,
 # so the combined rate `r + n((1 + s)^(1/n) - 1)` must also exceed -n. A bare number is an annual rate.
 _spread_floor(base::Real) = _periodic_spread_floor(_primal(base), 1)
-function _spread_floor(base::FinanceCore.Rate)
-    base.compounding isa FinanceCore.Periodic || return -1.0
-    return _periodic_spread_floor(_primal(FinanceCore.rate(base)), base.compounding.frequency)
-end
+_spread_floor(base::FinanceCore.Rate{<:Any, FinanceCore.Periodic}) =
+    _periodic_spread_floor(_primal(FinanceCore.rate(base)), base.compounding.frequency)
 _spread_floor(base) = -1.0
 _periodic_spread_floor(r, n) = max(-1.0, float(max(-r / n, zero(r)))^n - 1)
 
