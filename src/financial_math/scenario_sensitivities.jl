@@ -36,6 +36,10 @@ function sensitivities(
     end
 end
 
+# A contract is valued on the model's discount function, as its duration is; the callback
+# forms above value scenario sets.
+sensitivities(kr::KeyRates, target::_Contractish, hw::HW) = sensitivities(kr, target, hw, hw)
+
 # Do-block-first forwarders (support `f(args...) do x; ...; end` syntax)
 sensitivities(vf::Function, kr::KeyRates, hw::HW; kw...) = sensitivities(kr, vf, hw; kw...)
 sensitivities(vf::Function, ::DV01, kr::KeyRates, hw::HW; kw...) = sensitivities(DV01(), kr, vf, hw; kw...)

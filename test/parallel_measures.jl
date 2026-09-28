@@ -130,6 +130,14 @@ end
         () -> convexity(bond, curve, tenors),
         () -> convexity(Effective(), bond, curve, tenors),
         () -> duration(DV01(), bond, curve, tenors),
+        # Key-rate grids are always a `KeyRates` marker.
+        () -> sensitivities(bond, curve, tenors),
+        () -> sensitivities(bond, curve, credit, tenors),
+        () -> sensitivities(bond, tenors; discount = (; curve), index = curve),
+        () -> sensitivities(c -> value(c.curve), (; curve); tenors),
+        () -> sensitivities((; curve); tenors) do c
+            value(c.curve)
+        end,
     )
     for f in removed
         @test_throws MethodError f()

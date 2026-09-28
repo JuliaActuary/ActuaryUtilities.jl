@@ -27,12 +27,12 @@ _cvalue2(c::FinanceCore.AbstractContract, fwd, credit) = FinanceCore.present_val
 _cvalue2(cs::AbstractVector{<:FinanceCore.AbstractContract}, fwd, credit) = sum(_cvalue2(c, fwd, credit) for c in cs)
 
 """
-    sensitivities(target, curve, tenors) -> NamedTuple
-    sensitivities(target, forward, credit, tenors) -> NamedTuple
+    sensitivities(kr::KeyRates, target, curve) -> NamedTuple
+    sensitivities(kr::KeyRates, target, forward, credit) -> NamedTuple
 
 Calculate sensitivities for a contract or portfolio, reprojecting cashflows under
 bumped curves. Project coupons on `forward` and discount on `credit`, or pass one
-`curve` for both. Return these results on the `tenors` grid:
+`curve` for both. Return these results on the `kr.tenors` grid:
 
   - `value`
   - `effective_duration` / `effective_dv01` / `effective_key_rate` — bump both curves
@@ -48,8 +48,8 @@ duration is undefined. For a fixed bond, effective and spread duration equal its
 continuous-zero duration; forward duration is zero. See [`duration`](@ref) with [`Effective`](@ref)/
 [`Spread`](@ref), [`dv01`](@ref), [`zspread`](@ref), [`locked_floater`](@ref).
 """
-function sensitivities(target::_Contractish, forward::AYM, credit::AYM, tenors)
-    r = _ncurve_ad(c -> _cvalue2(target, c.forward, c.credit), (; forward, credit), tenors; order = 1)
+function sensitivities(kr::KeyRates, target::_Contractish, forward::AYM, credit::AYM)
+    r = _ncurve_ad(c -> _cvalue2(target, c.forward, c.credit), (; forward, credit), kr.tenors; order = 1)
     # Use signed derivatives to retain dollar exposure at zero present value.
     forward_dv01 = _per_bp(r, sum(r.gradient.forward))
     spread_dv01 = _per_bp(r, sum(r.gradient.credit))
@@ -64,7 +64,7 @@ function sensitivities(target::_Contractish, forward::AYM, credit::AYM, tenors)
         forward_duration = sum(fwd), forward_dv01, forward_key_rate = fwd,
     )
 end
-sensitivities(target::_Contractish, curve::AYM, tenors) = sensitivities(target, curve, curve, tenors)
+sensitivities(kr::KeyRates, target::_Contractish, curve::AYM) = sensitivities(kr, target, curve, curve)
 
 # The value under a continuous-zero parallel shift `s` of the curves the metric moves.
 _contract_parallel_value(::Effective, target, forward, credit, s) =
@@ -94,8 +94,8 @@ function duration(metric::Union{Effective, Spread}, target::_Contractish, forwar
     return -derivative / value
 end
 duration(metric::Union{Effective, Spread}, target::_Contractish, curve::AYM) = duration(metric, target, curve, curve)
-duration(::Effective, kr::KeyRates, target::_Contractish, curve::AYM) = sensitivities(target, curve, kr.tenors).effective_key_rate
-duration(::Spread, kr::KeyRates, target::_Contractish, curve::AYM) = sensitivities(target, curve, kr.tenors).spread_key_rate
+duration(::Effective, kr::KeyRates, target::_Contractish, curve::AYM) = sensitivities(kr, target, curve).effective_key_rate
+duration(::Spread, kr::KeyRates, target::_Contractish, curve::AYM) = sensitivities(kr, target, curve).spread_key_rate
 # Unmarked contract and portfolio calls use Effective().
 duration(target::_Contractish, curve::AYM) = duration(Effective(), target, curve)
 duration(kr::KeyRates, target::_Contractish, curve::AYM) = duration(Effective(), kr, target, curve)
@@ -119,9 +119,9 @@ end
 dv01(metric::Union{Effective, Spread}, target::_Contractish, curve::AYM) = dv01(metric, target, curve, curve)
 dv01(args...; kwargs...) = duration(DV01(), args...; kwargs...)
 
-function sensitivities(target::_Contractish, tenors::AbstractVector; discount::NamedTuple, index)
+function sensitivities(kr::KeyRates, target::_Contractish; discount::NamedTuple, index)
     layers = keys(discount)
-    return sensitivities(merge(discount, (; index = index)); tenors) do c
+    return sensitivities(kr, merge(discount, (; index = index))) do c
         _cvalue2(target, c.index, reduce(+, getfield(c, r) for r in layers))
     end
 end

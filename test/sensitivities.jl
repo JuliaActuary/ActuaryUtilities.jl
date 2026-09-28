@@ -357,14 +357,15 @@ end
     @test @inferred(duration(kr, one_curve, curve)) isa Vector{Float64}
     @test @inferred(duration(CS01(), two_curves, curve, credit)) isa Float64
     @test @inferred(sensitivities(kr, two_curves, curve, credit)).credit_durations isa Vector{Float64}
-    @test @inferred(sensitivities(named, (; a = curve, b = credit); tenors = kr.tenors)).key_rate.b isa Vector{Float64}
-    @test @inferred(sensitivities(c -> one_curve(c.a), (; a = curve); tenors = kr.tenors)).key_rate.a isa Vector{Float64}
+    @test @inferred(sensitivities(kr, named, (; a = curve, b = credit))).key_rate.b isa Vector{Float64}
+    @test @inferred(sensitivities(kr, c -> one_curve(c.a), (; a = curve))).key_rate.a isa Vector{Float64}
     # Market inputs share the named-role engine and result.
     inputs = m -> FC.pv(FM.Yield.Constant(FC.Continuous(m.r[1] + m.s[2])), amts, times)
     @test @inferred(sensitivities(inputs, (; r = [0.03], s = [0.01, 0.02]))).key_rate.s isa Vector{Float64}
     @test @inferred(sensitivities(m -> inputs((; r = m.r, s = [0.0, 0.01])), (; r = [0.03]))).dv01.r isa Float64
     bond = FM.Bond.Fixed(0.04, FC.Periodic(2), 10.0)
-    @test @inferred(sensitivities(bond, curve, credit, kr.tenors)).spread_key_rate isa Vector{Float64}
+    @test @inferred(sensitivities(kr, bond, curve, credit)).spread_key_rate isa Vector{Float64}
+    @test @inferred(sensitivities(kr, bond, curve)).effective_key_rate isa Vector{Float64}
     # Omitted times.
     @test @inferred(duration(kr, curve, amts)) isa Vector{Float64}
     @test @inferred(sensitivities(kr, (; a = curve, b = credit), amts)).durations.b isa Vector{Float64}

@@ -364,7 +364,7 @@ for a key-rate decomposition.
 `sensitivities` returns effective, spread, and forward risk together:
 
 ```@example sensitivities
-s = sensitivities(floater, zrc, tenors)
+s = sensitivities(KeyRates(tenors), floater, zrc)
 (effective = s.effective_duration, spread = s.spread_duration, eff_dv01 = s.effective_dv01)
 ```
 
@@ -392,7 +392,7 @@ Pass named discount layers and a coupon-projection `index` to obtain risk by rol
 rf     = zrc
 credit = Yield.Constant(Continuous(0.01))
 ilp    = Yield.Constant(Continuous(0.004))
-r = sensitivities(floater, tenors; discount = (; rf, credit, ilp), index = zrc)
+r = sensitivities(KeyRates(tenors), floater; discount = (; rf, credit, ilp), index = zrc)
 r.duration    # (; rf ≈ IR01, credit ≈ CS01, ilp = "ILP01", index = reset sensitivity)
 ```
 
@@ -400,7 +400,7 @@ Additional layers can represent liquidity, matching adjustment, or basis spreads
 Use a callback with [`reproject`](@ref) for custom valuations:
 
 ```@example sensitivities
-sensitivities((; rf, credit, ilp, index = zrc); tenors) do c
+sensitivities(KeyRates(tenors), (; rf, credit, ilp, index = zrc)) do c
     present_value(c.rf + c.credit + c.ilp, reproject(floater, c.index))
 end
 ```

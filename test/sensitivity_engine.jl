@@ -17,12 +17,12 @@ end
     v(c) = 5FC.discount(c, 2.0) + 105FC.discount(c, 6.0)
     v2(b, c) = v(b + c)
     single = sensitivities(kr, v, base)
-    named = sensitivities(c -> v(c.base), (; base); tenors)
+    named = sensitivities(kr, c -> v(c.base), (; base))
     @test named.value ≈ single.value
     @test named.key_rate.base ≈ single.durations
-    @test sensitivities(c -> v(c.base), (; base); tenors = Real[1, 3.0, 7]).key_rate.base ≈ single.durations
+    @test sensitivities(KeyRates(Real[1, 3.0, 7]), c -> v(c.base), (; base)).key_rate.base ≈ single.durations
     pair = sensitivities(kr, v2, base, credit)
-    named_pair = sensitivities(c -> v2(c.base, c.credit), (; base, credit); tenors)
+    named_pair = sensitivities(kr, c -> v2(c.base, c.credit), (; base, credit))
     @test pair.base_durations ≈ named_pair.key_rate.base
     @test pair.credit_durations ≈ named_pair.key_rate.credit
     engine = ActuaryUtilities.FinancialMath._ncurve_ad
@@ -36,7 +36,7 @@ end
     @test three.hessian.base.credit ≈ three.hessian.liquidity.credit
 
     c = GradientOnlyContract(Int[])
-    bundle = sensitivities(c, base, tenors)
+    bundle = sensitivities(kr, c, base)
     @test maximum(c.depths) == 1
     for (metric, dur, dollars) in (
             (Effective(), bundle.effective_duration, bundle.effective_dv01),
@@ -48,19 +48,20 @@ end
         @test maximum(c.depths) == 1
     end
     floater = FM.Bond.Floating(0.005, FC.Periodic(2), 5.0, :index)
-    sb = sensitivities(floater, base, base + credit, tenors)
+    sb = sensitivities(kr, floater, base, base + credit)
     @test duration(Effective(), floater, base, base + credit) ≈ sb.effective_duration atol = 1.0e-12
     @test duration(Spread(), floater, base, base + credit) ≈ sb.spread_duration
     @test dv01(Effective(), floater, base, base + credit) ≈ sb.effective_dv01 atol = 1.0e-12
 
     for bad in (Float64[], [2.0, 1.0], [1.0, 1.0], [0.0, 1.0], [1.0, Inf], [1.0, NaN])
         @test_throws ArgumentError KeyRates(bad)
-        @test_throws ArgumentError sensitivities(c -> v(c.base), (; base); tenors = bad)
-        @test_throws ArgumentError sensitivities(floater, base, bad)
     end
+    # A grid mutated after construction is caught where it is used.
     grid = KeyRates(copy(tenors))
     grid.tenors[2] = grid.tenors[1]
     @test_throws ArgumentError duration(grid, v, base)
+    @test_throws ArgumentError sensitivities(grid, c -> v(c.base), (; base))
+    @test_throws ArgumentError sensitivities(grid, floater, base)
 end
 
 @testset "Derivative bundles reuse AD results and preserve numeric types" begin

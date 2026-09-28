@@ -13,7 +13,7 @@
     end
 
     @testset "bundle: effective = forward + spread; sums; dollar <-> year" begin
-        s = sensitivities(flm, curve, tenors)
+        s = sensitivities(KeyRates(tenors), flm, curve)
         @test s.effective_duration ≈ s.forward_duration + s.spread_duration atol = 1.0e-10
         @test s.effective_dv01 ≈ s.effective_duration * s.value / 10_000 atol = 1.0e-12
         @test sum(s.effective_key_rate) ≈ s.effective_duration atol = 1.0e-10
@@ -21,7 +21,7 @@
     end
 
     @testset "fixed bond: effective == spread == modified, forward == 0" begin
-        s = sensitivities(fb, curve, tenors)
+        s = sensitivities(KeyRates(tenors), fb, curve)
         modified = duration(curve, collect(FM.Projection(fb, curve, FM.CashflowProjection())))
         @test s.effective_duration ≈ modified atol = 1.0e-8
         @test s.spread_duration ≈ modified atol = 1.0e-8
@@ -52,14 +52,17 @@
             @test duration(DV01(), target, curve) ≈ dv01(Effective(), target, curve)
             @test convexity(target, curve) ≈ convexity(Effective(), target, curve)
             # The parallel measures equal the sums of the key-rate bundle.
-            s = sensitivities(target, curve, tenors)
+            s = sensitivities(KeyRates(tenors), target, curve)
             @test duration(target, curve) ≈ s.effective_duration atol = 1.0e-12
             @test duration(Spread(), target, curve) ≈ s.spread_duration atol = 1.0e-12
             @test dv01(Spread(), target, curve) ≈ s.spread_dv01 atol = 1.0e-12
         end
         @test (@inferred dv01(fb, curve)) isa Float64
         @test (@inferred convexity(fb, curve)) isa Float64
-        @test dv01(Effective(), flm, curve) ≈ sensitivities(flm, curve, tenors).effective_dv01
+        @test dv01(Effective(), flm, curve) ≈ sensitivities(KeyRates(tenors), flm, curve).effective_dv01
+        # A contract under Hull-White is valued on the model's discount function, as its duration is.
+        hw = FM.ShortRate.HullWhite(0.1, 0.01, curve)
+        @test sensitivities(KeyRates(tenors), flm, hw).effective_key_rate == duration(KeyRates(tenors), flm, hw)
         @test dv01(0.05, [5.0, 5.0, 105.0]) ≈ duration(DV01(), 0.05, [5.0, 5.0, 105.0])   # cashflow fallback
     end
 
@@ -74,8 +77,8 @@
     @testset "multi-curve: structured == do-block; additive layers" begin
         credit = FM.Yield.Constant(FC.Continuous(0.01))
         ilp = FM.Yield.Constant(FC.Continuous(0.004))
-        rs = sensitivities(flm, tenors; discount = (; rf = curve, credit = credit, ilp = ilp), index = curve)
-        rd = sensitivities((; rf = curve, credit = credit, ilp = ilp, index = curve); tenors) do c
+        rs = sensitivities(KeyRates(tenors), flm; discount = (; rf = curve, credit = credit, ilp = ilp), index = curve)
+        rd = sensitivities(KeyRates(tenors), (; rf = curve, credit = credit, ilp = ilp, index = curve)) do c
             FC.present_value(c.rf + c.credit + c.ilp, reproject(flm, c.index))
         end
         @test rs.duration.rf ≈ rd.duration.rf atol = 1.0e-10
@@ -155,7 +158,7 @@ end
     ir01_ref = (pv_ir(-bp) - pv_ir(bp)) / 2          # dv01 ≈ (V(−1bp) − V(+1bp)) / 2
     cs01_ref = (pv_cs(-bp) - pv_cs(bp)) / 2
 
-    s = sensitivities(fl, rf, credit, tenors)
+    s = sensitivities(KeyRates(tenors), fl, rf, credit)
 
     @testset "reproduces OpenGamma eq.(3)+(4) price" begin
         @test s.value ≈ pv_ref atol = 1.0e-12

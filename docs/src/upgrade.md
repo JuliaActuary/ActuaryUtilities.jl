@@ -50,7 +50,24 @@ grids. See [Shock coordinates](@ref) for the full rule.
   | `dv01(target, curve, tenors)`, `duration(target, curve, tenors)`, `convexity(target, curve, tenors)` | `dv01(target, curve)`, `duration(target, curve)`, `convexity(target, curve)` |
   | two-curve contract forms `(target, forward, credit, tenors)` | `(target, forward, credit)` |
 
-  `KeyRates(tenors)` forms and `sensitivities(...)` bundles keep their grids.
+  `KeyRates(tenors)` forms and `sensitivities(...)` bundles keep their grids. The
+  parallel measures equal the sums of the key-rate bundle, so
+  `duration(Effective(), target, curve)` is also
+  `sensitivities(KeyRates(tenors), target, curve).effective_duration`.
+- **Key-rate grids are always a `KeyRates(tenors)` marker, in the first position.**
+  The contract bundles and named-curve callbacks took a raw tenor vector, positionally
+  or as a keyword; those calls now throw `MethodError`:
+
+  | v5 call | v6 replacement |
+  |:--|:--|
+  | `sensitivities(target, curve, tenors)` | `sensitivities(KeyRates(tenors), target, curve)` |
+  | `sensitivities(target, forward, credit, tenors)` | `sensitivities(KeyRates(tenors), target, forward, credit)` |
+  | `sensitivities(target, tenors; discount, index)` | `sensitivities(KeyRates(tenors), target; discount, index)` |
+  | `sensitivities(valuation, curves::NamedTuple; tenors)` | `sensitivities(KeyRates(tenors), valuation, curves)` |
+  | `sensitivities(curves::NamedTuple; tenors) do c ... end` | `sensitivities(KeyRates(tenors), curves) do c ... end` |
+
+  Results are unchanged. The market-input form `sensitivities(valuation, inputs)` has
+  no grid and is unaffected.
 - **The finite-difference `KeyRateDuration` API is removed.** `KeyRate`,
   `KeyRateZero`, `KeyRatePar`, and `krd_points` are gone.
   `duration(KeyRateZero(t), curve, cfs, times, grid)` is the `t` entry of

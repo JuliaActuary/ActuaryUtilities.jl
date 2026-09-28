@@ -83,7 +83,7 @@ end
         @test abs(FC.present_value(curve, port)) < 1.0e-10
         expected = duration(DV01(), curve, sign .* [A, -B], [1.0, 5.0])
         @test abs(expected) > 1.0e-3
-        r = sensitivities(port, curve, tenors)
+        r = sensitivities(KeyRates(tenors), port, curve)
         @test r.effective_dv01 ≈ expected
         @test r.effective_dv01 ≈ dv01(Effective(), port, curve)
         @test dv01(port, curve) ≈ expected
@@ -93,14 +93,14 @@ end
         @test !isfinite(r.effective_duration)
         @test !isfinite(r.spread_duration)
         # Two-curve form: the discount role carries the whole exposure for fixed cashflows.
-        r2 = sensitivities(port, curve, credit, tenors)
+        r2 = sensitivities(KeyRates(tenors), port, curve, credit)
         @test r2.spread_dv01 ≈ dv01(Spread(), port, curve, credit)
         @test r2.effective_dv01 ≈ dv01(Effective(), port, curve, credit)
         @test r2.forward_dv01 ≈ 0 atol = 1.0e-12
     end
     # Nonzero-value positions are unchanged.
     fb = FM.Bond.Fixed(0.05, FC.Periodic(1), 3.0)
-    r = sensitivities(fb, curve, tenors)
+    r = sensitivities(KeyRates(tenors), fb, curve)
     @test r.effective_dv01 ≈ dv01(Effective(), fb, curve)
     @test r.spread_dv01 ≈ dv01(Spread(), fb, curve)
     @test r.effective_dv01 ≈ r.effective_duration * r.value / 10_000
