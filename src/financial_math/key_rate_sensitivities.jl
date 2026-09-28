@@ -20,40 +20,6 @@ _bumped(curve, tenors, bumps) = FinanceModels.Yield.TenorShift(
     (z, t) -> FinanceCore.Continuous(_hat_bump(tenors, bumps, t)) + z,
 )
 
-function _ad_derivatives(f::F, z, order) where {F}
-    # The valuation can return BigFloat or an outer AD Dual even when bumps are
-    # Float64. Establish its type before allocating the Hessian result buffers.
-    value = f(z)
-    g = zeros(typeof(value), length(z))
-    if order == 1
-        # Gradients take up to 64 inputs per pass; measured faster than ForwardDiff's default.
-        ForwardDiff.gradient!(g, f, z, ForwardDiff.GradientConfig(f, z, ForwardDiff.Chunk(z, 64)))
-        return (; value, gradient = g)
-    end
-    # Hessians keep the default chunk: their nested partials grow with its square.
-    result = DiffResults.DiffResult(value, g, similar(g, length(z), length(z)))
-    result = ForwardDiff.hessian!(result, f, z)
-    return (; value = DiffResults.value(result), gradient = g, hessian = DiffResults.hessian(result))
-end
-
-# Shared derivative engine: derivatives of `f` at the named input vectors `x`. Its result,
-# `(; value, gradient, hessian, zero_stream)` with derivatives keyed by role (`gradient.role`,
-# `hessian.role.role`), is the one shape every key-rate and market-input method normalizes. A
-# callback's value can be zero without its cashflows being zero, so `zero_stream` is always false.
-function _named_ad(f::F, x::NamedTuple{roles}; order = 1) where {F, roles}
-    stops = cumsum(map(length, values(x)))
-    ranges = ntuple(i -> (i == 1 ? 1 : stops[i - 1] + 1):stops[i], length(x))
-    # Closures read the typed tuple's length, which keeps the callback's return type inferable.
-    part(v, i) = length(x) == 1 ? v : view(v, ranges[i])
-    g(z) = f(NamedTuple{roles}(ntuple(i -> part(z, i), length(x))))
-    result = _ad_derivatives(g, reduce(vcat, map(v -> float.(v), values(x))), order)
-    gradient = NamedTuple{roles}(ntuple(i -> part(result.gradient, i), length(x)))
-    order == 1 && return (; result.value, gradient, zero_stream = false)
-    block(i, j) = length(x) == 1 ? result.hessian : view(result.hessian, ranges[i], ranges[j])
-    hessian = NamedTuple{roles}(ntuple(i -> NamedTuple{roles}(ntuple(j -> block(i, j), length(x))), length(x)))
-    return (; result.value, gradient, hessian, zero_stream = false)
-end
-
 # Named curve roles, each bumped by triangular hats on one tenor grid.
 function _ncurve_ad(valuation::F, curves::NamedTuple{roles}, tenors; order = 1) where {F, roles}
     grid = _validate_tenors(tenors)
