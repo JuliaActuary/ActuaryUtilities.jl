@@ -258,14 +258,12 @@ FC.discount(c::CompositeTwoFlatYield, t) = FC.discount(c.base, t) * FC.discount(
 end
 
 @testset "AD vs analytic KRD: byte-equivalence across curve types and arities" begin
-    # The analytic helpers `_keyrate_analytic` (single/two-curve) and
-    # `_ncurve_analytic` (NamedTuple) must produce the same value, gradient,
-    # and Hessian as the AD path (`_keyrate_ad`, `_ncurve_ad`) for the vanilla
-    # cashflow case. Regression guard against future drift between the two
-    # implementations of the same math.
-    KRA = ActuaryUtilities.FinancialMath._keyrate_analytic
+    # The analytic results (`_keyrate` with cashflows, `_ncurve_analytic` for the kernel) must
+    # have the same value, gradient, and Hessian as the AD results (`_keyrate` with a callback,
+    # `_ncurve_ad`) for the vanilla cashflow case. Regression guard against future drift between
+    # the two implementations of the same math.
+    KR = ActuaryUtilities.FinancialMath._keyrate
     KRA_N = ActuaryUtilities.FinancialMath._ncurve_analytic
-    KRAD = ActuaryUtilities.FinancialMath._keyrate_ad
     NCAD = ActuaryUtilities.FinancialMath._ncurve_ad
 
     tenors = collect(1.0:30.0)
@@ -282,35 +280,37 @@ end
     times = FC.timepoint.(cfs_full)
 
     @testset "single-curve [$(typeof(c).name.name)]" for c in curves
-        ad = KRAD(
-            c, tenors,
+        ad = KR(
+            (; curve = c), tenors,
             i -> sum(amts[k] * FC.discount(i, times[k]) for k in eachindex(amts));
             order = 2
         )
-        an = KRA(c, tenors, amts, times; order = 2)
+        an = KR((; curve = c), tenors, amts, times; order = 2)
         @test ad.value ≈ an.value rtol = 1.0e-12
-        @test maximum(abs.(ad.gradient .- an.gradient)) < 1.0e-12
-        @test maximum(abs.(ad.hessian .- an.hessian)) < 1.0e-12
+        @test maximum(abs.(ad.gradient.curve .- an.gradient.curve)) < 1.0e-12
+        @test maximum(abs.(ad.hessian.curve.curve .- an.hessian.curve.curve)) < 1.0e-12
+        @test !ad.zero_stream && !an.zero_stream
     end
 
     @testset "two-curve" begin
         base = curves[1]
         credit = FM.ZeroRateCurve(rates2, tenors, FM.Spline.Linear())
-        ad = KRAD(
-            base, credit, tenors,
+        ad = KR(
+            (; base, credit), tenors,
             (b, c) -> sum(
                 amts[k] * FC.discount(b, times[k]) * FC.discount(c, times[k])
                     for k in eachindex(amts)
             );
             order = 2
         )
-        an = KRA(base, credit, tenors, amts, times; order = 2)
+        an = KR((; base, credit), tenors, amts, times; order = 2)
         @test ad.value ≈ an.value rtol = 1.0e-12
-        @test maximum(abs.(ad.base_gradient .- an.base_gradient)) < 1.0e-12
-        @test maximum(abs.(ad.credit_gradient .- an.credit_gradient)) < 1.0e-12
-        @test maximum(abs.(ad.base_hessian .- an.base_hessian)) < 1.0e-12
-        @test maximum(abs.(ad.credit_hessian .- an.credit_hessian)) < 1.0e-12
-        @test maximum(abs.(ad.cross_hessian .- an.cross_hessian)) < 1.0e-12
+        for a in (:base, :credit)
+            @test maximum(abs.(ad.gradient[a] .- an.gradient[a])) < 1.0e-12
+            for b in (:base, :credit)
+                @test maximum(abs.(ad.hessian[a][b] .- an.hessian[a][b])) < 1.0e-12
+            end
+        end
     end
 
     @testset "NamedTuple (3 curves)" begin
@@ -335,4 +335,27 @@ end
             @test maximum(abs.(ad_g[r] .- an.gradient)) < 1.0e-12
         end
     end
+end
+
+@testset "key-rate results are inferred" begin
+    # Every method reads its result by curve role; the roles must stay visible to inference.
+    tenors = collect(1.0:30.0)
+    curve = FM.ZeroRateCurve(0.02 .+ 0.0005 .* tenors, tenors, FM.Spline.Linear())
+    credit = FM.Yield.Constant(FC.Continuous(0.01))
+    kr = KeyRates([1.0, 2.0, 5.0, 10.0, 20.0, 30.0])
+    amts = [fill(2.0, 19); 102.0]
+    times = collect(0.5:0.5:10.0)
+    one_curve = c -> FC.pv(c, amts, times)
+    two_curves = (b, c) -> FC.pv(b + c, amts, times)
+    named = cs -> FC.pv(cs.a + cs.b, amts, times)
+    @test @inferred(duration(kr, curve, amts, times)) isa Vector{Float64}
+    @test @inferred(duration(IR01(), kr, curve, credit, amts, times)) isa Vector{Float64}
+    @test @inferred(convexity(curve, credit, amts, times)).cross isa Float64
+    @test @inferred(sensitivities(kr, curve, credit, amts, times)).convexities.cross isa Matrix{Float64}
+    @test @inferred(sensitivities(DV01(), kr, curve, amts, times)).dv01s isa Vector{Float64}
+    @test @inferred(sensitivities(kr, (; a = curve, b = credit, c = credit), amts, times)).convexities.c.a isa Matrix{Float64}
+    @test @inferred(duration(kr, one_curve, curve)) isa Vector{Float64}
+    @test @inferred(duration(CS01(), two_curves, curve, credit)) isa Float64
+    @test @inferred(sensitivities(kr, two_curves, curve, credit)).credit_durations isa Vector{Float64}
+    @test @inferred(sensitivities(named, (; a = curve, b = credit); tenors = kr.tenors)).key_rate.b isa Vector{Float64}
 end
