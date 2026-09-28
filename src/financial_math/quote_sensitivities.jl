@@ -17,7 +17,7 @@ end
 ```
 
 Each input must be an `AbstractVector{<:Real}`; wrap a scalar input in a one-element
-vector. The valuation receives views of the same shapes. For each named input the
+vector. The valuation receives vectors of the same shapes. For each named input the
 result contains:
 
 - `duration`: `-∂V/∂s / V` for a parallel shift `s` added to every element
@@ -44,23 +44,5 @@ elements), not once per input.
 See also [`KeyRates`](@ref) for sensitivities to bumps of a given curve.
 """
 function sensitivities(valuation::F, inputs::NamedTuple{roles, <:Tuple{AbstractVector{<:Real}, Vararg{AbstractVector{<:Real}}}}) where {F, roles}
-    lengths = map(length, values(inputs))
-    stops = cumsum(lengths)
-    ranges = ntuple(i -> (stops[i] - lengths[i] + 1):stops[i], length(roles))
-    x0 = reduce(vcat, map(v -> float.(v), values(inputs)))
-    rebuild(x) = NamedTuple{roles}(map(r -> view(x, r), ranges))
-    f(x) = valuation(rebuild(x))
-    value = f(x0)
-    # The valuation can return BigFloat or an outer AD Dual; size the buffer from it.
-    gradient = zeros(typeof(value), length(x0))
-    config = ForwardDiff.GradientConfig(f, x0, ForwardDiff.Chunk(x0, 64))
-    ForwardDiff.gradient!(gradient, f, x0, config)
-    grads = NamedTuple{roles}(map(r -> gradient[r], ranges))
-    return (;
-        value,
-        duration = map(g -> -sum(g) / value, grads),
-        dv01 = map(g -> -sum(g) / 10_000, grads),
-        key_rate = map(g -> -g ./ value, grads),
-        key_rate_dv01 = map(g -> -g ./ 10_000, grads),
-    )
+    return _parallel_and_key_rate(_named_ad(valuation, inputs))
 end

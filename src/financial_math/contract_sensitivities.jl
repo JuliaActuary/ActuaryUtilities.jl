@@ -50,17 +50,15 @@ continuous-zero duration; forward duration is zero. See [`duration`](@ref) with 
 """
 function sensitivities(target::_Contractish, forward::AYM, credit::AYM, tenors)
     r = _ncurve_ad(c -> _cvalue2(target, c.forward, c.credit), (; forward, credit), tenors; order = 1)
-    v = r.value
-    gf, gc = r.gradient.forward, r.gradient.credit
     # Use signed derivatives to retain dollar exposure at zero present value.
-    forward_dv01 = -sum(gf) / 10_000
-    spread_dv01 = -sum(gc) / 10_000
+    forward_dv01 = _per_bp(r, sum(r.gradient.forward))
+    spread_dv01 = _per_bp(r, sum(r.gradient.credit))
     effective_dv01 = forward_dv01 + spread_dv01
-    fwd = -gf ./ v
-    spr = -gc ./ v
+    fwd = _relative(r, r.gradient.forward; negate = true)
+    spr = _relative(r, r.gradient.credit; negate = true)
     eff = fwd .+ spr
     return (;
-        value = v,
+        value = r.value,
         effective_duration = sum(eff), effective_dv01, effective_key_rate = eff,
         spread_duration = sum(spr), spread_dv01, spread_key_rate = spr,
         forward_duration = sum(fwd), forward_dv01, forward_key_rate = fwd,

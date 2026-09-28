@@ -26,34 +26,39 @@ function _ad_derivatives(f::F, z, order) where {F}
     value = f(z)
     g = zeros(typeof(value), length(z))
     if order == 1
-        ForwardDiff.gradient!(g, f, z)
+        # Gradients take up to 64 inputs per pass; measured faster than ForwardDiff's default.
+        ForwardDiff.gradient!(g, f, z, ForwardDiff.GradientConfig(f, z, ForwardDiff.Chunk(z, 64)))
         return (; value, gradient = g)
     end
+    # Hessians keep the default chunk: their nested partials grow with its square.
     result = DiffResults.DiffResult(value, g, similar(g, length(z), length(z)))
     result = ForwardDiff.hessian!(result, f, z)
     return (; value = DiffResults.value(result), gradient = g, hessian = DiffResults.hessian(result))
 end
 
-# Shared derivative engine for named curve roles on one tenor grid. Its result, `(; value,
-# gradient, hessian, zero_stream)` with derivatives keyed by role (`gradient.role`,
-# `hessian.role.role`), is the one shape every key-rate method normalizes. A callback's value can be
-# zero without its cashflows being zero, so `zero_stream` is always false here.
+# Shared derivative engine: derivatives of `f` at the named input vectors `x`. Its result,
+# `(; value, gradient, hessian, zero_stream)` with derivatives keyed by role (`gradient.role`,
+# `hessian.role.role`), is the one shape every key-rate and market-input method normalizes. A
+# callback's value can be zero without its cashflows being zero, so `zero_stream` is always false.
+function _named_ad(f::F, x::NamedTuple{roles}; order = 1) where {F, roles}
+    stops = cumsum(map(length, values(x)))
+    ranges = ntuple(i -> (i == 1 ? 1 : stops[i - 1] + 1):stops[i], length(x))
+    # Closures read the typed tuple's length, which keeps the callback's return type inferable.
+    part(v, i) = length(x) == 1 ? v : view(v, ranges[i])
+    g(z) = f(NamedTuple{roles}(ntuple(i -> part(z, i), length(x))))
+    result = _ad_derivatives(g, reduce(vcat, map(v -> float.(v), values(x))), order)
+    gradient = NamedTuple{roles}(ntuple(i -> part(result.gradient, i), length(x)))
+    order == 1 && return (; result.value, gradient, zero_stream = false)
+    block(i, j) = length(x) == 1 ? result.hessian : view(result.hessian, ranges[i], ranges[j])
+    hessian = NamedTuple{roles}(ntuple(i -> NamedTuple{roles}(ntuple(j -> block(i, j), length(x))), length(x)))
+    return (; result.value, gradient, hessian, zero_stream = false)
+end
+
+# Named curve roles, each bumped by triangular hats on one tenor grid.
 function _ncurve_ad(valuation::F, curves::NamedTuple{roles}, tenors; order = 1) where {F, roles}
     grid = _validate_tenors(tenors)
-    n, k = length(grid), length(curves)
-    indices(i) = ((i - 1) * n + 1):(i * n)
-    slice(b, i) = length(curves) == 1 ? b : view(b, indices(i))
-    # Use the typed tuple's length to keep the callback's return type inferable.
-    f(b) = valuation(NamedTuple{roles}(ntuple(i -> _bumped(curves[i], grid, slice(b, i)), length(curves))))
-    z = zeros(k * n)
-    result = _ad_derivatives(f, z, order)
-    value, g = result.value, result.gradient
-    gradient = NamedTuple{roles}(ntuple(i -> slice(g, i), k))
-    order == 1 && return (; value, gradient, zero_stream = false)
-    h = result.hessian
-    block(i, j) = k == 1 ? h : view(h, indices(i), indices(j))
-    hessian = NamedTuple{roles}(ntuple(i -> NamedTuple{roles}(ntuple(j -> block(i, j), k)), k))
-    return (; value, gradient, hessian, zero_stream = false)
+    bumped(b) = NamedTuple{roles}(ntuple(i -> _bumped(curves[i], grid, b[i]), length(curves)))
+    return _named_ad(b -> valuation(bumped(b)), map(_ -> zeros(length(grid)), curves); order)
 end
 
 ## Analytic derivatives for fixed cashflows
@@ -492,7 +497,10 @@ to market inputs that the valuation turns into curves, pass named input vectors
 instead: `sensitivities(valuation, inputs::NamedTuple)`.
 """
 function sensitivities(valuation::F, curves::NamedTuple{roles, <:Tuple{AYM, Vararg{AYM}}}; tenors) where {F, roles}
-    r = _ncurve_ad(valuation, curves, tenors; order = 1)
+    return _parallel_and_key_rate(_ncurve_ad(valuation, curves, tenors; order = 1))
+end
+# Per role: parallel duration and DV01 from the summed gradient, and the per-element vectors.
+function _parallel_and_key_rate(r)
     n = _scale(r)
     return (;
         value = r.value,
