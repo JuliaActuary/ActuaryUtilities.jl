@@ -38,9 +38,13 @@ function _named_ad(f::F, x::NamedTuple{roles}; order = 1) where {F, roles}
     part(v, i) = length(x) == 1 ? v : view(v, ranges[i])
     g(z) = f(NamedTuple{roles}(ntuple(i -> part(z, i), length(x))))
     result = _ad_derivatives(g, reduce(vcat, map(v -> float.(v), values(x))), order)
-    gradient = NamedTuple{roles}(ntuple(i -> part(result.gradient, i), length(x)))
-    order == 1 && return (; result.value, gradient, zero_stream = false)
-    block(i, j) = length(x) == 1 ? result.hessian : view(result.hessian, ranges[i], ranges[j])
+    # Closures capture the concretely typed parts, not `result`: Julia 1.10 loses the result type
+    # when a closure captures a value whose type depends on `order`.
+    value, grad = result.value, result.gradient
+    gradient = NamedTuple{roles}(ntuple(i -> part(grad, i), length(x)))
+    order == 1 && return (; value, gradient, zero_stream = false)
+    h = result.hessian
+    block(i, j) = length(x) == 1 ? h : view(h, ranges[i], ranges[j])
     hessian = NamedTuple{roles}(ntuple(i -> NamedTuple{roles}(ntuple(j -> block(i, j), length(x))), length(x)))
-    return (; result.value, gradient, hessian, zero_stream = false)
+    return (; value, gradient, hessian, zero_stream = false)
 end
