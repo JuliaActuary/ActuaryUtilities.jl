@@ -49,6 +49,37 @@
     end
 end
 
+@testset "Key-rate cashflow forms default times to periods" begin
+    tenors = [1.0, 2.0, 5.0]
+    kr = KeyRates(tenors)
+    curve = FM.ZeroRateCurve([0.02, 0.03, 0.04], tenors)
+    credit = FM.Yield.Constant(FC.Continuous(0.01))
+    layers = (; base = curve, credit)
+    cfs = [5.0, 5.0, 105.0]
+    wrapped = FC.Cashflow.(cfs, [0.5, 1.5, 3.5])
+    calls = (
+        (x...) -> duration(kr, curve, x...),
+        (x...) -> duration(DV01(), kr, curve, x...),
+        (x...) -> duration(IR01(), kr, curve, credit, x...),
+        (x...) -> duration(CS01(), kr, curve, credit, x...),
+        (x...) -> convexity(kr, curve, x...),
+        (x...) -> convexity(curve, credit, x...),
+        (x...) -> convexity(kr, curve, credit, x...),
+        (x...) -> convexity(kr, layers, x...),
+        (x...) -> sensitivities(kr, curve, x...),
+        (x...) -> sensitivities(DV01(), kr, curve, x...),
+        (x...) -> sensitivities(kr, curve, credit, x...),
+        (x...) -> sensitivities(DV01(), kr, curve, credit, x...),
+        (x...) -> sensitivities(kr, layers, x...),
+    )
+    for f in calls
+        # Numeric amounts are paid at periods 1:n, as in the scalar measures.
+        @test isequal(f(cfs), f(cfs, 1:3))
+        # Wrapped cashflows use their embedded times whatever times are supplied.
+        @test isequal(f(wrapped), f(wrapped, [9.0, 9.0, 9.0]))
+    end
+end
+
 @testset "Wrapped sensitivity numeric types and zero streams" begin
     kr = KeyRates([1.0, 2.0, 5.0])
     times = [0.0, 1.5, 3.5]

@@ -180,8 +180,7 @@ const _PARALLEL_GRID = 1.0:1.0
 
 """
     duration(kr::KeyRates, valuation_fn, curve::AbstractYieldModel) -> Vector
-    duration(kr::KeyRates, curve::AbstractYieldModel, cfs, times) -> Vector
-    duration(kr::KeyRates, curve::AbstractYieldModel, cfs::AbstractVector{<:Cashflow}) -> Vector
+    duration(kr::KeyRates, curve::AbstractYieldModel, cfs, times = eachindex(cfs)) -> Vector
 
 Return normalized key-rate durations `-∂V/∂rᵢ / V` for an `AbstractYieldModel`.
 Each `rᵢ` is a triangular continuous-zero bump at `kr.tenors[i]`. The base curve
@@ -191,7 +190,9 @@ Empty collections and collections whose amounts are all exactly zero return zero
 key-rate durations by convention, with one entry per tenor, without valuing any payment.
 Every cashflow needs a time; unused trailing times are ignored.
 Wrapped `Cashflow` objects use their embedded amounts and payment times, including
-when explicit `times` are supplied. Numeric amounts use the explicit times.
+when explicit `times` are supplied. Numeric amounts use the explicit times, which
+default to `eachindex(cfs)` (periods `1:n`). The same holds for every key-rate,
+two-curve, and named-curve cashflow form.
 See [Zero cashflow streams](@ref) for numeric types and zero-net-value portfolios.
 
 # Tenor grid
@@ -223,11 +224,10 @@ function duration(kr::KeyRates, valuation_fn::F, curve::AYM) where {F}
     r = _keyrate((; curve), kr.tenors, valuation_fn)
     return _relative(r, r.gradient.curve; negate = true)
 end
-function duration(kr::KeyRates, curve::AYM, cfs::AbstractVector, times)
+function duration(kr::KeyRates, curve::AYM, cfs::AbstractVector, times = eachindex(cfs))
     r = _keyrate((; curve), kr.tenors, cfs, times)
     return _relative(r, r.gradient.curve; negate = true)
 end
-duration(kr::KeyRates, curve::AYM, cfs::AbstractVector{<:FinanceCore.Cashflow}) = duration(kr, curve, _extract_cfs_times(cfs)...)
 
 """
     duration(::DV01, kr::KeyRates, valuation_fn, curve::AbstractYieldModel) -> Vector
@@ -241,11 +241,10 @@ function duration(::DV01, kr::KeyRates, valuation_fn::F, curve::AYM) where {F}
     r = _keyrate((; curve), kr.tenors, valuation_fn)
     return _per_bp(r, r.gradient.curve)
 end
-function duration(::DV01, kr::KeyRates, curve::AYM, cfs::AbstractVector, times)
+function duration(::DV01, kr::KeyRates, curve::AYM, cfs::AbstractVector, times = eachindex(cfs))
     r = _keyrate((; curve), kr.tenors, cfs, times)
     return _per_bp(r, r.gradient.curve)
 end
-duration(::DV01, kr::KeyRates, curve::AYM, cfs::AbstractVector{<:FinanceCore.Cashflow}) = duration(DV01(), kr, curve, _extract_cfs_times(cfs)...)
 
 """
     duration(::IR01, valuation_fn, base::AbstractYieldModel, credit::AbstractYieldModel) -> scalar
@@ -275,11 +274,10 @@ function duration(::IR01, kr::KeyRates, valuation_fn::F, base::AYM, credit::AYM)
     r = _keyrate((; base, credit), kr.tenors, valuation_fn)
     return _per_bp(r, r.gradient.base)
 end
-function duration(::IR01, kr::KeyRates, base::AYM, credit::AYM, cfs::AbstractVector, times)
+function duration(::IR01, kr::KeyRates, base::AYM, credit::AYM, cfs::AbstractVector, times = eachindex(cfs))
     r = _keyrate((; base, credit), kr.tenors, cfs, times)
     return _per_bp(r, r.gradient.base)
 end
-duration(::IR01, kr::KeyRates, base::AYM, credit::AYM, cfs::AbstractVector{<:FinanceCore.Cashflow}) = duration(IR01(), kr, base, credit, _extract_cfs_times(cfs)...)
 
 function duration(::CS01, valuation_fn::F, base::AYM, credit::AYM) where {F}
     r = _keyrate((; base, credit), _PARALLEL_GRID, valuation_fn)
@@ -290,11 +288,10 @@ function duration(::CS01, kr::KeyRates, valuation_fn::F, base::AYM, credit::AYM)
     r = _keyrate((; base, credit), kr.tenors, valuation_fn)
     return _per_bp(r, r.gradient.credit)
 end
-function duration(::CS01, kr::KeyRates, base::AYM, credit::AYM, cfs::AbstractVector, times)
+function duration(::CS01, kr::KeyRates, base::AYM, credit::AYM, cfs::AbstractVector, times = eachindex(cfs))
     r = _keyrate((; base, credit), kr.tenors, cfs, times)
     return _per_bp(r, r.gradient.credit)
 end
-duration(::CS01, kr::KeyRates, base::AYM, credit::AYM, cfs::AbstractVector{<:FinanceCore.Cashflow}) = duration(CS01(), kr, base, credit, _extract_cfs_times(cfs)...)
 
 # Do-block-first forwarders (support `f(args...) do x; ...; end` syntax)
 duration(vf::Function, kr::KeyRates, curve::AYM) = duration(kr, vf, curve)
@@ -338,11 +335,10 @@ function convexity(kr::KeyRates, valuation_fn::F, curve::AYM) where {F}
     r = _keyrate((; curve), kr.tenors, valuation_fn; order = 2)
     return _relative(r, r.hessian.curve.curve)
 end
-function convexity(kr::KeyRates, curve::AYM, cfs::AbstractVector, times)
+function convexity(kr::KeyRates, curve::AYM, cfs::AbstractVector, times = eachindex(cfs))
     r = _keyrate((; curve), kr.tenors, cfs, times; order = 2)
     return _relative(r, r.hessian.curve.curve)
 end
-convexity(kr::KeyRates, curve::AYM, cfs::AbstractVector{<:FinanceCore.Cashflow}) = convexity(kr, curve, _extract_cfs_times(cfs)...)
 
 function convexity(valuation_fn::F, base::AYM, credit::AYM) where {F}
     r = _keyrate((; base, credit), _PARALLEL_GRID, valuation_fn; order = 2)
@@ -352,33 +348,29 @@ end
 # treating the marker as a two-curve valuation callback.
 convexity(kr::KeyRates, valuation_fn::AYM, curve::AYM) =
     invoke(convexity, Tuple{KeyRates, Any, AYM}, kr, valuation_fn, curve)
-function convexity(base::AYM, credit::AYM, cfs::AbstractVector, times)
+function convexity(base::AYM, credit::AYM, cfs::AbstractVector, times = eachindex(cfs))
     # Fixed cashflows have analytic base, credit, and cross derivatives.
     r = _keyrate((; base, credit), _PARALLEL_GRID, cfs, times; order = 2)
     return _base_credit_cross(r, only)
 end
-convexity(base::AYM, credit::AYM, cfs::AbstractVector{<:FinanceCore.Cashflow}) = convexity(base, credit, _extract_cfs_times(cfs)...)
 
 function convexity(kr::KeyRates, valuation_fn::F, base::AYM, credit::AYM) where {F}
     r = _keyrate((; base, credit), kr.tenors, valuation_fn; order = 2)
     return _base_credit_cross(r)
 end
-function convexity(kr::KeyRates, base::AYM, credit::AYM, cfs::AbstractVector, times)
+function convexity(kr::KeyRates, base::AYM, credit::AYM, cfs::AbstractVector, times = eachindex(cfs))
     r = _keyrate((; base, credit), kr.tenors, cfs, times; order = 2)
     return _base_credit_cross(r)
 end
-convexity(kr::KeyRates, base::AYM, credit::AYM, cfs::AbstractVector{<:FinanceCore.Cashflow}) = convexity(kr, base, credit, _extract_cfs_times(cfs)...)
 
 # Multi-curve NamedTuple cashflow form. Per-role and per-role-pair convexities
 # for static cashflows. Values coincide under multiplicative discount
 # composition; each public block owns an independent matrix.
-function convexity(kr::KeyRates, curves::NamedTuple, cfs::AbstractVector, times)
+function convexity(kr::KeyRates, curves::NamedTuple, cfs::AbstractVector, times = eachindex(cfs))
     r = _keyrate(curves, kr.tenors, cfs, times; order = 2)
     n = _scale(r)
     return map(row -> map(h -> _relative(n, h), row), r.hessian)
 end
-convexity(kr::KeyRates, curves::NamedTuple, cfs::AbstractVector{<:FinanceCore.Cashflow}) =
-    convexity(kr, curves, _extract_cfs_times(cfs)...)
 
 # Do-block-first forwarders (support `f(args...) do x; ...; end` syntax). The
 # two-curve scalar callback already takes the function first.
@@ -419,7 +411,7 @@ See [Zero cashflow streams](@ref) for batch numeric types and simulation RNG beh
 function sensitivities(kr::KeyRates, valuation_fn::F, curve::AYM) where {F}
     return _single_curve_sensitivities(_keyrate((; curve), kr.tenors, valuation_fn; order = 2))
 end
-function sensitivities(kr::KeyRates, curve::AYM, cfs::AbstractVector, times)
+function sensitivities(kr::KeyRates, curve::AYM, cfs::AbstractVector, times = eachindex(cfs))
     return _single_curve_sensitivities(_keyrate((; curve), kr.tenors, cfs, times; order = 2))
 end
 _single_curve_sensitivities(r) = (;
@@ -427,12 +419,11 @@ _single_curve_sensitivities(r) = (;
     durations = _relative(r, r.gradient.curve; negate = true),
     convexities = _relative(r, r.hessian.curve.curve),
 )
-sensitivities(kr::KeyRates, curve::AYM, cfs::AbstractVector{<:FinanceCore.Cashflow}) = sensitivities(kr, curve, _extract_cfs_times(cfs)...)
 
 function sensitivities(::DV01, kr::KeyRates, valuation_fn::F, curve::AYM) where {F}
     return _single_curve_dv01s(_keyrate((; curve), kr.tenors, valuation_fn; order = 2))
 end
-function sensitivities(::DV01, kr::KeyRates, curve::AYM, cfs::AbstractVector, times)
+function sensitivities(::DV01, kr::KeyRates, curve::AYM, cfs::AbstractVector, times = eachindex(cfs))
     return _single_curve_dv01s(_keyrate((; curve), kr.tenors, cfs, times; order = 2))
 end
 _single_curve_dv01s(r) = (;
@@ -440,12 +431,11 @@ _single_curve_dv01s(r) = (;
     dv01s = _per_bp(r, r.gradient.curve),
     convexities = _relative(r, r.hessian.curve.curve),
 )
-sensitivities(::DV01, kr::KeyRates, curve::AYM, cfs::AbstractVector{<:FinanceCore.Cashflow}) = sensitivities(DV01(), kr, curve, _extract_cfs_times(cfs)...)
 
 function sensitivities(kr::KeyRates, valuation_fn::F, base::AYM, credit::AYM) where {F}
     return _two_curve_sensitivities(_keyrate((; base, credit), kr.tenors, valuation_fn; order = 2))
 end
-function sensitivities(kr::KeyRates, base::AYM, credit::AYM, cfs::AbstractVector, times)
+function sensitivities(kr::KeyRates, base::AYM, credit::AYM, cfs::AbstractVector, times = eachindex(cfs))
     return _two_curve_sensitivities(_keyrate((; base, credit), kr.tenors, cfs, times; order = 2))
 end
 _two_curve_sensitivities(r) = (;
@@ -454,12 +444,11 @@ _two_curve_sensitivities(r) = (;
     credit_durations = _relative(r, r.gradient.credit; negate = true),
     convexities = _base_credit_cross(r),
 )
-sensitivities(kr::KeyRates, base::AYM, credit::AYM, cfs::AbstractVector{<:FinanceCore.Cashflow}) = sensitivities(kr, base, credit, _extract_cfs_times(cfs)...)
 
 # Multi-curve NamedTuple cashflow form. One AD-free pass returns per-role
 # durations + per-role-pair N×N convexity blocks. Values coincide under
 # multiplicative discount composition; public arrays are independent.
-function sensitivities(kr::KeyRates, curves::NamedTuple, cfs::AbstractVector, times)
+function sensitivities(kr::KeyRates, curves::NamedTuple, cfs::AbstractVector, times = eachindex(cfs))
     r = _keyrate(curves, kr.tenors, cfs, times; order = 2)
     n = _scale(r)
     return (;
@@ -468,13 +457,11 @@ function sensitivities(kr::KeyRates, curves::NamedTuple, cfs::AbstractVector, ti
         convexities = map(row -> map(h -> _relative(n, h), row), r.hessian),
     )
 end
-sensitivities(kr::KeyRates, curves::NamedTuple, cfs::AbstractVector{<:FinanceCore.Cashflow}) =
-    sensitivities(kr, curves, _extract_cfs_times(cfs)...)
 
 function sensitivities(::DV01, kr::KeyRates, valuation_fn::F, base::AYM, credit::AYM) where {F}
     return _two_curve_dv01s(_keyrate((; base, credit), kr.tenors, valuation_fn; order = 2))
 end
-function sensitivities(::DV01, kr::KeyRates, base::AYM, credit::AYM, cfs::AbstractVector, times)
+function sensitivities(::DV01, kr::KeyRates, base::AYM, credit::AYM, cfs::AbstractVector, times = eachindex(cfs))
     return _two_curve_dv01s(_keyrate((; base, credit), kr.tenors, cfs, times; order = 2))
 end
 _two_curve_dv01s(r) = (;
@@ -483,7 +470,6 @@ _two_curve_dv01s(r) = (;
     credit_dv01s = _per_bp(r, r.gradient.credit),
     convexities = _base_credit_cross(r),
 )
-sensitivities(::DV01, kr::KeyRates, base::AYM, credit::AYM, cfs::AbstractVector{<:FinanceCore.Cashflow}) = sensitivities(DV01(), kr, base, credit, _extract_cfs_times(cfs)...)
 
 # Do-block-first forwarders (support `f(args...) do x; ...; end` syntax)
 sensitivities(vf::Function, kr::KeyRates, curve::AYM) = sensitivities(kr, vf, curve)

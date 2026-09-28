@@ -42,7 +42,7 @@ sensitivities(vf::Function, ::DV01, kr::KeyRates, hw::HW; kw...) = sensitivities
 
 # Cashflow-form wrappers that delegate to the do-block forms above
 function sensitivities(
-        kr::KeyRates, hw::HW, cfs::AbstractVector, times;
+        kr::KeyRates, hw::HW, cfs::AbstractVector, times = eachindex(cfs);
         n_scenarios = 1000, timestep = 1 / 12, horizon = nothing,
         rng = Random.default_rng()
     )
@@ -55,7 +55,7 @@ function sensitivities(
 end
 
 function sensitivities(
-        ::DV01, kr::KeyRates, hw::HW, cfs::AbstractVector, times;
+        ::DV01, kr::KeyRates, hw::HW, cfs::AbstractVector, times = eachindex(cfs);
         n_scenarios = 1000, timestep = 1 / 12, horizon = nothing,
         rng = Random.default_rng()
     )

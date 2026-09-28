@@ -72,4 +72,17 @@ end
         n_scenarios = 500, rng = Xoshiro(43)
     )
     @test !(r1.value ≈ r3.value && r1.durations ≈ r3.durations)
+
+    # Omitted times default to periods 1:n, and wrapped cashflows simulate under Hull-White
+    # too. Before v6.0 a `Cashflow` vector without times treated `hw` as a discount curve.
+    wrapped = FC.Cashflow.(cfs, tenors)
+    for m in ((), (DV01(),))
+        seeded = sensitivities(m..., KeyRates(tenors), hw, cfs, tenors; n_scenarios = 500, rng = Xoshiro(42))
+        @test isequal(sensitivities(m..., KeyRates(tenors), hw, cfs; n_scenarios = 500, rng = Xoshiro(42)), seeded)
+        @test _same_sensitivity(sensitivities(m..., KeyRates(tenors), hw, wrapped; n_scenarios = 500, rng = Xoshiro(42)), seeded)
+    end
+    @test !(
+        sensitivities(KeyRates(tenors), hw, wrapped; n_scenarios = 500, rng = Xoshiro(42)).durations ≈
+            sensitivities(KeyRates(tenors), hw.curve, wrapped).durations
+    )
 end

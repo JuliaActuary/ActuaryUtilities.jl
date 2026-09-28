@@ -61,7 +61,11 @@ grids. See [Shock coordinates](@ref) for the full rule.
   wrapped `Cashflow` objects with explicit times. Scalar, key-rate, and bundled
   sensitivities use embedded payment times, as do Hull–White default horizons.
   Numeric amounts use the corresponding explicit times. Explicit time vectors must
-  cover the collection; trailing entries are ignored.
+  cover the collection; trailing entries are ignored. Omitted times default to
+  `eachindex(cfs)` in every key-rate, two-curve, named-curve, and Hull–White cashflow
+  form, so numeric amounts are paid at periods `1:n` as in the scalar measures.
+  `sensitivities(KeyRates(tenors), hw, cashflows)` without times now simulates under
+  Hull–White like the form with times; v5 treated `hw` as a deterministic discount curve there.
   **Migration:** to change payment dates, construct updated `Cashflow` objects or
   pass numeric amounts with the desired times.
 - Unmarked contract and portfolio duration, DV01, and convexity default to

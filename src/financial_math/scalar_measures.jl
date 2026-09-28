@@ -754,12 +754,6 @@ function moic(cfs::T) where {T <: AbstractArray}
     return returned / invested
 end
 
-## Cashflow extraction helper
-
-function _extract_cfs_times(cfs::AbstractVector{<:FinanceCore.Cashflow})
-    return FinanceCore.amount.(cfs), FinanceCore.timepoint.(cfs)
-end
-
 ## Scalar do-block forwarding for AbstractYieldModel
 #
 # Forwards `duration(vf, curve)` and `convexity(vf, curve)` (no tenors) to the
