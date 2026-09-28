@@ -49,7 +49,10 @@ continuous-zero duration; forward duration is zero. See [`duration`](@ref) with 
 [`Spread`](@ref), [`dv01`](@ref), [`zspread`](@ref), [`locked_floater`](@ref).
 """
 function sensitivities(kr::KeyRates, target::_Contractish, forward::AYM, credit::AYM)
-    r = _ncurve_ad(c -> _cvalue2(target, c.forward, c.credit), (; forward, credit), kr.tenors; order = 1)
+    return _contract_bundle(_ncurve_ad(c -> _cvalue2(target, c.forward, c.credit), (; forward, credit), kr.tenors; order = 1))
+end
+# A function barrier: some projected contracts (floaters) have uninferred values.
+function _contract_bundle(r)
     # Use signed derivatives to retain dollar exposure at zero present value.
     forward_dv01 = _per_bp(r, sum(r.gradient.forward))
     spread_dv01 = _per_bp(r, sum(r.gradient.credit))
