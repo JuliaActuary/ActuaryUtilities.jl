@@ -673,7 +673,6 @@ function spread(curve1, curve2, cashflows, times = eachindex(cashflows); tol = 1
 
     combined(s) = curve1 + FinanceCore.Periodic(s, 1)
     f(s) = FinanceCore.pv(combined(s), cashflows, times) - pv2
-    gross1(s) = sum(abs(cf) * FinanceCore.discount(combined(s), t) for (cf, t) in zip(cashflows, times))
     # Dampen Newton steps: mixed-sign cashflows can have nearly zero price derivatives, and
     # near the domain edge a full step would leave it.
     max_step = 0.25
@@ -681,16 +680,19 @@ function spread(curve1, curve2, cashflows, times = eachindex(cashflows); tol = 1
     s = 0.0
     newton = NaN
     for _ in 1:maxiter
-        fs = f(s)
+        fs, dfs = _value_and_derivative(f, s)
         iszero(fs) && return FinanceCore.Periodic(s, 1)
-        newton = fs / ForwardDiff.derivative(f, s)
+        newton = fs / dfs
         isnan(_primal(newton)) && throw(
             ErrorException("spread: the valuation or its derivative is NaN at spread $(_primal(s))")
         )
         # Convergence is decided on primal values; the returned candidate keeps any partials.
         if isfinite(_primal(newton)) && abs(_primal(newton)) < tol
-            c = s - newton
-            residual, scale = _primal(f(c)), _primal(gross1(c) + gross2)
+            # The dual evaluation sums in another order, so the candidate's step takes the
+            # residual from `f` itself, which keeps the root's rounding error at its previous size.
+            c = s - f(s) / dfs
+            residual, gross1 = _primal_residual_and_gross(combined(c), cashflows, times, pv2)
+            scale = gross1 + _primal(gross2)
             isfinite(residual) && isfinite(scale) &&
                 abs(residual) <= sqrt(eps(float(typeof(residual)))) * scale &&
                 return FinanceCore.Periodic(c, 1)
@@ -716,6 +718,26 @@ _periodic_spread_floor(r, n) = max(-1.0, float(max(-r / n, zero(r)))^n - 1)
 
 _primal(x) = x
 _primal(x::ForwardDiff.Dual) = _primal(ForwardDiff.value(x))
+
+# `f(x)` and `f′(x)` from the one evaluation `ForwardDiff.derivative(f, x)` makes. `x` and `f` may
+# already carry partials of an outer differentiation, which the value keeps.
+function _value_and_derivative(f::F, x::R) where {F, R <: Real}
+    T = typeof(ForwardDiff.Tag(f, R))
+    y = f(ForwardDiff.Dual{T}(x, one(x)))
+    return ForwardDiff.value(T, y), ForwardDiff.extract_derivative(T, y)
+end
+
+# The pricing residual against `target` and the gross discounted value Σ|cfᵢ|⋅dfᵢ of the cashflows
+# under `curve`, as primal values, from one discount per cashflow.
+function _primal_residual_and_gross(curve, cashflows, times, target)
+    value = gross = zero(_primal(target))
+    for (cf, t) in zip(cashflows, times)
+        a, d = _primal(cf), _primal(FinanceCore.discount(curve, t))
+        value += a * d
+        gross += abs(a) * d
+    end
+    return value - _primal(target), gross
+end
 
 """
     moic(cashflows<:AbstractArray)
