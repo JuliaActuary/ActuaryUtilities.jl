@@ -42,12 +42,15 @@ end
 # `_zero_amount` uses the amounts present.
 function _zero_stream_time(cfs, times)
     isconcretetype(eltype(cfs)) || isempty(cfs) ||
-        return zero(mapreduce(k -> typeof(FinanceCore.timepoint(cfs[k], times[k])), promote_type, eachindex(cfs)))
+        return _scanned_zero(k -> FinanceCore.timepoint(cfs[k], times[k]), cfs)
     return _zero_stream_time(eltype(cfs), times)
 end
 _zero_stream_time(::Type, times) = _zero_time(eltype(times))
 _zero_stream_time(::Type{Union{}}, times) = _zero_time(eltype(times))
-_zero_stream_time(::Type{E}, times) where {E <: FinanceCore.Cashflow} = _zero_cashflow_time(E)
+_zero_stream_time(::Type{<:FinanceCore.Cashflow}, times) = false
+# Bound both parameters as `Cashflow` does: with an unbounded amount type, Julia ranks the
+# `Type{<:Cashflow}` method above as more specific, and every `Cashflow` would give `false`.
+_zero_stream_time(::Type{FinanceCore.Cashflow{A, T}}, times) where {A <: Real, T <: Real} = zero(T)
 
 # The zero-stream value for a single rate, number or curve.
 _zero_stream_value(yield, cfs, times) = _zero_cashflow_value(t -> FinanceCore.discount(yield, t), cfs, times)
@@ -59,10 +62,11 @@ _zero_shifted(yield, cfs, times, divisor = 1) = zero(_zero_stream_value(yield, c
 
 # An all-zero stream in an abstractly typed collection uses the amounts present.
 function _zero_amount(cfs)
-    E = eltype(cfs)
-    isconcretetype(E) || isempty(cfs) || return zero(mapreduce(cf -> typeof(_cf_value(cf)), promote_type, cfs))
-    return _zero_amount_of(E)
+    isconcretetype(eltype(cfs)) || isempty(cfs) || return _scanned_zero(k -> _cf_value(cfs[k]), cfs)
+    return _zero_amount_of(eltype(cfs))
 end
+# The zero of the promoted type that `f` gives each payment `k`.
+_scanned_zero(f::F, cfs) where {F} = zero(mapreduce(k -> typeof(f(k)), promote_type, eachindex(cfs)))
 # An element type that says nothing about amounts contributes `false`, which every
 # numeric type absorbs under promotion.
 _zero_amount_of(::Type) = false
@@ -72,9 +76,6 @@ _zero_amount_of(::Type{<:FinanceCore.Cashflow{A}}) where {A <: Real} = zero(A)
 _zero_time(::Type) = false
 _zero_time(::Type{Union{}}) = false
 _zero_time(::Type{T}) where {T <: Real} = zero(T)
-_zero_cashflow_time(::Type) = false
-_zero_cashflow_time(::Type{Union{}}) = false
-_zero_cashflow_time(::Type{<:FinanceCore.Cashflow{A, T}}) where {A, T <: Real} = zero(T)
 
 # The same normalization handles scalars and arrays. Signs stay inside the
 # broadcast, and zero streams return positive typed zeros before any division.
