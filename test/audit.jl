@@ -254,6 +254,13 @@ end
     # the sums are type-stable for a concrete element type
     @test @inferred(moic([-10.0, 20.0, 30.0])) === 5.0
     @test @inferred(moic(FC.Cashflow.([-10.0, 20.0], [0.0, 1.0]))) === 2.0
+    # Narrow integers: the sums widen before the contributions are negated.
+    for T in (Int8, Int16, Int32)
+        m = typemin(T)
+        @test moic(T[m, -1, 64]) ≈ 64 / (1 - Int(m))
+        @test moic(T[m, 64]) ≈ 64 / -Int(m)
+        @test moic(FC.Cashflow.(T[m, -1, 64], [0, 1, 2])) ≈ 64 / (1 - Int(m))
+    end
 end
 
 @testset "duration with a negative-valued valuation function" begin
