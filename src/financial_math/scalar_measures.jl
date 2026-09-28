@@ -328,13 +328,6 @@ end
 duration(d::Modified, yield::_YieldInput, cfs::_CashflowCollection, times) =
     duration(d, yield, _cashflow_vector(cfs), times)
 
-function duration(::Modified, yield::_YieldInput, cfs::AbstractVector, times)
-    times = _cashflow_times(cfs, times)
-    _iszero_cashflow_stream(cfs) && return _zero_shifted(yield, cfs, times)
-    D(i) = price(i, cfs, times)
-    return duration(yield, D)
-end
-
 ## Analytic duration for flat yields
 # Macaulay = Σ t·cf·d / Σ cf·d. Modified divides by 1+y/m for periodic rates
 # (m=1 for scalars); continuous rates and yield models use Macaulay directly.
@@ -557,12 +550,6 @@ julia> convexity(0.03,my_lump_sum_value)
 """
 convexity(yield::_YieldInput, cfs::_CashflowCollection, times) =
     convexity(yield, _cashflow_vector(cfs), times)
-
-function convexity(yield::_YieldInput, cfs::AbstractVector, times)
-    times = _cashflow_times(cfs, times)
-    _iszero_cashflow_stream(cfs) && return _zero_shifted(yield, cfs, times)
-    return convexity(yield, i -> price(i, cfs, times))
-end
 
 function convexity(yield::_YieldInput, cfs::_CashflowCollection)
     cfs = _cashflow_vector(cfs)
