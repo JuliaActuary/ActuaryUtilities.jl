@@ -82,9 +82,15 @@ same zero-rate level:
 
 ### Two curves: IR01 and CS01
 
-Fixed cashflows discounted at `base + credit` have equal IR01, CS01, and DV01 of the
-combined curve: a one-basis-point move in either component is a one-basis-point move
-in the combined rate.
+IR01 shifts the base (rate) curve by one basis point, and CS01 the credit curve.
+
+!!! note "Equal rate and credit sensitivities are the usual case"
+    When a valuation depends only on the combined rate, as fixed cashflows discounted at
+    `base + credit` do, its IR01, CS01 and combined-curve DV01 are equal, and so are its
+    `base`, `credit` and `cross` convexity blocks. A one-basis-point move in either curve
+    is a one-basis-point move in the rate the cashflows are discounted at. The
+    fixed-cashflow forms, such as `duration(IR01(), base, credit, cfs, times)` and
+    `convexity(base, credit, cfs, times)`, are always in this case.
 
 ```@example sensitivities
 base   = ZeroRateCurve([0.03, 0.03, 0.03, 0.03, 0.03], tenors)
@@ -95,26 +101,54 @@ credit = ZeroRateCurve([0.02, 0.02, 0.02, 0.02, 0.02], tenors)
  dv01 = duration(DV01(), base + credit, cfs, times))
 ```
 
-The measures separate when the curves play different roles. Pass a callback that
-receives `(base, credit)`; each measure applies a parallel shift to one curve:
+The measures differ when a valuation uses the two curves differently. Pass a callback
+that receives `(base, credit)`; each measure applies a parallel shift to one curve.
+Compare the fixed cashflows with a five-year floater paying the one-year forward rate plus
+a 2% margin. The floater's coupons reset on the base curve, while every payment is
+discounted at `base + credit`:
 
 ```@example sensitivities
-spread_margin = 0.02
-floating_value(b, c) = sum(1:5) do t
-    df_prev = t == 1 ? 1.0 : b(t - 1.0)
-    coupon  = 100 * (df_prev / b(Float64(t)) - 1 + spread_margin)   # resets on the base curve
-    (coupon + (t == 5 ? 100 : 0)) * b(Float64(t)) * c(Float64(t))
+margin = 0.02
+
+fixed_value(b, c) = pv(b + c, cfs, times)
+floater_value(b, c) = sum(1:5) do t
+    coupon = 100 * (1 / discount(b, t - 1, t) - 1 + margin)   # resets on the base curve
+    (coupon + (t == 5 ? 100 : 0)) * discount(b + c, t)       # discounted at base + credit
 end
 
-(ir01 = duration(IR01(), floating_value, base, credit),
- cs01 = duration(CS01(), floating_value, base, credit))
+(fixed   = (ir01 = duration(IR01(), fixed_value, base, credit),
+            cs01 = duration(CS01(), fixed_value, base, credit)),
+ floater = (ir01 = duration(IR01(), floater_value, base, credit),
+            cs01 = duration(CS01(), floater_value, base, credit)))
 ```
 
-Two-curve convexity returns the parallel `base`, `credit`, and `cross` blocks:
+The floater's IR01 is small: a base-rate move is offset at the next coupon reset, so its
+rate risk runs only to the next reset date. Its CS01 is close to that of a five-year bond,
+because the credit curve discounts every payment. For a FinanceModels contract,
+[Floating-Rate Instruments: Effective vs Spread Duration](@ref) makes the same
+distinction between rate and credit risk.
 
 ```@example sensitivities
-(fixed    = convexity(base, credit, cfs, times),
- floating = convexity(floating_value, base, credit))
+using CairoMakie
+
+ir01s = [duration(IR01(), v, base, credit) for v in (fixed_value, floater_value)]
+cs01s = [duration(CS01(), v, base, credit) for v in (fixed_value, floater_value)]
+
+fig = Figure(size = (650, 320))
+ax = Axis(fig[1, 1]; title = "Rate vs credit sensitivity", ylabel = "Value lost per +1bp",
+    xticks = (1:2, ["5-year fixed cashflows", "5-year floater"]))
+colors = Makie.wong_colors()[1:2]
+barplot!(ax, [1, 2, 1, 2], [ir01s; cs01s]; dodge = [1, 1, 2, 2], color = colors[[1, 1, 2, 2]])
+Legend(fig[1, 2], [PolyElement(polycolor = c) for c in colors], ["IR01 (base curve)", "CS01 (credit curve)"])
+fig
+```
+
+Two-curve convexity returns the parallel `base`, `credit`, and `cross` blocks, which
+split the same way:
+
+```@example sensitivities
+(fixed   = convexity(fixed_value, base, credit),
+ floater = convexity(floater_value, base, credit))
 ```
 
 ## Key-Rate Decomposition
@@ -301,36 +335,24 @@ bumped `(base, credit)` curves.
 
 ### Example: Credit-Risky Floating Rate Bond
 
-Fixed cashflows have equal IR01 and CS01 under multiplicative discount composition.
-For a floater, base-rate changes also reset coupons, so the sensitivities differ
-bucket by bucket:
+For the fixed cashflows in [Two curves: IR01 and CS01](@ref), the base and credit key
+rate durations are equal bucket by bucket. For the floater defined there, base-rate
+changes also reset its coupons, so the two differ in every bucket:
 
 ```@example sensitivities
-credit_spread = 0.02
-face          = 100.0
+floater_krd = sensitivities(floater_value, KeyRates(tenors), base, credit)
 
-floater_result = sensitivities(KeyRates(tenors), base, credit) do base_curve, credit_curve
-    total = 0.0
-    for t in 1:5
-        df_base      = base_curve(Float64(t))
-        df_credit    = credit_curve(Float64(t))
-        df_base_prev = t == 1 ? 1.0 : base_curve(Float64(t - 1))
-
-        # Coupon resets to risk-free forward rate + fixed credit spread
-        fwd = df_base_prev / df_base - 1.0
-        total += face * (fwd + credit_spread) * df_base * df_credit
-
-        # Principal at maturity
-        t == 5 && (total += face * df_base * df_credit)
-    end
-    total
-end
-
-(IR01 = sum(floater_result.base_durations),
- CS01 = sum(floater_result.credit_durations))
+(base_durations   = floater_krd.base_durations,
+ credit_durations = floater_krd.credit_durations)
 ```
 
 Base-rate changes affect coupons and discounting; credit changes affect discounting only.
+Each vector sums to the floater's parallel modified duration for its curve:
+
+```@example sensitivities
+(base   = sum(floater_krd.base_durations),
+ credit = sum(floater_krd.credit_durations))
+```
 
 ## Floating-Rate Instruments: Effective vs Spread Duration
 
