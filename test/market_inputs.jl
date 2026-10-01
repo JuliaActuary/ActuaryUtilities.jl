@@ -77,4 +77,56 @@
         @test_throws MethodError sensitivities(KeyRates(tenors), c -> 0.0, (; rate = 0.03))
         @test_throws MethodError sensitivities(m -> 0.0, (; rate = 0.03))
     end
+
+    @testset "par quotes: calibration, AD, and finite bumps" begin
+        par_tenors = [1.0, 2.0, 3.0, 5.0, 10.0]
+        par_yields = [0.02, 0.024, 0.028, 0.032, 0.035]
+        payments = [4.0, 4.0, 4.0, 4.0, 4.0, 4.0, 104.0]
+        payment_times = collect(1.0:7.0)
+        quotes(y) = FM.ParYield.(y, par_tenors; frequency = FC.Periodic(2))
+        curve_from_par(y) = FM.fit(FM.Spline.Linear(), quotes(y), FM.Fit.Bootstrap())
+        par_value(y) = FC.pv(curve_from_par(y), payments, payment_times)
+        curve = curve_from_par(par_yields)
+        @test all(q -> FC.pv(curve, q.instrument) ≈ q.price, quotes(par_yields))
+
+        ad = sensitivities(m -> par_value(m.par_yields), (; par_yields))
+        @test ad.value ≈ par_value(par_yields)
+        @test ad.key_rate_dv01.par_yields ≈ ad.key_rate.par_yields .* ad.value ./ 10_000
+
+        # Independent primal refits at 10 bp and 1 bp. Compare both dollar and
+        # normalized measures; the central difference has second-order bump error.
+        fd = map((10.0, 1.0)) do bump_bps
+            h = bump_bps / 10_000
+            map(eachindex(par_yields)) do i
+                up, down = copy(par_yields), copy(par_yields)
+                up[i] += h
+                down[i] -= h
+                vup, vdown = par_value(up), par_value(down)
+                (; dv01 = (vdown - vup) / (2 * bump_bps), duration = (vdown - vup) / (2 * h * ad.value))
+            end
+        end
+        coarse_error = maximum(abs.([x.dv01 for x in fd[1]] .- ad.key_rate_dv01.par_yields))
+        fine_error = maximum(abs.([x.dv01 for x in fd[2]] .- ad.key_rate_dv01.par_yields))
+        @test fine_error < coarse_error / 20
+        @test [x.dv01 for x in fd[2]] ≈ ad.key_rate_dv01.par_yields rtol = 1.0e-6
+        @test [x.duration for x in fd[2]] ≈ ad.key_rate.par_yields rtol = 1.0e-6
+        h = 1.0e-4
+        parallel_dv01 = (par_value(par_yields .- h) - par_value(par_yields .+ h)) / 2
+        @test parallel_dv01 ≈ ad.dv01.par_yields rtol = 1.0e-6
+
+        # Calibration identity: hold a par bond's payments fixed at its original
+        # coupon. Other par quotes cannot change its price, while its own quote
+        # sensitivity is minus the discounted coupon annuity.
+        j = 4
+        par_bond = quotes(par_yields)[j].instrument
+        bond_risk = sensitivities((; par_yields)) do m
+            FC.pv(curve_from_par(m.par_yields), par_bond)
+        end
+        annuity = sum(FC.discount(curve, t) / 2 for t in 0.5:0.5:par_tenors[j])
+        expected = zeros(length(par_yields))
+        expected[j] = annuity
+        @test bond_risk.value ≈ 1.0
+        @test bond_risk.key_rate.par_yields ≈ expected atol = 1.0e-9
+        @test bond_risk.key_rate_dv01.par_yields ≈ expected ./ 10_000 atol = 1.0e-13
+    end
 end

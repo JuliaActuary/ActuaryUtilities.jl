@@ -288,6 +288,94 @@ end
 With linear zero-rate interpolation, the per-element results equal the `KeyRates`
 decomposition on the same knots.
 
+### Par-yield sensitivities: AD and bump-and-reprice
+
+To measure sensitivity to par yields, rebuild the curve from par quotes inside the
+valuation. `KeyRates(tenors)` instead bumps continuous zero rates on an existing
+curve; these are different shock coordinates.
+
+The following example uses annualized, semiannually compounded par yields in
+decimal units. It bootstraps a curve with linear interpolation of continuous zero
+rates, then values a seven-year bond with fixed annual payments:
+
+```@example par_quote_risk
+using ActuaryUtilities, FinanceModels, FinanceCore
+
+par_tenors = [1.0, 2.0, 3.0, 5.0, 10.0]
+par_yields = [0.02, 0.024, 0.028, 0.032, 0.035]
+payments = [4.0, 4.0, 4.0, 4.0, 4.0, 4.0, 104.0]
+payment_times = collect(1.0:7.0)
+
+function curve_from_par(yields)
+    quotes = ParYield.(yields, par_tenors; frequency = Periodic(2))
+    return fit(Spline.Linear(), quotes, Fit.Bootstrap())
+end
+par_value(yields) = pv(curve_from_par(yields), payments, payment_times)
+
+ad = sensitivities((; par_yields)) do inputs
+    par_value(inputs.par_yields)
+end
+
+(tenors = par_tenors,
+ par_durations = ad.key_rate.par_yields,
+ par_dv01s = ad.key_rate_dv01.par_yields)
+```
+
+Each entry differentiates one par quote while holding the other quotes fixed and
+recalibrating the curve. `par_dv01s` is ``-\partial V/\partial q_i \times 10^{-4}``:
+the first-order value loss per one-basis-point increase. `par_durations` is
+``-\partial V/\partial q_i / V``. Both use the unbumped **recalibrated** value.
+The sum of the buckets describes a parallel shift of these par quotes, not a
+parallel continuous-zero shift. The calculation requires a differentiable fit;
+FinanceModels' calibration checks still apply.
+
+For a traditional finite bump, choose `bump_bps` and reprice both scenarios. This
+example moves only the five-year par quote by ten basis points in each direction:
+
+```@example par_quote_risk
+bump_bps = 10.0                        # positive bump size in basis points
+h = bump_bps / 10_000
+i = findfirst(==(5.0), par_tenors)
+up, down = copy(par_yields), copy(par_yields)
+up[i] += h
+down[i] -= h
+
+v0 = par_value(par_yields)
+vup, vdown = par_value(up), par_value(down)
+
+bump_result = (
+    up_change = vup - v0,              # actual signed P&L for the +10 bp scenario
+    down_change = vdown - v0,          # actual signed P&L for the -10 bp scenario
+    dv01 = (vdown - vup) / (2 * bump_bps),
+    duration = (vdown - vup) / (2 * h * v0),
+)
+(bump_result = bump_result,
+ ad_dv01 = ad.key_rate_dv01.par_yields[i],
+ ad_duration = ad.key_rate.par_yields[i])
+```
+
+The two scenario changes are actual finite-shock results. The central-difference
+`dv01` and `duration` estimate the derivatives and approach the AD results as the
+bump shrinks, until numerical precision limits the comparison. At a finite bump,
+the up and down P&Ls need not be opposites. To shock every par quote together, use
+`up = par_yields .+ h` and `down = par_yields .- h`; its AD comparison is
+`ad.dv01.par_yields` or `ad.duration.par_yields`.
+
+If starting from an existing `curve`, obtain synthetic quotes with
+`[rate(par(curve, t; frequency = 2)) for t in par_tenors]` and use those as
+`par_yields`. The rebuilt curve need not reproduce the original curve between
+quote maturities. This measures risk to that synthetic par calibration, not
+necessarily to the original market inputs. To measure original-input risk, use
+those inputs and their actual calibration procedure in the callback.
+
+This is the migration route for `KeyRatePar`. Its old default was a ±10 bp bump,
+linear bootstrapping, and normalization by the **original** curve's price. The
+finite-bump example has the same par-bump interpretation; to retain that original
+normalization, replace `v0` in the duration denominator with
+`pv(curve, payments, payment_times)`. Exact legacy numbers are not promised across
+changes to fitting or quote conventions. Normalized duration is undefined at zero
+value, although dollar sensitivity can remain finite.
+
 ## Callable Valuations
 
 A valuation can be a function or a callable struct that holds its input data:

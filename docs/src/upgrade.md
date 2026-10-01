@@ -81,6 +81,10 @@ v6 requires FinanceModels 7.
   `duration(KeyRates(grid), curve, cfs, times)`, which applies the same triangular
   continuous-zero bumps with exact derivatives. Pass the grid explicitly; the former
   default grid of annual knots from year 1 is no longer implied.
+  `KeyRatePar` has a different migration: use the market-input callback to rebuild
+  a curve from par quotes. `KeyRates` is not a par-rate replacement. See
+  [Par-yield sensitivities: AD and bump-and-reprice](@ref) for both AD and a
+  configurable basis-point bump, including the old normalization convention.
 - **Embedded cashflow times take precedence.** Analytic key-rate forms now accept
   wrapped `Cashflow` objects with explicit times. Scalar, key-rate, and bundled
   sensitivities use embedded payment times, as do Hull–White default horizons.
