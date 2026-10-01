@@ -2,8 +2,9 @@
 
 ## v5.12.0 to v6.0.0
 
-v6 shocks each input in its native form and measures parallel risk without tenor
-grids. See [Shock coordinates](@ref) for the full rule.
+v6 measures parallel risk without tenor grids. Single-rate inputs use their native
+shock coordinate; fixed-cashflow IR01/CS01 use the combined rate's coordinate.
+See [Shock coordinates](@ref) for the full rule.
 
 - **Curve convexity uses continuous-zero shocks.** This changes scalar convexity
   for every yield model, including constant curves, ZeroRateCurve, Nelson–Siegel,
@@ -13,8 +14,10 @@ grids. See [Shock coordinates](@ref) for the full rule.
   Scalars and explicit `Rate` inputs retain their compounding conventions.
   See [Convexity Conventions](@ref) for formulas and examples.
 - **Dollar risk preserves position sign and zero-value exposure.** DV01, IR01,
-  and CS01 use signed value derivatives, so **a net liability now has negative
-  DV01, IR01, and CS01**. For `[-1, 1]` at `[0, 1]` under a zero curve, they return
+  and CS01 reverse sign when the position is reversed. Ordinary liability payments
+  entered as negative cashflows contribute negative dollar risk; a mixed position's
+  net present value alone does not determine the risk's sign.
+  For `[-1, 1]` at `[0, 1]` under a zero curve, they return
   `0.0001` instead of `NaN`. Contract sensitivity bundles also retain dollar
   exposure at zero value. Normalized duration and convexity remain undefined there.
   **Migration:** aggregate `asset_dv01 + liability_dv01`, not
@@ -27,8 +30,11 @@ grids. See [Shock coordinates](@ref) for the full rule.
   makes the sum a yield model with a continuous-zero shock (previously a scalar
   spread was shocked as an annual rate, so CS01 was about IR01 / (1 + spread)), and a
   mixed-compounding `Rate` sum takes the left operand's compounding. Scalar-only
-  inputs are unchanged. Use the callback forms
+  inputs are unchanged. A basis point here is in the combined coordinate, not each
+  input's original nominal-rate convention. These are discount-spread sensitivities;
+  CS01 to recalibrated CDS quotes can differ. Use the callback forms
   `duration(IR01(), (b, c) -> ..., base, credit)` when the curves play different roles.
+  See [Two curves: IR01 and CS01](@ref) and [Two-curve convexity blocks](@ref).
 - **Tenor grids appear only where results have a tenor dimension.** Parallel
   measures no longer accept a `tenors` argument; the grid never changed their
   values, and its position let swapped arguments return wrong numbers silently.

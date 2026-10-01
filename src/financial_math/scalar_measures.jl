@@ -53,7 +53,8 @@ The default measure is `Modified()`.
 
 # Shock coordinates
 
-Each input is shocked in its own native form; see [Shock coordinates](@ref):
+Single-rate inputs are shocked in their native form; fixed-cashflow IR01/CS01 use
+the combined rate's coordinate. See [Shock coordinates](@ref):
 
 - Scalars are annual effective rates: Modified = Macaulay / (1 + y).
 - `Periodic(y, m)` shocks its nominal rate: Modified = Macaulay / (1 + y/m).
@@ -211,16 +212,21 @@ end
     duration(IR01(), base_curve, credit_spread, cfs, times)
     duration(IR01(), base_curve, credit_spread, cfs)
 
-Calculate the IR01 (Interest Rate 01): the signed dollar change in value for a
-1 basis point parallel shift in the risk-free (base) curve, holding the credit
-spread constant.
+Calculate fixed-cashflow IR01 (Interest Rate 01) using the combined-rate shock
+convention: `-∂V/∂s / 10000`, the first-order value lost per basis point increase.
 
-Fixed cashflows are discounted at the combined rate `base_curve + credit_spread`,
-so a one-basis-point move in either component is a one-basis-point move in the
-combined rate. IR01 therefore equals [`CS01`](@ref) and the DV01 of the combined
-rate, shocked in that rate's own coordinate (see [Shock coordinates](@ref)): scalars
-add as annual rates, a `Rate` sum takes the left operand's compounding, and any
-yield-model component makes the sum a yield model with a continuous-zero shock.
+Fixed cashflows are discounted at `base_curve + credit_spread`. This method defines
+the base-rate move as a one-basis-point shift in that combined rate's coordinate,
+so it equals [`CS01`](@ref) and the DV01 of the combined rate. Scalars add as annual
+rates, a `Rate` sum takes the left operand's compounding, and any yield-model
+component makes the sum a yield model with a continuous-zero shock.
+
+For mixed-compounding inputs, this is not an independent bump to the base input's
+original nominal rate. With two yield models, it is a continuous-zero parallel
+shift of the base curve with credit held fixed. Use the callback or contract forms
+when the curves also affect projected payments. This discount-spread convention
+does not imply equality with market-quote risk after recalibration. See
+[Two curves: IR01 and CS01](@ref).
 
 # Examples
 
@@ -252,14 +258,21 @@ end
     duration(CS01(), base_curve, credit_spread, cfs, times)
     duration(CS01(), base_curve, credit_spread, cfs)
 
-Calculate the CS01 (Credit Spread 01): the signed dollar change in value for a
-1 basis point parallel shift in the credit spread, holding the risk-free (base)
-curve constant.
+Calculate fixed-cashflow CS01 (Credit Spread 01) using the combined-rate shock
+convention: `-∂V/∂s / 10000`, the first-order value lost per basis point increase.
 
-Fixed cashflows are discounted at the combined rate `base_curve + credit_spread`,
-so CS01 equals [`IR01`](@ref) and the DV01 of the combined rate, shocked in that
-rate's own coordinate (see [Shock coordinates](@ref)). Use the callback, key-rate,
-or contract forms when the base and credit curves play different roles.
+Fixed cashflows are discounted at `base_curve + credit_spread`. This method defines
+the spread move as a one-basis-point shift in that combined rate's coordinate,
+so it equals [`IR01`](@ref) and the DV01 of the combined rate. The coordinate is
+annual effective for scalar sums, the left operand's compounding for `Rate` sums,
+and continuous zero when a yield-model component is present.
+
+For mixed-compounding inputs, this is not an independent bump to the credit input's
+original nominal rate. With two yield models, it is a continuous-zero parallel
+shift of credit with the base curve held fixed. Credit here is an additive discount
+spread, not a CDS par quote or hazard-rate parameter. Use the callback, key-rate,
+or contract forms when the curves play different roles, and [Market Inputs](@ref)
+for sensitivity to quotes used in calibration. See [Two curves: IR01 and CS01](@ref).
 
 # Examples
 

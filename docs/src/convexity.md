@@ -46,6 +46,61 @@ The callback API derives convexity by differentiating the shocked valuation.
 The cashflow API evaluates the formula directly. For rate-dependent cashflows,
 use a callback or contract so the derivative includes changes in the payments.
 
+## Two-curve convexity blocks
+
+For parallel continuous-zero shifts ``u`` to the base curve and ``v`` to the
+credit curve, `convexity(base, credit, cfs, times)` and the callback form return
+`(; base, credit, cross)`. With nonzero initial value ``V``, these are
+
+```math
+C_{bb} = \frac{V_{uu}}{V}, \qquad
+C_{cc} = \frac{V_{vv}}{V}, \qquad
+C_{bc} = \frac{V_{uv}}{V}.
+```
+
+The `cross` field is ``C_{bc}``, with no extra factor of two. Including the
+first-order exposures, the change in value is approximately
+
+```math
+\Delta V \approx -10^4(\mathrm{IR01}\,u + \mathrm{CS01}\,v)
+  + \frac{V}{2}\left(C_{bb}u^2 + 2C_{bc}uv + C_{cc}v^2\right).
+```
+
+The shifts are in decimal rate units: one basis point is ``10^{-4}``. The mixed
+term thus contributes ``V C_{bc}uv``. Its two symmetric entries in the Hessian
+cancel the one-half in the quadratic expansion.
+
+For fixed cashflows discounted at `base + credit`, value depends on ``u+v``, so
+all three blocks equal the combined curve's convexity. A five-year zero-coupon
+payment has continuous-zero convexity ``5^2 = 25``:
+
+```jldoctest two_curve_convexity
+julia> using ActuaryUtilities, FinanceModels, FinanceCore
+
+julia> base = Yield.Constant(Continuous(0.03)); credit = Yield.Constant(Continuous(0.02));
+
+julia> blocks = convexity(base, credit, [100.0], [5.0]);
+
+julia> all(c -> c ≈ 25, values(blocks))
+true
+
+julia> combined = convexity(base + credit, [100.0], [5.0]);
+
+julia> blocks.base + 2 * blocks.cross + blocks.credit ≈ 4 * combined
+true
+```
+
+The last line describes moving both curves by the same amount: the combined
+shift doubles, so its second-order contribution is four times that of shifting
+one curve alone. Equal blocks do not mean that the cross contribution can be
+omitted. For key-rate blocks, equality also requires matching grids and bump
+functions. [Two curves: IR01 and CS01](@ref) gives a floater example where the
+curves have different roles and their convexities differ.
+
+When nonzero cashflows offset to zero present value, the normalized blocks are
+undefined even if their dollar second derivatives are finite. Empty and all-zero
+streams return zero normalized risk by the [Zero cashflow streams](@ref) convention.
+
 ## Worked example: 11.26, 8.40, and annual-yield convexity
 
 Consider cashflows `[5, 5, 105]` at years `[1, 2, 3]`, discounted at a 4% annual

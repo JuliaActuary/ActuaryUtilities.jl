@@ -230,6 +230,12 @@ play different roles. The scalar callback forms apply a parallel bump and equal 
 sums of the `KeyRates` vectors. For fixed cashflows discounted at `base + credit`,
 use the scalar cashflow form `duration(IR01(), base, credit, cfs, times)`.
 
+Both measures use `-∂V/∂s / 10000`. For fixed cashflows discounted at `base + credit`,
+their values coincide under matching continuous-zero bumps (and the same grid for
+key-rate results). A callback can give different values when the curves affect
+payments differently. These curve shifts do not recalibrate to bumped market
+quotes; see [Two curves: IR01 and CS01](@ref) and [Market Inputs](@ref).
+
 ```julia
 duration(IR01(), base, credit) do b, c
     present_value(b + c, cfs, times)
@@ -299,6 +305,13 @@ be mutated without changing another block.
 The two-curve scalar forms return the parallel blocks `(; base, credit, cross)`,
 each `(∂²V/∂sᵢ∂sⱼ) / V` for continuous-zero parallel shifts of the named curves.
 They equal the sums of the corresponding `KeyRates` blocks, including cross terms.
+`cross` is the mixed derivative divided by `V`, without an extra factor of two.
+For decimal shifts `u` and `v`, the second-order P&L is
+`V / 2 * (base * u^2 + 2 * cross * u * v + credit * v^2)`.
+For fixed cashflows discounted at `base + credit`, all three blocks coincide
+where normalization is defined; key-rate block equality also requires matching
+grids and bump functions. Shifting both curves by one basis point shifts their
+combined continuous zero rates by two basis points. See [Two-curve convexity blocks](@ref).
 Use [`sensitivities`](@ref) to also obtain value and duration or DV01 from the same
 derivatives.
 """

@@ -16,7 +16,8 @@ value retain their dollar exposures and undefined normalized risk. See
 ## Shock coordinates
 
 A one-basis-point shift must move some rate, and the dollar result depends on which
-one. Each input is shocked in its own native form:
+one. Single-rate inputs are shocked in their native form. The fixed-cashflow
+IR01/CS01 forms use the combined rate's coordinate:
 
 | Input | What moves by `s` | Modified duration | Convexity weight |
 |:------|:------------------|:------------------|:-----------------|
@@ -28,8 +29,11 @@ one. Each input is shocked in its own native form:
 | `IR01`/`CS01` with fixed cashflows | the combined rate `base + spread`, in its own coordinate | — | — |
 | Contracts with `Effective()`/`Spread()` | continuous zero rates of the projection and/or discount curve | — | — |
 
-DV01 is `-∂V/∂s / 10000` in the same coordinate and keeps the position's sign: a
-net liability has negative DV01. Scalar curve risk equals the sum of the
+DV01 is `-∂V/∂s / 10000` in the same coordinate: it is the first-order value lost
+for a rate increase of one basis point. Reversing a position reverses its dollar
+risk. Ordinary liability payments entered as negative cashflows contribute negative
+DV01, but the sign of a mixed position's present value alone does not determine its
+DV01. Scalar curve risk equals the sum of the
 corresponding key-rate results, including convexity cross terms (see
 [Convexity Conventions](@ref)).
 
@@ -82,15 +86,30 @@ same zero-rate level:
 
 ### Two curves: IR01 and CS01
 
-IR01 shifts the base (rate) curve by one basis point, and CS01 the credit curve.
+For yield-model inputs, IR01 applies a parallel continuous-zero shift to the base
+curve, holding the credit curve fixed; CS01 shifts the credit curve, holding the
+base curve fixed. Both use the same sign and one-basis-point scaling as DV01.
 
-!!! note "Equal rate and credit sensitivities are the usual case"
-    When a valuation depends only on the combined rate, as fixed cashflows discounted at
-    `base + credit` do, its IR01, CS01 and combined-curve DV01 are equal, and so are its
-    `base`, `credit` and `cross` convexity blocks. A one-basis-point move in either curve
-    is a one-basis-point move in the rate the cashflows are discounted at. The
-    fixed-cashflow forms, such as `duration(IR01(), base, credit, cfs, times)` and
-    `convexity(base, credit, cfs, times)`, are always in this case.
+!!! note "When rate and credit sensitivities coincide"
+    For fixed cashflows discounted at `base + credit`, matching one-basis-point
+    shifts to either curve produce the same change in the combined continuous
+    zero rates. IR01, CS01 and combined-curve DV01 are therefore equal. The `base`,
+    `credit` and `cross` convexity blocks are also equal wherever their
+    normalization is defined. Here, credit is an additive discount spread.
+
+    More generally, the equality requires the same shock coordinate, shape and
+    scaling. If value depends only on the sum of two additive shifts,
+    ``V(u, v) = F(u + v)``, both first derivatives equal ``F'`` and all three
+    second derivatives equal ``F''``. Shifting **both** curves by one basis point
+    shifts the combined curve by **two** basis points.
+
+The fixed-cashflow calls `duration(IR01(), base, credit, cfs, times)` and its
+CS01 counterpart explicitly use the combined rate's coordinate. With scalar or
+`Rate` inputs, that means the convention of `base + credit`; with a yield-model
+component, it means continuous-zero shifts. For mixed-compounding inputs, this
+does **not** mean independently increasing each input's original nominal rate by
+one basis point. See [Shock coordinates](@ref). The two-curve `convexity` forms
+take yield models and use continuous-zero shifts.
 
 ```@example sensitivities
 base   = ZeroRateCurve([0.03, 0.03, 0.03, 0.03, 0.03], tenors)
@@ -101,7 +120,7 @@ credit = ZeroRateCurve([0.02, 0.02, 0.02, 0.02, 0.02], tenors)
  dv01 = duration(DV01(), base + credit, cfs, times))
 ```
 
-The measures differ when a valuation uses the two curves differently. Pass a callback
+The measures can differ when a valuation uses the two curves differently. Pass a callback
 that receives `(base, credit)`; each measure applies a parallel shift to one curve.
 Compare the fixed cashflows with a five-year floater paying the one-year forward rate plus
 a 2% margin. The floater's coupons reset on the base curve, while every payment is
@@ -122,9 +141,10 @@ end
             cs01 = duration(CS01(), floater_value, base, credit)))
 ```
 
-The floater's IR01 is small: a base-rate move is offset at the next coupon reset, so its
-rate risk runs only to the next reset date. Its CS01 is close to that of a five-year bond,
-because the credit curve discounts every payment. For a FinanceModels contract,
+The floater's IR01 is smaller because a base-rate move changes both projected coupons
+and discount factors, with much of the exposure offsetting. Its CS01 is close to that
+of a five-year bond because the credit curve changes only discounting in this example.
+For a FinanceModels contract,
 [Floating-Rate Instruments: Effective vs Spread Duration](@ref) makes the same
 distinction between rate and credit risk.
 
@@ -143,13 +163,36 @@ Legend(fig[1, 2], [PolyElement(polycolor = c) for c in colors], ["IR01 (base cur
 fig
 ```
 
-Two-curve convexity returns the parallel `base`, `credit`, and `cross` blocks, which
-split the same way:
+Two-curve convexity returns the parallel `base`, `credit`, and `cross` blocks.
+They coincide for the fixed cashflows and can differ for the floater:
 
 ```@example sensitivities
 (fixed   = convexity(fixed_value, base, credit),
  floater = convexity(floater_value, base, credit))
 ```
+
+The `cross` block is the mixed second derivative divided by the initial value;
+it contains no extra factor of two. See [Two-curve convexity blocks](@ref) for
+the second-order P&L formula. Dollar sensitivities remain defined at zero present
+value when their derivatives are finite, but normalized convexities do not.
+Empty and all-zero cashflow streams use the separate [Zero cashflow streams](@ref)
+convention.
+
+### Curve shocks and market-quote risk
+
+These are sensitivities to the specified curve shifts, not a universal definition
+of market IR01 or CS01. For example, [CDS CS01 in OpenGamma Strata](https://strata.opengamma.io/apidocs/com/opengamma/strata/pricer/credit/SpreadSensitivityCalculator.html)
+measures sensitivity to CDS par spreads. Bumping a market quote and recalibrating
+a curve can produce a different curve change from a parallel zero-rate shift.
+Different shock coordinates or key-rate grids can therefore give different risk
+numbers even when the pricing function depends only on a combined discount curve.
+
+A bond's contractual coupons can be fixed while its expected payments depend on
+default probabilities and recovery. Such a valuation also need not satisfy the
+additive-spread identity. The fixed-cashflow forms here hold the supplied amounts
+and times fixed; use a callback or contract when payments depend on the curves.
+For sensitivities to calibration inputs, use [Market Inputs](@ref) with the curve
+construction or calibration inside the valuation.
 
 ## Key-Rate Decomposition
 
@@ -219,7 +262,9 @@ twocurve_result.base_durations
 ```
 
 The fixed-cashflow valuation is `V = Σ cf × base(t) × credit(t)`: discount factors
-multiply, so continuously compounded zero rates add.
+multiply, so continuously compounded zero rates add. Equality of the base and
+credit vectors and convexity blocks assumes the same `KeyRates` grid and bump
+functions, as these two-curve forms use.
 
 ## Market Inputs
 
