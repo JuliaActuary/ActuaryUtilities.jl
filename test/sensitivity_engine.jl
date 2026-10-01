@@ -1,6 +1,7 @@
 struct GradientOnlyContract <: FC.AbstractContract
     depths::Vector{Int}
 end
+FM.model_requirements(::GradientOnlyContract) = ()
 _dual_depth(::Type) = 0
 _dual_depth(::Type{ForwardDiff.Dual{Tag, V, N}}) where {Tag, V, N} = 1 + _dual_depth(V)
 function FC.present_value(curve::FM.Yield.AbstractYieldModel, c::GradientOnlyContract)

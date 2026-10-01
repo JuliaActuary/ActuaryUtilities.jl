@@ -401,8 +401,12 @@ Each vector sums to the floater's parallel modified duration for its curve:
 
 ## Floating-Rate Instruments: Effective vs Spread Duration
 
-Pass a FinanceModels contract or portfolio directly to reproject its cashflows.
-The marker selects the risk:
+Pass a FinanceModels contract or portfolio directly. Contract measures use the
+projection requirements FinanceModels declares for it (`FinanceModels.model_requirements`).
+With no requirements beyond the discount curve, they differentiate
+`present_value(discount, contract)`, preserving custom closed-form pricing. Otherwise they
+rebuild the projection on the bumped index curve and differentiate its value. The marker
+selects the risk:
 
 - **Effective (rate) duration** — bump the curve, coupons re-fix → small (≈ time to next reset).
 - **Spread (credit) duration** — bump the discount only, coupons fixed → ≈ maturity.
@@ -464,11 +468,12 @@ r.duration    # (; rf ≈ IR01, credit ≈ CS01, ilp = "ILP01", index = reset se
 ```
 
 Additional layers can represent liquidity, matching adjustment, or basis spreads.
-Use a callback with [`reproject`](@ref) for custom valuations:
+Use a callback with FinanceModels' `Projection` for custom valuations:
 
 ```@example sensitivities
+using FinanceModels: Projection
 sensitivities(KeyRates(tenors), (; rf, credit, ilp, index = zrc)) do c
-    present_value(c.rf + c.credit + c.ilp, reproject(floater, c.index))
+    present_value(c.rf + c.credit + c.ilp, Projection(floater; index = c.index))
 end
 ```
 

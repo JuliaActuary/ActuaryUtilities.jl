@@ -165,6 +165,7 @@ include("dollar_risk_regressions.jl")
 include("convexity_conventions.jl")
 include("stochastic_sensitivities.jl")
 include("contract_sensitivities.jl")
+include("projection_models.jl")
 include("parallel_measures.jl")
 include("market_inputs.jl")
 

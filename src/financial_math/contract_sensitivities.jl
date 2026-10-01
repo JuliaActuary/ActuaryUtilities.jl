@@ -1,30 +1,16 @@
 ## Contract and portfolio sensitivities
-# Reproject under each bumped curve so floating coupons reset. `_contract_keys`
-# identifies which contracts need a projection curve.
-
-_contract_keys(c::FinanceModels.Bond.Floating) = (c.key,)
-_contract_keys(c::FinanceCore.Composite) = (_contract_keys(c.a)..., _contract_keys(c.b)...)
-_contract_keys(c::FinanceModels.Forward) = _contract_keys(c.instrument)
-_contract_keys(::FinanceCore.AbstractContract) = ()
+# Value each contract under bumped curves, using the projection requirements FinanceModels
+# declares for it, so ActuaryUtilities keeps no list of contract types.
 
 const _Contractish = Union{FinanceCore.AbstractContract, AbstractVector{<:FinanceCore.AbstractContract}}
 
-"""
-    reproject(contract, index_curve)
-
-Project coupons using `index_curve`. Return the contract unchanged if its
-cashflows are fixed; otherwise map its model keys to `index_curve` in a `Projection`.
-"""
-reproject(c::FinanceCore.AbstractContract, index) =
-    isempty(_contract_keys(c)) ? c :
-    FinanceModels.Projection(c, Dict(k => index for k in _contract_keys(c)), FinanceModels.CashflowProjection())
-
-# Use one curve for coupon projection and discounting.
-_cvalue(c::FinanceCore.AbstractContract, curve) = FinanceCore.present_value(curve, reproject(c, curve))
-_cvalue(cs::AbstractVector{<:FinanceCore.AbstractContract}, curve) = sum(_cvalue(c, curve) for c in cs)
-# Project coupons on `fwd` and discount on `credit`.
-_cvalue2(c::FinanceCore.AbstractContract, fwd, credit) = FinanceCore.present_value(credit, reproject(c, fwd))
-_cvalue2(cs::AbstractVector{<:FinanceCore.AbstractContract}, fwd, credit) = sum(_cvalue2(c, fwd, credit) for c in cs)
+# With no projection requirements beyond the discount curve, differentiate
+# `present_value(discount, contract)`, preserving custom closed-form pricing. Otherwise
+# rebuild the projection on the bumped `index` curve, so floating coupons reset.
+_value(c::FinanceCore.AbstractContract, index, discount) =
+    isempty(FinanceModels.model_requirements(c)) ? FinanceCore.present_value(discount, c) :
+    FinanceCore.present_value(discount, FinanceModels.Projection(c; index))
+_value(cs::AbstractVector{<:FinanceCore.AbstractContract}, index, discount) = sum(_value(c, index, discount) for c in cs)
 
 """
     sensitivities(kr::KeyRates, target, curve) -> NamedTuple
@@ -49,7 +35,7 @@ continuous-zero duration; forward duration is zero. See [`duration`](@ref) with 
 [`Spread`](@ref), [`dv01`](@ref), [`zspread`](@ref), [`locked_floater`](@ref).
 """
 function sensitivities(kr::KeyRates, target::_Contractish, forward::AYM, credit::AYM)
-    return _contract_bundle(_ncurve_ad(c -> _cvalue2(target, c.forward, c.credit), (; forward, credit), kr.tenors; order = 1))
+    return _contract_bundle(_ncurve_ad(c -> _value(target, c.forward, c.credit), (; forward, credit), kr.tenors; order = 1))
 end
 # A function barrier: some projected contracts (floaters) have uninferred values.
 function _contract_bundle(r)
@@ -71,9 +57,9 @@ sensitivities(kr::KeyRates, target::_Contractish, curve::AYM) = sensitivities(kr
 
 # The value under a continuous-zero parallel shift `s` of the curves the metric moves.
 _contract_parallel_value(::Effective, target, forward, credit, s) =
-    _cvalue2(target, _parallel_bumped(forward, s), _parallel_bumped(credit, s))
+    _value(target, _parallel_bumped(forward, s), _parallel_bumped(credit, s))
 _contract_parallel_value(::Spread, target, forward, credit, s) =
-    _cvalue2(target, forward, _parallel_bumped(credit, s))
+    _value(target, forward, _parallel_bumped(credit, s))
 
 """
     duration(Effective(), target, curve)                   # rate duration, yrs
@@ -107,7 +93,7 @@ convexity(target::_Contractish, curve::AYM) = convexity(Effective(), target, cur
 
 # Parallel convexity equals the full key-rate matrix sum. The scalar callback
 # computes it directly while reprojecting coupons under each curve shock.
-convexity(::Effective, target::_Contractish, curve::AYM) = convexity(curve, c -> _cvalue(target, c))
+convexity(::Effective, target::_Contractish, curve::AYM) = convexity(curve, c -> _value(target, c, c))
 
 """
     dv01(args...)
@@ -125,7 +111,7 @@ dv01(args...; kwargs...) = duration(DV01(), args...; kwargs...)
 function sensitivities(kr::KeyRates, target::_Contractish; discount::NamedTuple, index)
     layers = keys(discount)
     return sensitivities(kr, merge(discount, (; index = index))) do c
-        _cvalue2(target, c.index, reduce(+, getfield(c, r) for r in layers))
+        _value(target, c.index, reduce(+, getfield(c, r) for r in layers))
     end
 end
 

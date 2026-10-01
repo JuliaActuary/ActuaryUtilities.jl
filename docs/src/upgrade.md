@@ -5,6 +5,7 @@
 v6 measures parallel risk without tenor grids. Single-rate inputs use their native
 shock coordinate; fixed-cashflow IR01/CS01 use the combined rate's coordinate.
 See [Shock coordinates](@ref) for the full rule.
+v6 requires FinanceModels 7.
 
 - **Curve convexity uses continuous-zero shocks.** This changes scalar convexity
   for every yield model, including constant curves, ZeroRateCurve, Nelson–Siegel,
@@ -125,6 +126,21 @@ See [Shock coordinates](@ref) for the full rule.
   about 1.96%. A zero `market_price` is also handled. Pass `tol` as a rate if you
   set it explicitly.
   Contract duration bundles compute gradients without unused Hessians.
+- **Contract measures use the projection requirements FinanceModels declares.** With no
+  requirements beyond the discount curve, they differentiate
+  `present_value(discount, contract)`, preserving custom closed-form pricing. Otherwise
+  they rebuild the projection on the bumped index curve and differentiate its value.
+  Contracts that v5 missed now work: an `InterestRateSwap`, whose floating leg is a
+  transformed contract, threw a `MethodError`.
+  **Migration:** a custom contract must declare `FinanceModels.model_requirements`
+  (`()` if it needs no projection model). v5 valued an undeclared contract as if it
+  needed none, so a custom floating contract never saw the index curve; it now throws an
+  `ArgumentError`.
+- **`reproject` is removed**, because it duplicated FinanceModels' `Projection`. Replace
+  `reproject(contract, index_curve)` with `Projection(contract; index = index_curve)`, or
+  pass a model store, `Projection(contract, Dict(key => curve, ...))`, for distinct index
+  curves or FX. `Projection` returns a `Projection` for fixed contracts too, where
+  `reproject` returned the contract itself.
 
 ## v5.11.2 to v5.12.0
 
