@@ -25,6 +25,31 @@
     end
 end
 
+@testset "Fixed-cashflow scalar measures keep the discounted cashflows' type" begin
+    # Macaulay, modified, DV01 and convexity share one shock-coordinate kernel, so rates and
+    # curves give results of the same type, empty or not, and DV01 is modified duration in
+    # dollars.
+    for (r, T) in ((0.03, Float64), (0.03f0, Float32), (big"0.03", BigFloat))
+        cfs, times = T[5, 5, 105], T[1, 2, 3]
+        for y in (r, FC.Periodic(r, 2), FC.Continuous(r), FM.Yield.Constant(FC.Continuous(r)))
+            for m in (Macaulay(), Modified(), DV01())
+                @test (@inferred duration(m, y, cfs, times)) isa T
+                @test (@inferred duration(m, y, zero(cfs), times)) isa T
+                @test (@inferred duration(m, y, cfs)) isa T
+            end
+            @test @inferred(convexity(y, cfs, times)) isa Real
+            @test duration(DV01(), y, cfs, times) ≈ duration(Modified(), y, cfs, times) * FC.pv(y, cfs, times) / 10_000
+        end
+    end
+    cfs, times = [5.0, 5.0, 105.0], [1.0, 2.0, 3.0]
+    for rate in (r -> r, r -> FC.Periodic(r, 2), r -> FC.Continuous(r), r -> FM.Yield.Constant(FC.Continuous(r)))
+        for m in (Modified(), DV01())
+            @test ForwardDiff.derivative(r -> @inferred(duration(m, rate(r), cfs, times)), 0.03) isa Float64
+        end
+        @test ForwardDiff.derivative(r -> @inferred(convexity(rate(r), cfs, times)), 0.03) isa Float64
+    end
+end
+
 @testset "Yield-model parallel measures use continuous-zero fast paths" begin
     cfs = [5.0, 5.0, 105.0]
     times = [0.5, 2.0, 3.5]

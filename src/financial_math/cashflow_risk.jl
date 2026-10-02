@@ -57,8 +57,6 @@ _zero_stream_value(yield, cfs, times) = _zero_cashflow_value(t -> FinanceCore.di
 # The same for a statistic Σ weight(t)⋅cf⋅d / divisor, so it has the nonempty formula's type.
 _zero_weighted(yield, weight, cfs, times, divisor = 1) =
     zero(weight(_zero_stream_time(cfs, times)) * _zero_stream_value(yield, cfs, times) / divisor)
-# The same for a measure the nonempty path differentiates at a `Float64` shift of 0.0.
-_zero_shifted(yield, cfs, times, divisor = 1) = zero(_zero_stream_value(yield, cfs, times) * 0.0 / divisor)
 
 # An all-zero stream in an abstractly typed collection uses the amounts present.
 function _zero_amount(cfs)

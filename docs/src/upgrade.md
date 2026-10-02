@@ -122,8 +122,13 @@ v6 requires FinanceModels 7 and FinanceCore 3.
 - New parallel forms without tenor grids: `duration(DV01(), curve) do c ... end`,
   two-curve callback IR01/CS01, and two-curve convexity blocks
   `(; base, credit, cross)` for callbacks and fixed cashflows.
-- Yield-model modified duration and DV01 for fixed cashflows use analytic
-  continuous-zero formulas instead of automatic differentiation.
+- **Fixed-cashflow duration, DV01, and convexity share one analytic kernel** in each
+  input's shock coordinate, for scalars, `Rate`s, and yield models alike. Macaulay and
+  modified duration and convexity are unchanged. DV01 for scalar and `Rate` inputs,
+  which v5 computed by automatic differentiation, can move in the last bits (at most
+  4 ulp in `Float64`). It is now computed at the rate's precision: a `Float32` rate with
+  `Float32` amounts returns a `Float32` DV01, as modified duration and yield-model DV01
+  do, where v5 returned `Float64`.
 - Callback APIs accept callable structs. Scalar cashflow APIs accept arrays,
   tuples, and finite generators. Arrays are flattened in column-major order;
   generators are collected once before valuation.

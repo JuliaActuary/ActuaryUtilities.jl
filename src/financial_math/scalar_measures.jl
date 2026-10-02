@@ -118,36 +118,40 @@ julia> duration(0.03) do i
 
 ```
 """
-function duration(::Macaulay, yield::_YieldInput, cfs::_CashflowCollection, times)
-    return _macaulay_ratio(yield, _cashflow_vector(cfs), times)
-end
+duration(yield::_YieldInput, cfs::_CashflowCollection, times...) = duration(Modified(), yield, cfs, times...)
 
-duration(d::Modified, yield::_YieldInput, cfs::_CashflowCollection, times) =
+# Tuples and generators are collected, and arrays flattened, once before the indexed kernels.
+duration(d::Union{Macaulay, Modified, DV01}, yield::_YieldInput, cfs::_CashflowCollection) =
+    duration(d, yield, _cashflow_vector(cfs))
+duration(d::Union{Macaulay, Modified, DV01}, yield::_YieldInput, cfs::_CashflowCollection, times) =
     duration(d, yield, _cashflow_vector(cfs), times)
 
-## Analytic duration for flat yields
-# Macaulay = Σ t·cf·d / Σ cf·d. Modified divides by 1+y/m for periodic rates
-# (m=1 for scalars); continuous rates and yield models use Macaulay directly.
-# Tests compare these formulas with the callback derivative of log|V|.
-_macaulay_ratio(yield, cfs, times) = _weighted_ratio(yield, identity, cfs, times)
-
-function duration(::Modified, yield::Real, cfs::AbstractVector, times)
-    return _weighted_ratio(yield, identity, cfs, times; divisor = 1 + yield)
-end
-function duration(::Modified, yield::FinanceCore.Rate{<:Real, FinanceCore.Periodic}, cfs::AbstractVector, times)
+## Analytic measures for fixed cashflows
+# Each single-rate input moves in its own shock coordinate (docs: "Shock coordinates"):
+# the moved rate's compounding gives the convexity weight t(t + 1/m), with 1/m = 0 for a
+# continuous coordinate, and the divisor 1 + y/m turns Macaulay into modified duration
+# (m = 1 for scalars; 1 for continuous rates and every yield model, which take a
+# continuous-zero shift). Tests compare these formulas with the callback derivatives.
+_coordinate(yield::Real) = (; inv_m = 1, divisor = 1 + yield)
+function _coordinate(yield::FinanceCore.Rate{<:Real, FinanceCore.Periodic})
     m = yield.compounding.frequency
-    return _weighted_ratio(yield, identity, cfs, times; divisor = 1 + FinanceCore.rate(yield) / m)
+    return (; inv_m = 1 / m, divisor = 1 + FinanceCore.rate(yield) / m)
 end
-function duration(::Modified, yield::FinanceCore.Rate{<:Real, FinanceCore.Continuous}, cfs::AbstractVector, times)
-    return _macaulay_ratio(yield, cfs, times)
-end
-function duration(::Modified, yield::FinanceModels.Yield.Constant{<:FinanceCore.Rate}, cfs::AbstractVector, times)
-    return _macaulay_ratio(yield.rate, cfs, times)
-end
-# A continuous-zero shift multiplies each fixed payment's discount by exp(-s*t),
-# so modified duration equals Macaulay duration for every yield model.
-function duration(::Modified, yield::FinanceModels.Yield.AbstractYieldModel, cfs::AbstractVector, times)
-    return _macaulay_ratio(yield, cfs, times)
+_coordinate(::Union{FinanceCore.Rate{<:Real, FinanceCore.Continuous}, FinanceModels.Yield.AbstractYieldModel}) =
+    (; inv_m = false, divisor = 1)
+
+duration(::Macaulay, yield::_YieldInput, cfs::AbstractVector, times = eachindex(cfs)) =
+    _weighted_ratio(yield, identity, cfs, times)
+duration(::Modified, yield::_YieldInput, cfs::AbstractVector, times = eachindex(cfs)) =
+    _weighted_ratio(yield, identity, cfs, times; divisor = _coordinate(yield).divisor)
+
+# -∂V/∂s is Σ t·cf·d divided by the coordinate's divisor; do not divide by V so dollar
+# exposure remains defined at zero present value.
+function duration(::DV01, yield::_YieldInput, cfs::AbstractVector, times = eachindex(cfs))
+    divisor = _coordinate(yield).divisor * 10_000
+    sums = _weighted_sums(yield, identity, cfs, times)
+    isnothing(sums) && return _zero_weighted(yield, identity, cfs, times, divisor)
+    return last(sums) / divisor
 end
 
 function duration(valuation_function::F, yield::_YieldInput) where {F}
@@ -159,40 +163,6 @@ end
 # A scalar or `Rate` moves in its own coordinate; yield models move every continuous
 # zero rate (key_rate_sensitivities.jl).
 _parallel_bumped(yield, shift) = yield + shift
-
-
-function duration(yield::_YieldInput, cfs::_CashflowCollection, times)
-    return duration(Modified(), yield, _cashflow_vector(cfs), times)
-end
-
-# Use embedded Cashflow times or default numeric amounts to periods 1:n.
-function duration(yield::_YieldInput, cfs::_CashflowCollection)
-    cfs = _cashflow_vector(cfs)
-    times = FinanceCore.timepoint.(cfs, 1:length(cfs))
-    return duration(Modified(), yield, cfs, times)
-end
-
-function duration(::DV01, yield::_YieldInput, cfs::_CashflowCollection, times)
-    cfs = _cashflow_vector(cfs)
-    times = _cashflow_times(cfs, times)
-    _iszero_cashflow_stream(cfs) && return _zero_shifted(yield, cfs, times, 10_000)
-    return duration(i -> FinanceCore.present_value(i, cfs, times), DV01(), yield)
-end
-function duration(d::Duration, yield::_YieldInput, cfs::_CashflowCollection)
-    cfs = _cashflow_vector(cfs)
-    times = FinanceCore.timepoint.(cfs, 1:length(cfs))
-    return duration(d, yield, cfs, times)
-end
-
-function duration(::DV01, yield::FinanceModels.Yield.AbstractYieldModel, cfs::_CashflowCollection, times)
-    cfs = _cashflow_vector(cfs)
-    times = _cashflow_times(cfs, times)
-    _iszero_cashflow_stream(cfs) && return _zero_weighted(yield, identity, cfs, times, 10_000)
-    # -∂V/∂s under a continuous-zero shift is Σ t·cf·d; do not divide by V so
-    # dollar exposure remains defined at zero present value.
-    _, Vt = _weighted_sums(yield, identity, cfs, times)
-    return Vt / 10_000
-end
 
 function duration(valuation_function::F, ::DV01, yield::_YieldInput) where {F}
     # Dollar risk is defined even when value is zero and relative duration is not.
@@ -227,22 +197,16 @@ julia> cfs = [5, 5, 5, 105];
 julia> times = 1:4;
 
 julia> duration(IR01(), 0.03, 0.02, cfs, times)
-0.035459505041623596
+0.0354595050416236
 
 julia> duration(IR01(), 0.03, 0.02, cfs, times) ≈ duration(DV01(), 0.05, cfs, times)
 true
 ```
 """
-function duration(::IR01, base_curve, credit_spread, cfs::_CashflowCollection, times)
+function duration(::IR01, base_curve, credit_spread, cfs::_CashflowCollection, times...)
     # Shock the combined rate in its own coordinate so IR01 and CS01 measure the
     # same one-basis-point move whatever the component input types.
-    return duration(DV01(), base_curve + credit_spread, cfs, times)
-end
-
-function duration(::IR01, base_curve, credit_spread, cfs::_CashflowCollection)
-    cfs = _cashflow_vector(cfs)
-    times = FinanceCore.timepoint.(cfs, 1:length(cfs))
-    return duration(IR01(), base_curve, credit_spread, cfs, times)
+    return duration(DV01(), base_curve + credit_spread, cfs, times...)
 end
 
 """
@@ -273,20 +237,14 @@ julia> cfs = [5, 5, 5, 105];
 julia> times = 1:4;
 
 julia> duration(CS01(), 0.03, 0.02, cfs, times)
-0.035459505041623596
+0.0354595050416236
 
 julia> duration(CS01(), 0.03, 0.02, cfs, times) ≈ duration(DV01(), 0.05, cfs, times)
 true
 ```
 """
-function duration(::CS01, base_curve, credit_spread, cfs::_CashflowCollection, times)
-    return duration(DV01(), base_curve + credit_spread, cfs, times)
-end
-
-function duration(::CS01, base_curve, credit_spread, cfs::_CashflowCollection)
-    cfs = _cashflow_vector(cfs)
-    times = FinanceCore.timepoint.(cfs, 1:length(cfs))
-    return duration(CS01(), base_curve, credit_spread, cfs, times)
+function duration(::CS01, base_curve, credit_spread, cfs::_CashflowCollection, times...)
+    return duration(DV01(), base_curve + credit_spread, cfs, times...)
 end
 
 """
@@ -343,35 +301,30 @@ julia> convexity(my_lump_sum_value,0.03)
 ```
 
 """
-convexity(yield::_YieldInput, cfs::_CashflowCollection, times) =
-    convexity(yield, _cashflow_vector(cfs), times)
+convexity(yield::_YieldInput, cfs::_CashflowCollection) = convexity(yield, _cashflow_vector(cfs))
+convexity(yield::_YieldInput, cfs::_CashflowCollection, times) = convexity(yield, _cashflow_vector(cfs), times)
 
-function convexity(yield::_YieldInput, cfs::_CashflowCollection)
-    cfs = _cashflow_vector(cfs)
-    times = FinanceCore.timepoint.(cfs, 1:length(cfs))
-    return convexity(yield, cfs, times)
-end
-
-# ── Analytic convexity for fixed cashflows ─────────────────────────────────
-#
-# Weights and divisors follow the shock coordinate. Tests compare each formula
-# with the normalized second derivative from the callback API.
+# The weight t(t + 1/m) and squared divisor of the shock coordinate (see `_coordinate`):
 #
 # * `Real` y: V(x) = Σ cf·(1+y+x)^(-t) → Σ cf·d·t(t+1) / V / (1+y)²
 # * `Rate{Periodic(m)}`: V(x) = Σ cf·(1+(y+x)/m)^(-mt) → Σ cf·d·t(t+1/m) / V / (1+y/m)²
 # * `Rate{Continuous}`: V(x) = Σ cf·e^(-(y+x)t) → Σ cf·d·t² / V
-# * `AbstractYieldModel`: it is shocked in continuous-zero space,
-#   so V(x) = Σ cf·d·exp(-xt) → Σ cf·d·t² / V.
+# * `AbstractYieldModel`: a continuous-zero shift multiplies each fixed payment's discount
+#   by exp(-xt), so V(x) = Σ cf·d·exp(-xt) → Σ cf·d·t² / V, flat curve or not. Keep the
+#   callback form for rate-dependent cashflows.
 #
 # Signed normalization makes convexity invariant to position sign.
+function convexity(yield::_YieldInput, cfs::AbstractVector, times = eachindex(cfs))
+    c = _coordinate(yield)
+    return _weighted_ratio(yield, t -> t * (t + c.inv_m), cfs, times; divisor = c.divisor^2)
+end
 
-# Shared accumulation kernel: V = Σ cf·d and Vw = Σ weight(t)·cf·d. The ratio
-# Vw / V with `weight = identity` is the Macaulay ratio (Modified-duration fast
-# paths above); the t(t+1)/t² weights below give the convexity statistics.
-# Callers handle the zero-stream shortcut; the stream must be nonempty.
+# Shared accumulation kernel: V = Σ cf·d and Vw = Σ weight(t)·cf·d. Every cashflow needs a
+# time, checked before the zero-stream test and the @inbounds loop. A zero stream returns
+# `nothing` without valuing any payment; callers return its typed zero.
 function _weighted_sums(yield, weight::W, cfs, times) where {W}
-    # Check bounds before indexing times in the @inbounds loop.
     _check_cashflow_times(cfs, times)
+    _iszero_cashflow_stream(cfs) && return nothing
     t1 = FinanceCore.timepoint(first(cfs), first(times))
     z = _cf_value(first(cfs)) * FinanceCore.discount(yield, t1)
     V = zero(z)
@@ -385,32 +338,12 @@ function _weighted_sums(yield, weight::W, cfs, times) where {W}
     return V, Vw
 end
 
-# `weight` is only forwarded here, so type it to keep this method specialized.
+# Vw / V / divisor. `weight` is only forwarded here, so type it to keep this method specialized.
 function _weighted_ratio(yield, weight::W, cfs, times; divisor = 1) where {W}
-    _check_cashflow_times(cfs, times)
-    _iszero_cashflow_stream(cfs) && return _zero_weighted(yield, weight, cfs, times, divisor)
-    V, Vw = _weighted_sums(yield, weight, cfs, times)
+    sums = _weighted_sums(yield, weight, cfs, times)
+    isnothing(sums) && return _zero_weighted(yield, weight, cfs, times, divisor)
+    V, Vw = sums
     return _risk_ratio(Vw, V; divisor)
-end
-
-function convexity(yield::Real, cfs::AbstractVector, times)
-    return _weighted_ratio(yield, t -> t * (t + 1), cfs, times; divisor = (1 + yield)^2)
-end
-function convexity(yield::FinanceCore.Rate{<:Real, FinanceCore.Periodic}, cfs::AbstractVector, times)
-    m = yield.compounding.frequency
-    return _weighted_ratio(yield, t -> t * (t + 1 / m), cfs, times; divisor = (1 + FinanceCore.rate(yield) / m)^2)
-end
-function convexity(yield::FinanceCore.Rate{<:Real, FinanceCore.Continuous}, cfs::AbstractVector, times)
-    return _weighted_ratio(yield, t -> t * t, cfs, times)
-end
-function convexity(yield::FinanceModels.Yield.AbstractYieldModel, cfs::AbstractVector, times)
-    # A continuous-zero shift multiplies each fixed payment's discount by
-    # exp(-s*t), so the t² kernel applies to every yield model, including curves
-    # that are not flat. Keep the callback form for rate-dependent cashflows.
-    return _weighted_ratio(yield, t -> t * t, cfs, times)
-end
-function convexity(yield::FinanceModels.Yield.Constant{<:FinanceCore.Rate}, cfs::AbstractVector, times)
-    return _weighted_ratio(yield.rate, t -> t * t, cfs, times)
 end
 
 function convexity(valuation_function::F, yield::_YieldInput) where {F}
