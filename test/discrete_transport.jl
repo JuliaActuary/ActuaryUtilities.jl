@@ -81,3 +81,28 @@
         @test rm(law) ≈ rm(sample)
     end
 end
+
+@testset "Integer samples do not wrap around" begin
+    # The gap between two integers is taken in the accumulator's float type, not the sample's.
+    @test wasserstein(UInt8[0], UInt8[1]) == 1
+    @test wasserstein(Int8[-100], Int8[100]) == 200
+    @test wasserstein(Int8[-100], Int8[100]; p = Inf) == 200
+    @test wasserstein([typemin(Int)], [typemax(Int)]) == Float64(typemax(Int)) - Float64(typemin(Int))
+    # The same samples in any representation give the same distance, in either order:
+    # equal sizes, unequal sizes, and finite discrete laws.
+    equal_a, equal_b = [0, 3, 7, 120], [5, 1, 127, 0]
+    short = [100, 2, 9]
+    law(T, xs, ps) = DiscreteNonParametric(T.(xs), ps)
+    for p in (1, 2, Inf), (a, b) in ((equal_a, equal_b), (equal_a, short), (short, equal_b))
+        reference = wasserstein(Float64.(a), Float64.(b); p)
+        laws = ((T -> law(T, [0, 3, 120], [0.2, 0.3, 0.5])), (T -> law(T, [5, 127], [0.6, 0.4])))
+        law_reference = wasserstein(laws[1](Float64), laws[2](Float64); p)
+        for T in (UInt8, Int8, Int64, Float64)
+            @test wasserstein(T.(a), T.(b); p) == reference
+            @test wasserstein(T.(b), T.(a); p) == reference
+            @test wasserstein(laws[1](T), laws[2](T); p) == law_reference
+            @test wasserstein(laws[2](T), laws[1](T); p) == law_reference
+            @test wasserstein(T.(a), laws[2](T); p) == wasserstein(Float64.(a), laws[2](Float64); p)
+        end
+    end
+end

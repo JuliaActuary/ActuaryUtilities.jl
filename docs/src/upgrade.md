@@ -161,6 +161,12 @@ v6 requires FinanceModels 7 and FinanceCore 3.
   contributes zero, so a total loss (contributions only) returns `0.0`. Without
   contributions the ratio divides by zero: `Inf` for positive distributions, and `NaN`
   (undefined) for an empty or all-zero stream. v5 threw an `ArgumentError` for these.
+- **`wasserstein` no longer wraps around on integer samples.** The gap between two
+  quantiles was taken in the samples' own integer type: `wasserstein(UInt8[0], UInt8[1])`
+  returned 255 and `wasserstein(Int8[-100], Int8[100])` returned 56. Gaps are now taken in
+  the result's floating-point type, so these return 1 and 200, and every representation of
+  the same samples gives the same distance. `Float32` samples' gaps are no longer rounded to
+  `Float32` first, which can change results in the last bits.
 - **`spread` and `zspread` stop on the Newton step, not the price residual.** Their
   `tol` keyword now bounds the final Newton step in rate units (default `1e-12`)
   instead of the remaining price difference in currency. Results no longer depend on
