@@ -215,6 +215,10 @@ function duration(::DV01, kr::KeyRates, curve::AYM, cfs::AbstractVector, times =
     return _per_bp(r, r.gradient.curve)
 end
 
+# The curve role each two-curve measure bumps.
+_role(::IR01) = :base
+_role(::CS01) = :credit
+
 """
     duration(valuation_fn, ::IR01, base::AbstractYieldModel, credit::AbstractYieldModel) -> scalar
     duration(valuation_fn, ::IR01, kr::KeyRates, base, credit) -> Vector
@@ -240,10 +244,6 @@ duration(IR01(), base, credit) do b, c
 end
 ```
 """
-# The curve role each two-curve measure bumps.
-_role(::IR01) = :base
-_role(::CS01) = :credit
-
 function duration(valuation_fn::F, m::Union{IR01, CS01}, base::AYM, credit::AYM) where {F}
     r = _keyrate((; base, credit), _PARALLEL_GRID, valuation_fn)
     return _per_bp(r, only(r.gradient[_role(m)]))
