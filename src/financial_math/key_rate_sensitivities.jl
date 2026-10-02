@@ -22,8 +22,13 @@ const AYM = FinanceModels.Yield.AbstractYieldModel
     end
 end
 
-# The hat-function bump at `t`.
-_hat_bump(tenors, bumps, t) = ((i, wi, j, wj) = _active_hats(tenors, t); wi * bumps[i] + wj * bumps[j])
+# The hat-function bump at `t`. A lone knot's hat is flat, so a one-knot grid is a parallel
+# shift; beyond the endpoints, the end hats stay at their bumps.
+function _hat_bump(tenors, bumps, t)
+    length(bumps) == 1 && return only(bumps)
+    i, wi, j, wj = _active_hats(tenors, t)
+    return i == j ? bumps[i] : wi * bumps[i] + wj * bumps[j]
+end
 
 # Layer a hat-function zero-rate bump over `curve` lazily.
 _bumped(curve, tenors, bumps) = FinanceModels.Yield.TenorShift(
