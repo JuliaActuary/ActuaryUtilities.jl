@@ -71,10 +71,10 @@
 
     @testset "named curves and named inputs dispatch separately" begin
         curve = linear(zeros_)
-        by_curve = sensitivities(KeyRates(tenors), c -> FC.present_value(c.curve, cfs, times), (; curve))
+        by_curve = sensitivities(c -> FC.present_value(c.curve, cfs, times), KeyRates(tenors), (; curve))
         @test by_curve.key_rate.curve ≈ duration(KeyRates(tenors), curve, cfs, times) rtol = 1.0e-12
         @test by_curve.key_rate_dv01.curve ≈ duration(DV01(), KeyRates(tenors), curve, cfs, times) rtol = 1.0e-12
-        @test_throws MethodError sensitivities(KeyRates(tenors), c -> 0.0, (; rate = 0.03))
+        @test_throws MethodError sensitivities(c -> 0.0, KeyRates(tenors), (; rate = 0.03))
         @test_throws MethodError sensitivities(m -> 0.0, (; rate = 0.03))
     end
 

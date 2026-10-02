@@ -139,7 +139,7 @@
             sum(cf * curve(t) for (cf, t) in zip(bond1_cfs, bond1_times)) +
                 sum(cf * curve(t) for (cf, t) in zip(bond2_cfs, bond2_times))
         end
-        portfolio_dv01 = duration(DV01(), KeyRates(tenors), portfolio_valuation, zrc)
+        portfolio_dv01 = duration(portfolio_valuation, DV01(), KeyRates(tenors), zrc)
 
         # Individual DV01s
         dv01_1 = duration(DV01(), KeyRates(tenors), zrc, bond1_cfs, bond1_times)
@@ -170,8 +170,8 @@ FC.discount(c::CompositeTwoFlatYield, t) = FC.discount(c.base, t) * FC.discount(
     pv(c) = sum(cf * FC.discount(c, t) for (cf, t) in zip(cfs, times))
 
     @testset "scalar duration matches sum of KRDs" begin
-        sd = duration(curve, pv)
-        krds = duration(KeyRates(tenors), pv, curve)
+        sd = duration(pv, curve)
+        krds = duration(pv, KeyRates(tenors), curve)
         @test sd ≈ sum(krds) atol = 1.0e-10
     end
 
@@ -189,12 +189,12 @@ FC.discount(c::CompositeTwoFlatYield, t) = FC.discount(c.base, t) * FC.discount(
         dfs = [exp(-rate * t) for t in times]
         V = sum(cf * df for (cf, df) in zip(cfs, dfs))
         mac = sum(t * cf * df for (t, cf, df) in zip(times, cfs, dfs)) / V
-        @test duration(curve, pv) ≈ mac atol = 1.0e-6
+        @test duration(pv, curve) ≈ mac atol = 1.0e-6
     end
 
     @testset "DV01" begin
-        dv01 = duration(DV01(), curve, pv)
-        krd_dv01 = duration(DV01(), KeyRates(tenors), pv, curve)
+        dv01 = duration(pv, DV01(), curve)
+        krd_dv01 = duration(pv, DV01(), KeyRates(tenors), curve)
         @test dv01 ≈ sum(krd_dv01) atol = 1.0e-10
         @test all(krd_dv01 .≥ 0)
     end
@@ -204,33 +204,33 @@ FC.discount(c::CompositeTwoFlatYield, t) = FC.discount(c.base, t) * FC.discount(
         # alone, credit alone, or the composite all shift the total zero rate
         # by 1bp — so IR01 ≈ CS01 ≈ DV01 individually.
         pv2c(b, c) = sum(cf * FC.discount(b, t) * FC.discount(c, t) for (cf, t) in zip(cfs, times))
-        ir01 = duration(IR01(), pv2c, base, spread)
-        cs01 = duration(CS01(), pv2c, base, spread)
-        dv01 = duration(DV01(), curve, pv)
+        ir01 = duration(pv2c, IR01(), base, spread)
+        cs01 = duration(pv2c, CS01(), base, spread)
+        dv01 = duration(pv, DV01(), curve)
         @test ir01 ≈ cs01 atol = 1.0e-10
         @test ir01 ≈ dv01 atol = 1.0e-10
     end
 
     @testset "convexity matrix symmetric, scalar = sum" begin
-        cmat = convexity(KeyRates(tenors), pv, curve)
+        cmat = convexity(pv, KeyRates(tenors), curve)
         @test cmat ≈ cmat' atol = 1.0e-10
-        @test convexity(curve, pv) ≈ sum(cmat) atol = 1.0e-10
+        @test convexity(pv, curve) ≈ sum(cmat) atol = 1.0e-10
     end
 
     @testset "sensitivities bundle" begin
         r = sensitivities(KeyRates(tenors), curve, cfs, times)
         @test r.value ≈ pv(curve) atol = 1.0e-10        # exact baseline; no resampling
-        @test r.durations ≈ duration(KeyRates(tenors), pv, curve) atol = 1.0e-10
-        @test sum(r.durations) ≈ duration(curve, pv) atol = 1.0e-10
+        @test r.durations ≈ duration(pv, KeyRates(tenors), curve) atol = 1.0e-10
+        @test sum(r.durations) ≈ duration(pv, curve) atol = 1.0e-10
         @test r.convexities ≈ r.convexities' atol = 1.0e-10
 
         r_dv01 = sensitivities(DV01(), KeyRates(tenors), curve, cfs, times)
-        @test r_dv01.dv01s ≈ duration(DV01(), KeyRates(tenors), pv, curve) atol = 1.0e-10
+        @test r_dv01.dv01s ≈ duration(pv, DV01(), KeyRates(tenors), curve) atol = 1.0e-10
     end
 
     @testset "two-curve sensitivities" begin
         pv2c(b, c) = sum(cf * FC.discount(b, t) * FC.discount(c, t) for (cf, t) in zip(cfs, times))
-        r = sensitivities(KeyRates(tenors), pv2c, base, spread)
+        r = sensitivities(pv2c, KeyRates(tenors), base, spread)
         @test r.value ≈ pv2c(base, spread) atol = 1.0e-10
         @test r.base_durations ≈ r.credit_durations atol = 1.0e-10   # additive ⇒ symmetric
     end
@@ -239,8 +239,8 @@ FC.discount(c::CompositeTwoFlatYield, t) = FC.discount(c.base, t) * FC.discount(
         # With Spline.Linear, ZRC's KRDs match TenorShift+hat exactly because
         # linear interpolation in zero-rate space ≡ triangular-hat bumps.
         zrc = FM.Yield.ZeroRateCurve(curve, tenors, spline = FM.Spline.Linear())
-        krds_zrc = duration(KeyRates(tenors), pv, zrc)
-        krds_custom = duration(KeyRates(tenors), pv, curve)
+        krds_zrc = duration(pv, KeyRates(tenors), zrc)
+        krds_custom = duration(pv, KeyRates(tenors), curve)
         @test krds_custom ≈ krds_zrc atol = 1.0e-10
     end
 
@@ -251,8 +251,8 @@ FC.discount(c::CompositeTwoFlatYield, t) = FC.discount(c.base, t) * FC.discount(
         ns_base = FM.Yield.NelsonSiegel(1.0, 0.04, -0.02, 0.01)
         flat_spr = FM.Yield.Constant(FC.Continuous(0.012))
         curve_nf = CompositeTwoFlatYield(ns_base, flat_spr)
-        krds_nf = duration(KeyRates(tenors), pv, curve_nf)
-        @test sum(krds_nf) ≈ duration(curve_nf, pv) atol = 1.0e-10
+        krds_nf = duration(pv, KeyRates(tenors), curve_nf)
+        @test sum(krds_nf) ≈ duration(pv, curve_nf) atol = 1.0e-10
         @test argmax(krds_nf) == lastindex(tenors)   # sensitivity peaks at the long end
     end
 end
@@ -354,11 +354,11 @@ end
     @test @inferred(sensitivities(kr, curve, credit, amts, times)).convexities.cross isa Matrix{Float64}
     @test @inferred(sensitivities(DV01(), kr, curve, amts, times)).dv01s isa Vector{Float64}
     @test @inferred(sensitivities(kr, (; a = curve, b = credit, c = credit), amts, times)).convexities.c.a isa Matrix{Float64}
-    @test @inferred(duration(kr, one_curve, curve)) isa Vector{Float64}
-    @test @inferred(duration(CS01(), two_curves, curve, credit)) isa Float64
-    @test @inferred(sensitivities(kr, two_curves, curve, credit)).credit_durations isa Vector{Float64}
-    @test @inferred(sensitivities(kr, named, (; a = curve, b = credit))).key_rate.b isa Vector{Float64}
-    @test @inferred(sensitivities(kr, c -> one_curve(c.a), (; a = curve))).key_rate.a isa Vector{Float64}
+    @test @inferred(duration(one_curve, kr, curve)) isa Vector{Float64}
+    @test @inferred(duration(two_curves, CS01(), curve, credit)) isa Float64
+    @test @inferred(sensitivities(two_curves, kr, curve, credit)).credit_durations isa Vector{Float64}
+    @test @inferred(sensitivities(named, kr, (; a = curve, b = credit))).key_rate.b isa Vector{Float64}
+    @test @inferred(sensitivities(c -> one_curve(c.a), kr, (; a = curve))).key_rate.a isa Vector{Float64}
     # Market inputs share the named-role engine and result.
     inputs = m -> FC.pv(FM.Yield.Constant(FC.Continuous(m.r[1] + m.s[2])), amts, times)
     @test @inferred(sensitivities(inputs, (; r = [0.03], s = [0.01, 0.02]))).key_rate.s isa Vector{Float64}

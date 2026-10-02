@@ -11,7 +11,7 @@ Plain scalar inputs use annual compounding; explicit `Rate` inputs use their
 specified compounding. A curve's initial discount factors are preserved.
 
 In v6.0, scalar convexity changes for every yield-model type. Both
-`convexity(curve, cfs, times)` and `convexity(curve, valuation_function)` equal
+`convexity(curve, cfs, times)` and `convexity(valuation_function, curve)` equal
 the sum of the full key-rate convexity matrix. See [Shock coordinates](@ref) for
 the coordinate each input uses.
 
@@ -119,9 +119,9 @@ julia> valuation(c) = pv(c, cfs, times);
 julia> kr = KeyRates(times);
 
 julia> results = (convexity(curve, cfs, times),       # analytic fast path
-                 convexity(curve, valuation),       # scalar AutoDiff
+                 convexity(valuation, curve),       # scalar AutoDiff
                  sum(convexity(kr, curve, cfs, times)),
-                 sum(convexity(kr, valuation, curve)));
+                 sum(convexity(valuation, kr, curve)));
 
 julia> round.(results; digits=6)
 (8.400872, 8.400872, 8.400872, 8.400872)
@@ -177,7 +177,7 @@ nonzero off-diagonal entries:
 ```jldoctest convexity_conventions
 julia> K = convexity(KeyRates([1.0, 3.0]), curve, cfs, times);
 
-julia> (sum(K) ≈ convexity(curve, valuation),
+julia> (sum(K) ≈ convexity(valuation, curve),
         K[1, 2] > 0,
         K[1, 1] + K[2, 2] < sum(K))
 (true, true, true)

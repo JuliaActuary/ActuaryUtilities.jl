@@ -42,8 +42,8 @@
         end
         # Price at embedded dates without using the normalization helpers.
         value(c) = sum(cfs[k] * FC.discount(c, times[k]) for k in eachindex(cfs))
-        @test _same_sensitivity(sensitivities(kr, curve, wrapped, fallback), sensitivities(kr, value, curve))
-        @test sum(convexity(kr, curve, wrapped, fallback)) ≈ convexity(curve, value)
+        @test _same_sensitivity(sensitivities(kr, curve, wrapped, fallback), sensitivities(value, kr, curve))
+        @test sum(convexity(kr, curve, wrapped, fallback)) ≈ convexity(value, curve)
         @test duration(kr, curve, wrapped) ≈ duration(kr, curve, wrapped, fallback)
         @test _same_sensitivity(sensitivities(kr, layers, wrapped), sensitivities(kr, layers, wrapped, fallback))
     end

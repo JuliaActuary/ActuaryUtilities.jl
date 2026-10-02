@@ -10,7 +10,7 @@
     portfolio = [fixed, swap, forward]
     for c in (floater, swap, forward, portfolio)
         explicit(cs) = FC.pv(FM.Models(cs.credit, Dict(:index => cs.index)), c)
-        reference = sensitivities(KeyRates(tenors), explicit, (; index, credit))
+        reference = sensitivities(explicit, KeyRates(tenors), (; index, credit))
         actual = sensitivities(KeyRates(tenors), c, index, credit)
         @test actual.value ≈ reference.value
         @test actual.forward_key_rate ≈ reference.key_rate.index
@@ -55,14 +55,14 @@ end
     for (composite, parts) in ((FC.Composite(pair, pair), (pair, pair)), (FC.Composite(pair, bond), (pair, bond)))
         # A composite is worth the sum of its parts, under every bumped curve.
         value(c) = sum(FC.pv(c, p) for p in parts)
-        @test duration(Effective(), composite, curve) ≈ duration(curve, value)
-        @test duration(Spread(), composite, curve) ≈ duration(curve, value)
-        @test convexity(Effective(), composite, curve) ≈ convexity(curve, value)
+        @test duration(Effective(), composite, curve) ≈ duration(value, curve)
+        @test duration(Spread(), composite, curve) ≈ duration(value, curve)
+        @test convexity(Effective(), composite, curve) ≈ convexity(value, curve)
         @test dv01(composite, curve) ≈ sum(dv01(p, curve) for p in parts)
         s = sensitivities(kr, composite, curve)
         @test s.value ≈ value(curve)
-        @test s.effective_key_rate ≈ duration(kr, value, curve)
-        @test duration(Effective(), [composite, bond], curve) ≈ duration(curve, c -> value(c) + FC.pv(c, bond))
+        @test s.effective_key_rate ≈ duration(value, kr, curve)
+        @test duration(Effective(), [composite, bond], curve) ≈ duration(c -> value(c) + FC.pv(c, bond), curve)
     end
 end
 
@@ -78,8 +78,8 @@ FC.present_value(ctx, c::ClosedFormFloater) = FC.discount(ctx, 2.0) / FC.discoun
     floater = ClosedFormFloater(:index)
     reset(c) = FC.pv(FM.Models(c, Dict(:index => c)), floater)
     held(c) = FC.pv(FM.Models(c, Dict(:index => curve)), floater)
-    @test duration(Effective(), floater, curve) ≈ duration(curve, reset)
-    @test duration(Spread(), floater, curve) ≈ duration(curve, held)
+    @test duration(Effective(), floater, curve) ≈ duration(reset, curve)
+    @test duration(Spread(), floater, curve) ≈ duration(held, curve)
     # Rate risk ends at the reset; spread risk runs to payment.
     @test duration(Effective(), floater, curve) ≈ 1.0
     @test duration(Spread(), floater, curve) ≈ 2.0

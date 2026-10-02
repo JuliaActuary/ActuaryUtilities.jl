@@ -176,7 +176,7 @@ end
         vf_no_tenor = convexity(zrc) do c
             sum(cf * FC.discount(c, t) for (cf, t) in zip(cfs, times))
         end
-        vf_matrix = sum(convexity(KeyRates(tenors), c -> sum(cf * FC.discount(c, t) for (cf, t) in zip(cfs, times)), zrc))
+        vf_matrix = sum(convexity(c -> sum(cf * FC.discount(c, t) for (cf, t) in zip(cfs, times)), KeyRates(tenors), zrc))
         @test vf_no_tenor ≈ no_tenor_form atol = 1.0e-12
         @test vf_no_tenor ≈ vf_matrix atol = 1.0e-8
 
@@ -274,8 +274,8 @@ end
 
         # Callback forms bump one curve role with a parallel shift.
         pv2(b, c) = FC.present_value(b + c, cfs, tenors)
-        @test duration(IR01(), pv2, base, credit) ≈ sum(duration(IR01(), KeyRates(tenors), pv2, base, credit)) atol = 1.0e-12
-        @test duration(CS01(), pv2, base, credit) ≈ sum(duration(CS01(), KeyRates(tenors), pv2, base, credit)) atol = 1.0e-12
+        @test duration(pv2, IR01(), base, credit) ≈ sum(duration(pv2, IR01(), KeyRates(tenors), base, credit)) atol = 1.0e-12
+        @test duration(pv2, CS01(), base, credit) ≈ sum(duration(pv2, CS01(), KeyRates(tenors), base, credit)) atol = 1.0e-12
         @test duration(IR01(), base, credit) do b, c
             pv2(b, c)
         end ≈ scalar_ir01 atol = 1.0e-12

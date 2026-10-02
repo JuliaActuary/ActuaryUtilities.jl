@@ -121,7 +121,8 @@ credit = ZeroRateCurve([0.02, 0.02, 0.02, 0.02, 0.02], tenors)
 ```
 
 The measures can differ when a valuation uses the two curves differently. Pass a callback
-that receives `(base, credit)`; each measure applies a parallel shift to one curve.
+that receives `(base, credit)`, before the marker; each measure applies a parallel shift
+to one curve.
 Compare the fixed cashflows with a five-year floater paying the one-year forward rate plus
 a 2% margin. The floater's coupons reset on the base curve, while every payment is
 discounted at `base + credit`:
@@ -135,10 +136,10 @@ floater_value(b, c) = sum(1:5) do t
     (coupon + (t == 5 ? 100 : 0)) * discount(b + c, t)       # discounted at base + credit
 end
 
-(fixed   = (ir01 = duration(IR01(), fixed_value, base, credit),
-            cs01 = duration(CS01(), fixed_value, base, credit)),
- floater = (ir01 = duration(IR01(), floater_value, base, credit),
-            cs01 = duration(CS01(), floater_value, base, credit)))
+(fixed   = (ir01 = duration(fixed_value, IR01(), base, credit),
+            cs01 = duration(fixed_value, CS01(), base, credit)),
+ floater = (ir01 = duration(floater_value, IR01(), base, credit),
+            cs01 = duration(floater_value, CS01(), base, credit)))
 ```
 
 The floater's IR01 is smaller because a base-rate move changes both projected coupons
@@ -151,8 +152,8 @@ distinction between rate and credit risk.
 ```@example sensitivities
 using CairoMakie
 
-ir01s = [duration(IR01(), v, base, credit) for v in (fixed_value, floater_value)]
-cs01s = [duration(CS01(), v, base, credit) for v in (fixed_value, floater_value)]
+ir01s = [duration(v, IR01(), base, credit) for v in (fixed_value, floater_value)]
+cs01s = [duration(v, CS01(), base, credit) for v in (fixed_value, floater_value)]
 
 fig = Figure(size = (650, 320))
 ax = Axis(fig[1, 1]; title = "Rate vs credit sensitivity", ylabel = "Value lost per +1bp",
@@ -378,7 +379,8 @@ value, although dollar sensitivity can remain finite.
 
 ## Callable Valuations
 
-A valuation can be a function or a callable struct that holds its input data:
+Every callback form takes the valuation first, then any marker, then the rate, curves,
+or inputs. A valuation can be a function or a callable struct that holds its input data:
 
 ```@example sensitivities
 struct CashflowValuation{C, T}
@@ -388,12 +390,19 @@ end
 (v::CashflowValuation)(curve) = pv(curve, v.amounts, v.times)
 
 valuation = CashflowValuation(cfs, tenors)
-duration(zrc, valuation)
-convexity(zrc, valuation)
-sensitivities(KeyRates(tenors), valuation, zrc)
+duration(valuation, zrc)
+convexity(valuation, zrc)
+sensitivities(valuation, KeyRates(tenors), zrc)
 ```
 
-All callback APIs accept callable objects. Functions also support do-block syntax.
+Because the valuation comes first, do-block syntax works for every input, including
+scalar and `Rate` inputs:
+
+```@example sensitivities
+duration(DV01(), Periodic(0.03, 2)) do rate
+    pv(rate, cfs, times)
+end
+```
 
 ## Using Cashflow Objects
 

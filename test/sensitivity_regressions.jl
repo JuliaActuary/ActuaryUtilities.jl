@@ -47,14 +47,14 @@ end
         amounts = sign .* cfs
         vf(c) = sign * valuation(c)
         @test duration(curve, amounts, tenors) ≈ expected_duration
-        @test duration(curve, vf) ≈ expected_duration
-        @test sum(duration(kr, vf, curve)) ≈ expected_duration
-        @test duration(kr, vf, curve) ≈ duration(kr, curve, amounts, tenors)
+        @test duration(vf, curve) ≈ expected_duration
+        @test sum(duration(vf, kr, curve)) ≈ expected_duration
+        @test duration(vf, kr, curve) ≈ duration(kr, curve, amounts, tenors)
         @test convexity(curve, amounts, tenors) ≈ expected_convexity
-        @test sum(convexity(kr, vf, curve)) ≈ expected_convexity
-        @test convexity(kr, vf, curve) ≈ convexity(kr, curve, amounts, tenors)
+        @test sum(convexity(vf, kr, curve)) ≈ expected_convexity
+        @test convexity(vf, kr, curve) ≈ convexity(kr, curve, amounts, tenors)
         @test duration(DV01(), curve, amounts, tenors) ≈ sign * value * expected_duration / 10_000
-        @test sum(duration(DV01(), kr, vf, curve)) ≈ sign * value * expected_duration / 10_000
+        @test sum(duration(vf, DV01(), kr, curve)) ≈ sign * value * expected_duration / 10_000
     end
     bond = FM.Bond.Fixed(0.05, FC.Periodic(1), 3.0)
     reference = FM.Yield.Constant(FC.Periodic(0.04, 1))
@@ -95,11 +95,11 @@ end
     bond = FM.Bond.Fixed(0.05, FC.Periodic(1), 3.0)
     for curve in (FM.Yield.Constant(FC.Continuous(0.04)), FM.ZeroRateCurve([0.03, 0.04, 0.05], times))
         valuation = CashflowValue(cfs, times)
-        reference = convexity(curve, valuation)
+        reference = convexity(valuation, curve)
         @test convexity(curve, cfs, times) ≈ reference
         @test convexity(curve, wrapped) ≈ reference
-        @test convexity(Effective(), bond, curve) ≈ convexity(curve, c -> FC.pv(c, bond))
-        @test convexity(Effective(), [bond], curve) ≈ convexity(curve, c -> FC.pv(c, bond))
+        @test convexity(Effective(), bond, curve) ≈ convexity(c -> FC.pv(c, bond), curve)
+        @test convexity(Effective(), [bond], curve) ≈ convexity(c -> FC.pv(c, bond), curve)
         @test iszero(convexity(curve, Float64[], Float64[]))
         @test iszero(convexity(curve, zeros(3), times))
         @test iszero(convexity(curve, empty(wrapped)))

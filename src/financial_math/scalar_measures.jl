@@ -20,7 +20,8 @@ _cashflow_vector(cfs::Union{Tuple, Base.Generator}) = _cashflow_vector(collect(c
     duration(IR01(),base_curve,credit_spread,cfs,times)
     duration(CS01(),base_curve,credit_spread,cfs,times)
     duration(interest_rate,cfs,times)             # Modified Duration
-    duration(interest_rate,valuation_function)    # Modified Duration
+    duration(valuation_function,interest_rate)    # Modified Duration
+    duration(valuation_function,DV01(),interest_rate)
 
 Calculate Macaulay or modified duration, or signed dollar DV01, IR01, or CS01.
 For numeric amounts, omitted `times` default to `1:length(cfs)`.
@@ -101,15 +102,19 @@ julia> convexity(0.03,cfs,times)
 
 ```
 
-Using any given value function:
+Using any given value function, passed first so that do-block syntax works:
 
 ```julia-repl
 julia> lump_sum_value(amount,years,i) = amount / (1 + i ) ^ years
 julia> my_lump_sum_value(i) = lump_sum_value(100,5,i)
-julia> duration(0.03,my_lump_sum_value)
+julia> duration(my_lump_sum_value,0.03)
 4.854368932038835
-julia> convexity(0.03,my_lump_sum_value)
+julia> convexity(my_lump_sum_value,0.03)
 28.277877274012642
+julia> duration(0.03) do i
+           lump_sum_value(100,5,i)
+       end
+4.854368932038835
 
 ```
 """
@@ -145,10 +150,10 @@ function duration(::Modified, yield::FinanceModels.Yield.AbstractYieldModel, cfs
     return _macaulay_ratio(yield, cfs, times)
 end
 
-function duration(yield, valuation_function::T) where {T}
+function duration(valuation_function::F, yield::_YieldInput) where {F}
     # log|V| supports both asset and liability values.
     D(i) = log(abs(valuation_function(_parallel_bumped(yield, i))))
-    return δV = -ForwardDiff.derivative(D, 0.0)
+    return -ForwardDiff.derivative(D, 0.0)
 end
 
 # A scalar or `Rate` moves in its own coordinate; yield models move every continuous
@@ -171,7 +176,7 @@ function duration(::DV01, yield::_YieldInput, cfs::_CashflowCollection, times)
     cfs = _cashflow_vector(cfs)
     times = _cashflow_times(cfs, times)
     _iszero_cashflow_stream(cfs) && return _zero_shifted(yield, cfs, times, 10_000)
-    return duration(DV01(), yield, i -> FinanceCore.present_value(i, cfs, times))
+    return duration(i -> FinanceCore.present_value(i, cfs, times), DV01(), yield)
 end
 function duration(d::Duration, yield::_YieldInput, cfs::_CashflowCollection)
     cfs = _cashflow_vector(cfs)
@@ -189,11 +194,7 @@ function duration(::DV01, yield::FinanceModels.Yield.AbstractYieldModel, cfs::_C
     return Vt / 10_000
 end
 
-# Prefer cashflow collections over the generic DV01 callback.
-duration(d::DV01, yield::_YieldInput, cfs::_CashflowCollection) =
-    invoke(duration, Tuple{Duration, _YieldInput, _CashflowCollection}, d, yield, cfs)
-
-function duration(::DV01, yield, valuation_function::Y) where {Y}
+function duration(valuation_function::F, ::DV01, yield::_YieldInput) where {F}
     # Dollar risk is defined even when value is zero and relative duration is not.
     return -ForwardDiff.derivative(i -> valuation_function(_parallel_bumped(yield, i)), 0.0) / 10_000
 end
@@ -290,7 +291,7 @@ end
 
 """
     convexity(yield,cfs,times)
-    convexity(yield,valuation_function)
+    convexity(valuation_function,yield)
 
 Calculates the normalized second derivative of value under a parallel rate shock.
 `yield` may be a scalar annual yield (e.g. `0.05`), an explicit `Rate`, or an
@@ -334,9 +335,9 @@ Using any given value function:
 ```julia-repl
 julia> lump_sum_value(amount,years,i) = amount / (1 + i ) ^ years
 julia> my_lump_sum_value(i) = lump_sum_value(100,5,i)
-julia> duration(0.03,my_lump_sum_value)
+julia> duration(my_lump_sum_value,0.03)
 4.854368932038835
-julia> convexity(0.03,my_lump_sum_value)
+julia> convexity(my_lump_sum_value,0.03)
 28.277877274012642
 
 ```
@@ -412,21 +413,8 @@ function convexity(yield::FinanceModels.Yield.Constant{<:FinanceCore.Rate}, cfs:
     return _weighted_ratio(yield.rate, t -> t * t, cfs, times)
 end
 
-function convexity(yield, valuation_function::T) where {T}
+function convexity(valuation_function::F, yield::_YieldInput) where {F}
     v(x) = abs(valuation_function(_parallel_bumped(yield, x)))
     ∂²P = ForwardDiff.derivative(y -> ForwardDiff.derivative(v, y), 0.0)
     return ∂²P / v(0.0)
-end
-
-
-## Scalar do-block forwarding for AbstractYieldModel
-#
-# Forwards `duration(vf, curve)` and `convexity(vf, curve)` (no tenors) to the
-# scalar continuous-zero-shock paths for yield models.
-
-function duration(valuation_fn::Function, yield::FinanceModels.Yield.AbstractYieldModel)
-    return duration(yield, valuation_fn)
-end
-function convexity(valuation_fn::Function, yield::FinanceModels.Yield.AbstractYieldModel)
-    return convexity(yield, valuation_fn)
 end

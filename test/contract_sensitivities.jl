@@ -32,7 +32,7 @@
         # Reproject coupons under each shock; scalar and matrix-sum risk must agree.
         flm_value(c) = FC.present_value(FM.Models(c; index = c), flm)
         @test convexity(Effective(), flm, curve) ≈
-            sum(convexity(KeyRates(tenors), flm_value, curve)) atol = 1.0e-10
+            sum(convexity(flm_value, KeyRates(tenors), curve)) atol = 1.0e-10
     end
 
     @testset "fixed bond: effective convexity equals the key-rate matrix sum" begin
@@ -56,6 +56,11 @@
             @test duration(target, curve) ≈ s.effective_duration atol = 1.0e-12
             @test duration(Spread(), target, curve) ≈ s.spread_duration atol = 1.0e-12
             @test dv01(Spread(), target, curve) ≈ s.spread_dv01 atol = 1.0e-12
+            # Unmarked key-rate DV01s and convexities are effective risk too.
+            kr = KeyRates(tenors)
+            @test duration(DV01(), kr, target, curve) ≈ s.effective_key_rate .* s.value ./ 10_000 atol = 1.0e-12
+            @test dv01(kr, target, curve) == duration(DV01(), kr, target, curve)
+            @test sum(convexity(kr, target, curve)) ≈ convexity(target, curve) atol = 1.0e-10
         end
         @test (@inferred dv01(fb, curve)) isa Float64
         @test (@inferred convexity(fb, curve)) isa Float64

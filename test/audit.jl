@@ -2,7 +2,7 @@
 @testset "analytic fast paths match the generic AD path" begin
     # The generic scalar path uses the input's own compounding convention for
     # rates and a continuous-zero shift for yield models.
-    generic_duration(yield, cfs, times) = duration(yield, i -> ActuaryUtilities.FinancialMath.price(i, cfs, times))
+    generic_duration(yield, cfs, times) = duration(i -> ActuaryUtilities.FinancialMath.price(i, cfs, times), yield)
     parallel_bump(yield, x) = yield + x
     parallel_bump(yield::FM.Yield.AbstractYieldModel, x) =
         FM.Yield.TenorShift(yield, (z, t) -> FC.Continuous(x) + z)
@@ -265,8 +265,8 @@ end
 
 @testset "duration with a negative-valued valuation function" begin
     liability(i) = -100 / (1 + i)^5
-    @test duration(0.03, liability) ≈ duration(0.03, i -> 100 / (1 + i)^5)
-    @test convexity(0.03, liability) ≈ convexity(0.03, i -> 100 / (1 + i)^5)
+    @test duration(liability, 0.03) ≈ duration(i -> 100 / (1 + i)^5, 0.03)
+    @test convexity(liability, 0.03) ≈ convexity(i -> 100 / (1 + i)^5, 0.03)
 end
 
 @testset "mismatched cfs/times lengths error loudly" begin

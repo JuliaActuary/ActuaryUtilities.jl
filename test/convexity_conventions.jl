@@ -20,9 +20,9 @@
     ad_reference = ForwardDiff.derivative(s -> ForwardDiff.derivative(shifted_price, s), 0.0) / value
     @test ad_reference ≈ continuous
     @test convexity(curve, cfs, times) ≈ ad_reference # constant-curve analytic path
-    @test convexity(curve, valuation) ≈ ad_reference # scalar nested AD
+    @test convexity(valuation, curve) ≈ ad_reference # scalar nested AD
     @test sum(convexity(KeyRates(times), curve, cfs, times)) ≈ ad_reference
-    @test sum(convexity(KeyRates(times), valuation, curve)) ≈ ad_reference
+    @test sum(convexity(valuation, KeyRates(times), curve)) ≈ ad_reference
 
     # Coleman (2011), A Guide to Duration, DV01, and Yield Curve Risk
     # Transformations, pp. 3–4: the rate coordinate/compounding matters.
@@ -44,12 +44,12 @@
     @test ForwardDiff.derivative(r -> ForwardDiff.derivative(annual_price, r), y) / value ≈ annual
     for yield in (y, FC.Periodic(y, 1))
         @test convexity(yield, cfs, times) ≈ annual
-        @test convexity(yield, valuation) ≈ annual
+        @test convexity(valuation, yield) ≈ annual
     end
 
     # t is time in years, including fractional years, not the cashflow index.
     @test convexity(curve, [100.0], [2.5]) ≈ 2.5^2
-    @test convexity(curve, c -> 100FC.discount(c, 2.5)) ≈ 2.5^2
+    @test convexity(c -> 100FC.discount(c, 2.5), curve) ≈ 2.5^2
 end
 
 @testset "Parallel convexity includes mixed key-rate derivatives" begin
@@ -70,13 +70,13 @@ end
     price(s) = 5exp(-r - s[1]) + 5exp(-2r - s[1] - s[2]) + 105exp(-3r - 3s[2])
     expected = ForwardDiff.hessian(price, zeros(2)) / value
     analytic = convexity(kr, curve, cfs, times)
-    automatic = convexity(kr, valuation, curve)
+    automatic = convexity(valuation, kr, curve)
     @test analytic ≈ expected
     @test automatic ≈ expected
     @test expected[1, 2] ≈ 5 / 1.04^2 / value
     @test expected[2, 1] ≈ expected[1, 2]
     @test sum(analytic) ≈ 8.40087191197841
-    @test sum(automatic) ≈ convexity(curve, valuation)
+    @test sum(automatic) ≈ convexity(valuation, curve)
     # For a parallel shock, s = x*ones(2): C_parallel = ones' * K * ones.
     # Summing only diagonal entries loses the two mixed-derivative terms.
     diagonal_only = analytic[1, 1] + analytic[2, 2]

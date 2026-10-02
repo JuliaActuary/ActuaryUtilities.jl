@@ -34,10 +34,10 @@ end
     V = value(zrc)
     macaulay = sum(t * cf * FC.discount(zrc, t) for (cf, t) in zip(cfs, times)) / V
     @test duration(zrc, cfs, times) ≈ macaulay rtol = 1.0e-14
-    @test duration(zrc, cfs, times) ≈ duration(zrc, value) rtol = 1.0e-12
+    @test duration(zrc, cfs, times) ≈ duration(value, zrc) rtol = 1.0e-12
     @test duration(zrc, cfs, times) ≈ sum(duration(KeyRates(tenors), zrc, cfs, times)) rtol = 1.0e-12
     @test duration(DV01(), zrc, cfs, times) ≈ macaulay * V / 10_000 rtol = 1.0e-14
-    @test duration(DV01(), zrc, cfs, times) ≈ duration(DV01(), zrc, value) rtol = 1.0e-12
+    @test duration(DV01(), zrc, cfs, times) ≈ duration(value, DV01(), zrc) rtol = 1.0e-12
     @test duration(DV01(), zrc) do c
         value(c)
     end ≈ duration(DV01(), zrc, cfs, times) rtol = 1.0e-12
@@ -67,10 +67,10 @@ end
             100.0 * (previous_discount(b, t) / FC.discount(b, t) - 1) * FC.discount(b + c, t)
             for (k, t) in enumerate(times)
     )
-    ir01 = duration(IR01(), floater, base, credit)
-    cs01 = duration(CS01(), floater, base, credit)
-    @test ir01 ≈ sum(duration(IR01(), kr, floater, base, credit)) rtol = 1.0e-12
-    @test cs01 ≈ sum(duration(CS01(), kr, floater, base, credit)) rtol = 1.0e-12
+    ir01 = duration(floater, IR01(), base, credit)
+    cs01 = duration(floater, CS01(), base, credit)
+    @test ir01 ≈ sum(duration(floater, IR01(), kr, base, credit)) rtol = 1.0e-12
+    @test cs01 ≈ sum(duration(floater, CS01(), kr, base, credit)) rtol = 1.0e-12
     @test abs(ir01) < abs(cs01) / 10
     @test duration(IR01(), base, credit) do b, c
         floater(b, c)
@@ -80,7 +80,7 @@ end
     end == cs01
 
     blocks = convexity(floater, base, credit)
-    matrices = convexity(kr, floater, base, credit)
+    matrices = convexity(floater, kr, base, credit)
     @test blocks.base ≈ sum(matrices.base) rtol = 1.0e-10
     @test blocks.credit ≈ sum(matrices.credit) rtol = 1.0e-10
     @test blocks.cross ≈ sum(matrices.cross) rtol = 1.0e-10
@@ -138,6 +138,20 @@ end
         () -> sensitivities((; curve); tenors) do c
             value(c.curve)
         end,
+        # The valuation callback comes first, before any marker or curve.
+        () -> duration(curve, value),
+        () -> duration(0.03, i -> FC.pv(i, cfs, times)),
+        () -> duration(DV01(), curve, value),
+        () -> convexity(curve, value),
+        () -> duration(IR01(), value2, curve, credit),
+        () -> duration(KeyRates(tenors), value, curve),
+        () -> duration(DV01(), KeyRates(tenors), value, curve),
+        () -> duration(CS01(), KeyRates(tenors), value2, curve, credit),
+        () -> convexity(KeyRates(tenors), value, curve),
+        () -> convexity(KeyRates(tenors), value2, curve, credit),
+        () -> sensitivities(KeyRates(tenors), value, curve),
+        () -> sensitivities(DV01(), KeyRates(tenors), value2, curve, credit),
+        () -> sensitivities(KeyRates(tenors), c -> value(c.curve), (; curve)),
     )
     for f in removed
         @test_throws MethodError f()

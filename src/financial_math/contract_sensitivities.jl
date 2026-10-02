@@ -66,6 +66,8 @@ _contract_parallel_value(::Spread, target, forward, credit, s) =
     duration(target, curve)                                # defaults to Effective()
     dv01(target, curve)                                    # defaults to Effective()
     convexity(target, curve)                               # defaults to Effective()
+    duration(DV01(), KeyRates(tenors), target, curve)      # effective key-rate DV01s
+    convexity(KeyRates(tenors), target, curve)             # effective key-rate convexity matrix
 
 Effective (rate) and spread (credit) duration / DV01 for a contract or portfolio,
 re-projecting cashflows under continuous-zero parallel shifts. Two-curve forms
@@ -89,7 +91,10 @@ convexity(target::_Contractish, curve::AYM) = convexity(Effective(), target, cur
 
 # Parallel convexity equals the full key-rate matrix sum. The scalar callback
 # computes it directly while reprojecting coupons under each curve shock.
-convexity(::Effective, target::_Contractish, curve::AYM) = convexity(curve, c -> _value(target, c, c))
+convexity(::Effective, target::_Contractish, curve::AYM) = convexity(c -> _value(target, c, c), curve)
+# Effective key-rate DV01s and convexities bump the one curve that projects and discounts.
+duration(::DV01, kr::KeyRates, target::_Contractish, curve::AYM) = duration(c -> _value(target, c, c), DV01(), kr, curve)
+convexity(kr::KeyRates, target::_Contractish, curve::AYM) = convexity(c -> _value(target, c, c), kr, curve)
 
 """
     dv01(args...)

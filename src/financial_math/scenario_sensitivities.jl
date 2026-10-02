@@ -15,7 +15,7 @@ end
 # Draw one seed per call and reset Xoshiro inside the valuation. Every AD
 # evaluation must use the same random draws for value and derivatives to agree.
 function sensitivities(
-        kr::KeyRates, valuation_fn::F, hw::HW;
+        valuation_fn::F, kr::KeyRates, hw::HW;
         n_scenarios = 1000, timestep = 1 / 12, horizon = 30.0,
         rng = Random.default_rng()
     ) where {F}
@@ -26,7 +26,7 @@ function sensitivities(
 end
 
 function sensitivities(
-        ::DV01, kr::KeyRates, valuation_fn::F, hw::HW;
+        valuation_fn::F, ::DV01, kr::KeyRates, hw::HW;
         n_scenarios = 1000, timestep = 1 / 12, horizon = 30.0,
         rng = Random.default_rng()
     ) where {F}
@@ -35,14 +35,6 @@ function sensitivities(
         valuation_fn(_hw_paths(hw, curve; n_scenarios, timestep, horizon, rng = Random.Xoshiro(seed)))
     end
 end
-
-# A contract is valued on the model's discount function, as its duration is; the callback
-# forms above value scenario sets.
-sensitivities(kr::KeyRates, target::_Contractish, hw::HW) = sensitivities(kr, target, hw, hw)
-
-# Do-block-first forwarders (support `f(args...) do x; ...; end` syntax)
-sensitivities(vf::Function, kr::KeyRates, hw::HW; kw...) = sensitivities(kr, vf, hw; kw...)
-sensitivities(vf::Function, ::DV01, kr::KeyRates, hw::HW; kw...) = sensitivities(DV01(), kr, vf, hw; kw...)
 
 # Cashflow-form wrappers that delegate to the do-block forms above
 function sensitivities(

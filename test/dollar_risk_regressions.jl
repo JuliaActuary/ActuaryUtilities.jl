@@ -18,15 +18,15 @@
         @test iszero(value(yield))
         @test duration(DV01(), yield, cfs, times) ≈ expected
         @test duration(DV01(), yield, FC.Cashflow.(cfs, times)) ≈ expected
-        @test duration(DV01(), yield, callback) ≈ expected
-        @test duration(DV01(), yield, value) ≈ expected
+        @test duration(callback, DV01(), yield) ≈ expected
+        @test duration(value, DV01(), yield) ≈ expected
         @test duration(IR01(), yield, yield, cfs, times) ≈ expected
         @test duration(CS01(), yield, yield, cfs, times) ≈ expected
-        @test !isfinite(duration(yield, callback))
-        @test !isfinite(convexity(yield, callback))
+        @test !isfinite(duration(callback, yield))
+        @test !isfinite(convexity(callback, yield))
         if yield isa FM.Yield.AbstractYieldModel
             @test sum(duration(DV01(), kr, yield, cfs, times)) ≈ expected
-            @test sum(duration(DV01(), kr, callback, yield)) ≈ expected
+            @test sum(duration(callback, DV01(), kr, yield)) ≈ expected
         end
     end
 end
@@ -48,20 +48,20 @@ end
             calls[] += 1
             FC.pv(c, sign .* cfs, times)
         end
-        @test duration(DV01(), yield, counted) ≈ expected
+        @test duration(counted, DV01(), yield) ≈ expected
         @test calls[] == 1
         @test duration(DV01(), yield, sign .* cfs, times) ≈ expected
         for constant_value in (0.0, 3.0, big"0.0", big"3.0")
-            @test iszero(duration(DV01(), yield, _ -> constant_value))
+            @test iszero(duration(_ -> constant_value, DV01(), yield))
         end
     end
 
     r = big"0.04"
     curve = FM.Yield.Constant(FC.Continuous(r))
-    big_dv01 = duration(DV01(), curve, c -> big"100.0" * FC.discount(c, 2))
+    big_dv01 = duration(c -> big"100.0" * FC.discount(c, 2), DV01(), curve)
     @test big_dv01 isa BigFloat
     @test big_dv01 ≈ 200exp(-2r) / 10_000
-    curve_dv01(r) = duration(DV01(), FM.Yield.Constant(FC.Continuous(r)), c -> 100FC.discount(c, 2.0))
+    curve_dv01(r) = duration(c -> 100FC.discount(c, 2.0), DV01(), FM.Yield.Constant(FC.Continuous(r)))
     @test ForwardDiff.derivative(curve_dv01, 0.04) ≈ -400exp(-0.08) / 10_000
     @test ForwardDiff.derivative(r -> ForwardDiff.derivative(curve_dv01, r), 0.04) ≈ 800exp(-0.08) / 10_000
 

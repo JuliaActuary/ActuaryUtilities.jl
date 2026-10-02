@@ -115,7 +115,7 @@ FC.discount(::ZeroCashflowTestCurve, t) = iszero(t) ? one(float(t)) : error("zer
         @test tiny.value == 1.0e-200
         @test sum(tiny.durations) ≈ 2.0
         # Valuation functions cannot be classified as zero streams from PV alone.
-        @test all(isnan, duration(kr, _ -> 0.0, flat))
+        @test all(isnan, duration(_ -> 0.0, kr, flat))
     end
 
     @testset "Automatic differentiation" begin

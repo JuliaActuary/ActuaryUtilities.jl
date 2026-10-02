@@ -60,7 +60,7 @@ julia> pv(curve, cfs, times)
 0.0
 
 julia> (duration(DV01(), curve, cfs, times),
-        duration(DV01(), curve, c -> pv(c, cfs, times)),
+        duration(c -> pv(c, cfs, times), DV01(), curve),
         duration(IR01(), curve, curve, cfs, times),
         duration(CS01(), curve, curve, cfs, times))
 (0.0001, 0.0001, 0.0001, 0.0001)

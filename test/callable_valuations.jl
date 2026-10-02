@@ -24,28 +24,38 @@ _same_sensitivity(a::NamedTuple, b::NamedTuple) =
         closure(c) = value(c)
         pair(b, c) = value(b, c)
         @test !(value isa Function)
-        @test duration(curve, value) ≈ 2.0
-        @test convexity(curve, value) ≈ 4.0
-        @test duration(DV01(), curve, value) ≈ 2value(curve) / 10_000
+        @test duration(value, curve) ≈ 2.0
+        @test convexity(value, curve) ≈ 4.0
+        @test duration(value, DV01(), curve) ≈ 2value(curve) / 10_000
         for yield in (0.04, FC.Periodic(0.04, 2), FC.Continuous(0.04), curve)
-            @test duration(yield, value) ≈ duration(yield, closure)
-            @test convexity(yield, value) ≈ convexity(yield, closure)
-            @test duration(DV01(), yield, value) ≈ duration(DV01(), yield, closure)
+            @test duration(value, yield) ≈ duration(closure, yield)
+            @test convexity(value, yield) ≈ convexity(closure, yield)
+            @test duration(value, DV01(), yield) ≈ duration(closure, DV01(), yield)
+            # The callback comes first, so do-block syntax works for every input type.
+            @test duration(yield) do c
+                value(c)
+            end == duration(closure, yield)
+            @test duration(DV01(), yield) do c
+                value(c)
+            end == duration(closure, DV01(), yield)
+            @test convexity(yield) do c
+                value(c)
+            end == convexity(closure, yield)
         end
         for metric in (IR01(), CS01())
-            @test duration(metric, value, curve, credit) ≈ duration(metric, pair, curve, credit)
-            @test duration(metric, kr, value, curve, credit) ≈ duration(metric, kr, pair, curve, credit)
+            @test duration(value, metric, curve, credit) ≈ duration(pair, metric, curve, credit)
+            @test duration(value, metric, kr, curve, credit) ≈ duration(pair, metric, kr, curve, credit)
         end
         @test _same_sensitivity(convexity(value, curve, credit), convexity(pair, curve, credit))
         for f in (duration, convexity, sensitivities)
-            @test _same_sensitivity(f(kr, value, curve), f(kr, closure, curve))
+            @test _same_sensitivity(f(value, kr, curve), f(closure, kr, curve))
         end
         for f in (convexity, sensitivities)
-            @test _same_sensitivity(f(kr, value, curve, credit), f(kr, pair, curve, credit))
+            @test _same_sensitivity(f(value, kr, curve, credit), f(pair, kr, curve, credit))
         end
-        @test duration(DV01(), kr, value, curve) ≈ duration(DV01(), kr, closure, curve)
-        @test _same_sensitivity(sensitivities(DV01(), kr, value, curve), sensitivities(DV01(), kr, closure, curve))
-        @test _same_sensitivity(sensitivities(DV01(), kr, value, curve, credit), sensitivities(DV01(), kr, pair, curve, credit))
+        @test duration(value, DV01(), kr, curve) ≈ duration(closure, DV01(), kr, curve)
+        @test _same_sensitivity(sensitivities(value, DV01(), kr, curve), sensitivities(closure, DV01(), kr, curve))
+        @test _same_sensitivity(sensitivities(value, DV01(), kr, curve, credit), sensitivities(pair, DV01(), kr, curve, credit))
     end
 
     # Arrays, ranges, views, and wrapped cashflows still select collection routes.
@@ -71,8 +81,8 @@ _same_sensitivity(a::NamedTuple, b::NamedTuple) =
     hw = FM.ShortRate.HullWhite(0.1, 0.01, curve)
     value = ScenarioValue(CashflowValue([5.0, 105.0], [1.0, 3.0]))
     for prefix in ((), (DV01(),))
-        result = sensitivities(prefix..., kr, value, hw; n_scenarios = 8, timestep = 0.5, horizon = 3.0, rng = Random.Xoshiro(1234))
-        reference = sensitivities(prefix..., kr, s -> value(s), hw; n_scenarios = 8, timestep = 0.5, horizon = 3.0, rng = Random.Xoshiro(1234))
+        result = sensitivities(value, prefix..., kr, hw; n_scenarios = 8, timestep = 0.5, horizon = 3.0, rng = Random.Xoshiro(1234))
+        reference = sensitivities(s -> value(s), prefix..., kr, hw; n_scenarios = 8, timestep = 0.5, horizon = 3.0, rng = Random.Xoshiro(1234))
         @test _same_sensitivity(result, reference)
     end
     @test isempty(Test.detect_ambiguities(ActuaryUtilities; recursive = true))

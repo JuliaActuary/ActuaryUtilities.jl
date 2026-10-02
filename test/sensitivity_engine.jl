@@ -16,13 +16,13 @@ end
     credit = FM.Yield.Constant(FC.Continuous(0.01))
     v(c) = 5FC.discount(c, 2.0) + 105FC.discount(c, 6.0)
     v2(b, c) = v(b + c)
-    single = sensitivities(kr, v, base)
-    named = sensitivities(kr, c -> v(c.base), (; base))
+    single = sensitivities(v, kr, base)
+    named = sensitivities(c -> v(c.base), kr, (; base))
     @test named.value ≈ single.value
     @test named.key_rate.base ≈ single.durations
-    @test sensitivities(KeyRates(Real[1, 3.0, 7]), c -> v(c.base), (; base)).key_rate.base ≈ single.durations
-    pair = sensitivities(kr, v2, base, credit)
-    named_pair = sensitivities(kr, c -> v2(c.base, c.credit), (; base, credit))
+    @test sensitivities(c -> v(c.base), KeyRates(Real[1, 3.0, 7]), (; base)).key_rate.base ≈ single.durations
+    pair = sensitivities(v2, kr, base, credit)
+    named_pair = sensitivities(c -> v2(c.base, c.credit), kr, (; base, credit))
     @test pair.base_durations ≈ named_pair.key_rate.base
     @test pair.credit_durations ≈ named_pair.key_rate.credit
     engine = ActuaryUtilities.FinancialMath._ncurve_ad
@@ -59,8 +59,8 @@ end
     # A grid mutated after construction is caught where it is used.
     grid = KeyRates(copy(tenors))
     grid.tenors[2] = grid.tenors[1]
-    @test_throws ArgumentError duration(grid, v, base)
-    @test_throws ArgumentError sensitivities(grid, c -> v(c.base), (; base))
+    @test_throws ArgumentError duration(v, grid, base)
+    @test_throws ArgumentError sensitivities(c -> v(c.base), grid, (; base))
     @test_throws ArgumentError sensitivities(grid, floater, base)
 end
 
@@ -106,7 +106,7 @@ end
     @test ForwardDiff.derivative(second_order, 0.04) ≈ -8exp(-0.08)
 
     # Public blocks must own independent arrays.
-    bundle = sensitivities(KeyRates(tenors), (b, c) -> FC.discount(b, 2.0) * FC.discount(c, 2.0), curve(0.03), curve(0.01))
+    bundle = sensitivities((b, c) -> FC.discount(b, 2.0) * FC.discount(c, 2.0), KeyRates(tenors), curve(0.03), curve(0.01))
     credit_block = copy(bundle.convexities.credit)
     cross_block = copy(bundle.convexities.cross)
     fill!(bundle.convexities.base, NaN)

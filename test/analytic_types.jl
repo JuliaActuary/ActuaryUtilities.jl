@@ -10,7 +10,7 @@
     for r in (0.04, big"0.04")
         curve = makecurve(r)
         an = sensitivities(kr, curve, cfs, times)
-        ad = sensitivities(kr, value, curve)
+        ad = sensitivities(value, kr, curve)
         @test an.value ≈ ad.value
         @test an.durations ≈ ad.durations
         @test an.convexities ≈ ad.convexities
@@ -25,7 +25,7 @@
     end
 
     analytic(r) = sensitivities(kr, makecurve(r), cfs, times)
-    automatic(r) = sensitivities(kr, value, makecurve(r))
+    automatic(r) = sensitivities(value, kr, makecurve(r))
     for field in (:durations, :convexities)
         fa(r) = sum(getproperty(analytic(r), field))
         fd(r) = sum(getproperty(automatic(r), field))
