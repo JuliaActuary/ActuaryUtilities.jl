@@ -4,36 +4,10 @@
 
 const AYM = FinanceModels.Yield.AbstractYieldModel
 
-# Triangular hats with flat extrapolation outside the knot range.
-# At a knot τᵢ the bump equals bᵢ; between τᵢ and τᵢ₊₁ it is linear.
-function _hat_bump(tenors, bumps, t)
-    t <= first(tenors) && return first(bumps)
-    t >= last(tenors)  && return last(bumps)
-    i = searchsortedlast(tenors, t)
-    w = (t - tenors[i]) / (tenors[i + 1] - tenors[i])
-    return (one(w) - w) * bumps[i] + w * bumps[i + 1]
-end
-
-# Layer a hat-function zero-rate bump over `curve` lazily.
-_bumped(curve, tenors, bumps) = FinanceModels.Yield.TenorShift(
-    curve,
-    (z, t) -> FinanceCore.Continuous(_hat_bump(tenors, bumps, t)) + z,
-)
-
-# Named curve roles, each bumped by triangular hats on one tenor grid.
-function _ncurve_ad(valuation::F, curves::NamedTuple{roles}, tenors; order = 1) where {F, roles}
-    grid = _validate_tenors(tenors)
-    bumped(b) = NamedTuple{roles}(ntuple(i -> _bumped(curves[i], grid, b[i]), length(curves)))
-    return _named_ad(b -> valuation(bumped(b)), map(_ -> zeros(length(grid)), curves); order)
-end
-
-## Analytic derivatives for fixed cashflows
-# After locating its hat interval, each payment updates at most two gradient
-# entries and a 2×2 Hessian block.
-
-# Active hat pair at `t`. Returns (i, w_i, j, w_j) such that the hat sum
-# at t equals `w_i * b[i] + w_j * b[j]`. At/beyond the endpoints only one
-# hat is active (the other weight is 0 and j == i).
+# Triangular hats with flat extrapolation outside the knot range: at a knot τᵢ the
+# bump equals bᵢ; between τᵢ and τᵢ₊₁ it is linear. Returns (i, w_i, j, w_j) such
+# that the hat sum at t equals `w_i * b[i] + w_j * b[j]`. At/beyond the endpoints
+# only one hat is active (the other weight is 0 and j == i).
 @inline function _active_hats(tenors, t)
     n = length(tenors)
     if t <= first(tenors)
@@ -47,6 +21,34 @@ end
         return i, w_left, i + 1, w_right
     end
 end
+
+# The hat-function bump at `t`.
+_hat_bump(tenors, bumps, t) = ((i, wi, j, wj) = _active_hats(tenors, t); wi * bumps[i] + wj * bumps[j])
+
+# Layer a hat-function zero-rate bump over `curve` lazily.
+_bumped(curve, tenors, bumps) = FinanceModels.Yield.TenorShift(
+    curve,
+    (z, t) -> FinanceCore.Continuous(_hat_bump(tenors, bumps, t)) + z,
+)
+
+# A one-knot grid is an exact parallel shift: its hat is flat everywhere. The
+# scalar two-curve forms use it so they match the sums of the key-rate results.
+const _PARALLEL_GRID = 1.0:1.0
+
+# Shift every continuous zero rate of a yield model by `shift`. Converting an annual-rate
+# increment to continuous compounding would change the second derivative.
+_parallel_bumped(curve::AYM, shift) = _bumped(curve, _PARALLEL_GRID, (shift,))
+
+# Named curve roles, each bumped by triangular hats on one tenor grid.
+function _ncurve_ad(valuation::F, curves::NamedTuple{roles}, tenors; order = 1) where {F, roles}
+    grid = _validate_tenors(tenors)
+    bumped(b) = NamedTuple{roles}(ntuple(i -> _bumped(curves[i], grid, b[i]), length(curves)))
+    return _named_ad(b -> valuation(bumped(b)), map(_ -> zeros(length(grid)), curves); order)
+end
+
+## Analytic derivatives for fixed cashflows
+# After locating its hat interval, each payment updates at most two gradient
+# entries and a 2×2 Hessian block.
 
 # Value is Σ cf(t) * ∏ discount(curve, t). Every curve must be a discount layer;
 # an index curve that projects coupons does not belong here. All curve roles
@@ -145,10 +147,6 @@ _base_credit_cross(r, f = identity) = (;
 
 ## Public yield-model sensitivities
 
-# A one-knot grid is an exact parallel shift: its hat is flat everywhere. The
-# scalar two-curve forms use it so they match the sums of the key-rate results.
-const _PARALLEL_GRID = 1.0:1.0
-
 """
     duration(kr::KeyRates, valuation_fn, curve::AbstractYieldModel) -> Vector
     duration(kr::KeyRates, curve::AbstractYieldModel, cfs, times = eachindex(cfs)) -> Vector
@@ -242,42 +240,29 @@ duration(IR01(), base, credit) do b, c
 end
 ```
 """
-function duration(::IR01, valuation_fn::F, base::AYM, credit::AYM) where {F}
+# The curve role each two-curve measure bumps.
+_role(::IR01) = :base
+_role(::CS01) = :credit
+
+function duration(m::Union{IR01, CS01}, valuation_fn::F, base::AYM, credit::AYM) where {F}
     r = _keyrate((; base, credit), _PARALLEL_GRID, valuation_fn)
-    return _per_bp(r, only(r.gradient.base))
+    return _per_bp(r, only(r.gradient[_role(m)]))
 end
-
-function duration(::IR01, kr::KeyRates, valuation_fn::F, base::AYM, credit::AYM) where {F}
+function duration(m::Union{IR01, CS01}, kr::KeyRates, valuation_fn::F, base::AYM, credit::AYM) where {F}
     r = _keyrate((; base, credit), kr.tenors, valuation_fn)
-    return _per_bp(r, r.gradient.base)
+    return _per_bp(r, r.gradient[_role(m)])
 end
-function duration(::IR01, kr::KeyRates, base::AYM, credit::AYM, cfs::AbstractVector, times = eachindex(cfs))
+function duration(m::Union{IR01, CS01}, kr::KeyRates, base::AYM, credit::AYM, cfs::AbstractVector, times = eachindex(cfs))
     r = _keyrate((; base, credit), kr.tenors, cfs, times)
-    return _per_bp(r, r.gradient.base)
-end
-
-function duration(::CS01, valuation_fn::F, base::AYM, credit::AYM) where {F}
-    r = _keyrate((; base, credit), _PARALLEL_GRID, valuation_fn)
-    return _per_bp(r, only(r.gradient.credit))
-end
-
-function duration(::CS01, kr::KeyRates, valuation_fn::F, base::AYM, credit::AYM) where {F}
-    r = _keyrate((; base, credit), kr.tenors, valuation_fn)
-    return _per_bp(r, r.gradient.credit)
-end
-function duration(::CS01, kr::KeyRates, base::AYM, credit::AYM, cfs::AbstractVector, times = eachindex(cfs))
-    r = _keyrate((; base, credit), kr.tenors, cfs, times)
-    return _per_bp(r, r.gradient.credit)
+    return _per_bp(r, r.gradient[_role(m)])
 end
 
 # Do-block-first forwarders (support `f(args...) do x; ...; end` syntax)
 duration(vf::Function, kr::KeyRates, curve::AYM) = duration(kr, vf, curve)
 duration(vf::Function, ::DV01, curve::AYM) = duration(DV01(), curve, vf)
 duration(vf::Function, ::DV01, kr::KeyRates, curve::AYM) = duration(DV01(), kr, vf, curve)
-duration(vf::Function, ::IR01, base::AYM, credit::AYM) = duration(IR01(), vf, base, credit)
-duration(vf::Function, ::IR01, kr::KeyRates, base::AYM, credit::AYM) = duration(IR01(), kr, vf, base, credit)
-duration(vf::Function, ::CS01, base::AYM, credit::AYM) = duration(CS01(), vf, base, credit)
-duration(vf::Function, ::CS01, kr::KeyRates, base::AYM, credit::AYM) = duration(CS01(), kr, vf, base, credit)
+duration(vf::Function, m::Union{IR01, CS01}, base::AYM, credit::AYM) = duration(m, vf, base, credit)
+duration(vf::Function, m::Union{IR01, CS01}, kr::KeyRates, base::AYM, credit::AYM) = duration(m, kr, vf, base, credit)
 
 """
     convexity(kr::KeyRates, valuation_fn, curve::AbstractYieldModel) -> Matrix

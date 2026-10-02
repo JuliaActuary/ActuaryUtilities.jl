@@ -151,19 +151,9 @@ function duration(yield, valuation_function::T) where {T}
     return δV = -ForwardDiff.derivative(D, 0.0)
 end
 
-# Use Continuous(shift) for yield models. Converting an annual-rate increment
-# to continuous compounding would change the second derivative.
+# A scalar or `Rate` moves in its own coordinate; yield models move every continuous
+# zero rate (key_rate_sensitivities.jl).
 _parallel_bumped(yield, shift) = yield + shift
-
-function _parallel_bumped(
-        yield::FinanceModels.Yield.AbstractYieldModel, shift
-    )
-    # Rate addition inherits the left operand's compounding convention.
-    return FinanceModels.Yield.TenorShift(
-        yield,
-        (z, t) -> FinanceCore.Continuous(shift) + z,
-    )
-end
 
 
 function duration(yield::_YieldInput, cfs::_CashflowCollection, times)
