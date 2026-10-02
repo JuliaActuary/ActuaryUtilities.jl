@@ -1,16 +1,12 @@
 ## Contract and portfolio sensitivities
-# Value each contract under bumped curves, using the projection requirements FinanceModels
-# declares for it, so ActuaryUtilities keeps no list of contract types.
+# Value contracts under bumped curves in a FinanceModels valuation context, so
+# ActuaryUtilities keeps no list of contract types.
 
 const _Contractish = Union{FinanceCore.AbstractContract, AbstractVector{<:FinanceCore.AbstractContract}}
 
-# With no projection requirements beyond the discount curve, differentiate
-# `present_value(discount, contract)`, preserving custom closed-form pricing. Otherwise
-# rebuild the projection on the bumped `index` curve, so floating coupons reset.
-_value(c::FinanceCore.AbstractContract, index, discount) =
-    isempty(FinanceModels.model_requirements(c)) ? FinanceCore.present_value(discount, c) :
-    FinanceCore.present_value(discount, FinanceModels.Projection(c; index))
-_value(cs::AbstractVector{<:FinanceCore.AbstractContract}, index, discount) = sum(_value(c, index, discount) for c in cs)
+# `discount` discounts and prices; every model a contract reads by key is `index`, so floating
+# coupons reset on the bumped index curve. Closed forms, composites and portfolios value linearly.
+_value(target, index, discount) = FinanceCore.present_value(FinanceModels.Models(discount; index), target)
 
 """
     sensitivities(kr::KeyRates, target, curve) -> NamedTuple

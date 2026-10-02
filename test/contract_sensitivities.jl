@@ -30,7 +30,7 @@
 
     @testset "floater: effective convexity (coupons reset under each shock)" begin
         # Reproject coupons under each shock; scalar and matrix-sum risk must agree.
-        flm_value(c) = FC.present_value(c, FM.Projection(flm; index = c))
+        flm_value(c) = FC.present_value(FM.Models(c; index = c), flm)
         @test convexity(Effective(), flm, curve) ≈
             sum(convexity(KeyRates(tenors), flm_value, curve)) atol = 1.0e-10
     end
@@ -69,7 +69,7 @@
     @testset "portfolio: one-pass == value-weighted" begin
         port = [flm, fb]
         dport = duration(port, curve)
-        vfl = FC.present_value(curve, FM.Projection(flm; index = curve)); vfb = FC.present_value(curve, fb)
+        vfl = FC.present_value(FM.Models(curve; index = curve), flm); vfb = FC.present_value(curve, fb)
         dfl = duration(flm, curve); dfb = duration(fb, curve)
         @test dport ≈ (vfl * dfl + vfb * dfb) / (vfl + vfb) atol = 1.0e-8
     end
@@ -79,7 +79,7 @@
         ilp = FM.Yield.Constant(FC.Continuous(0.004))
         rs = sensitivities(KeyRates(tenors), flm; discount = (; rf = curve, credit = credit, ilp = ilp), index = curve)
         rd = sensitivities(KeyRates(tenors), (; rf = curve, credit = credit, ilp = ilp, index = curve)) do c
-            FC.present_value(c.rf + c.credit + c.ilp, FM.Projection(flm; index = c.index))
+            FC.present_value(FM.Models(c.rf + c.credit + c.ilp; index = c.index), flm)
         end
         @test rs.duration.rf ≈ rd.duration.rf atol = 1.0e-10
         @test rs.duration.index ≈ rd.duration.index atol = 1.0e-10
@@ -89,11 +89,11 @@
     end
 
     @testset "z-spread round-trips; locked ≈ next reset" begin
-        pvm = FC.present_value(curve, FM.Projection(flm; index = curve))
+        pvm = FC.present_value(FM.Models(curve; index = curve), flm)
         @test zspread(flm, curve, pvm).zspread ≈ 0.0 atol = 1.0e-8
         z = zspread(flm, curve, pvm - 0.03)
         @test z.zspread > 0.0
-        reprice = FC.present_value(curve + ((zz, t) -> zz + FC.Continuous(z.zspread)), FM.Projection(flm; index = curve))
+        reprice = FC.present_value(FM.Models(curve + ((zz, t) -> zz + FC.Continuous(z.zspread)); index = curve), flm)
         @test reprice ≈ pvm - 0.03 atol = 1.0e-10
         @test duration(Effective(), locked_floater(fl0, 0.05, 1.0), curve) ≈ 1.0 atol = 0.1
     end
@@ -101,7 +101,7 @@
     @testset "effective: AD == central finite difference (re-projecting)" begin
         Δ = 1.0e-4
         up = curve + ((z, t) -> z + FC.Continuous(+Δ)); dn = curve + ((z, t) -> z + FC.Continuous(-Δ))
-        rj(crv) = FC.present_value(crv, FM.Projection(flm; index = crv))
+        rj(crv) = FC.present_value(FM.Models(crv; index = crv), flm)
         eff_fd = (rj(dn) - rj(up)) / (2Δ * rj(curve))
         @test duration(Effective(), flm, curve) ≈ eff_fd atol = 1.0e-4
     end
@@ -162,7 +162,7 @@ end
 
     @testset "reproduces OpenGamma eq.(3)+(4) price" begin
         @test s.value ≈ pv_ref atol = 1.0e-12
-        @test FC.present_value(credit, FM.Projection(fl; index = rf)) ≈ pv_ref atol = 1.0e-12
+        @test FC.present_value(FM.Models(credit; index = rf), fl) ≈ pv_ref atol = 1.0e-12
         @test pv_ref ≈ 0.9760496203 atol = 1.0e-9                       # regression anchor
     end
 
