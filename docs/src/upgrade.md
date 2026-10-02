@@ -108,12 +108,25 @@ v6 requires FinanceModels 7 and FinanceCore 3.
   sensitivities use embedded payment times, as do Hull–White default horizons.
   Numeric amounts use the corresponding explicit times. Explicit time vectors must
   cover the collection; trailing entries are ignored. Omitted times default to
-  `eachindex(cfs)` in every key-rate, two-curve, named-curve, and Hull–White cashflow
+  `eachindex(cfs)` in every key-rate, two-curve, named-curve, and `Scenarios` cashflow
   form, so numeric amounts are paid at periods `1:n` as in the scalar measures.
-  `sensitivities(KeyRates(tenors), hw, cashflows)` without times now simulates under
-  Hull–White like the form with times; v5 treated `hw` as a deterministic discount curve there.
   **Migration:** to change payment dates, construct updated `Cashflow` objects or
   pass numeric amounts with the desired times.
+- **Hull–White simulation is requested with `Scenarios`.** A bare `HullWhite` model is
+  now a curve everywhere, valued on its discount function. In v5 it was a curve to
+  `duration`, `convexity`, and the cashflow forms without times, but a scenario
+  generator to `sensitivities` callbacks and to cashflow forms with times, so two
+  believable key-rate vectors could come back for the same position. The simulation
+  keywords move into [`Scenarios`](@ref); the per-call seed, defaults, and results are
+  unchanged:
+
+  | v5 call | v6 replacement |
+  |:--|:--|
+  | `sensitivities(KeyRates(tenors), hw, cfs, times; n_scenarios, timestep, horizon, rng)` (and `DV01()`) | `sensitivities(KeyRates(tenors), Scenarios(hw; n_scenarios, timestep, horizon, rng), cfs, times)` |
+  | `sensitivities(KeyRates(tenors), hw; kws...) do paths ... end` (and `DV01()`) | `sensitivities(KeyRates(tenors), Scenarios(hw; kws...)) do paths ... end` |
+
+  `sensitivities(KeyRates(tenors), hw, cfs, times)` without `Scenarios` now discounts on
+  `hw`, as `duration(KeyRates(tenors), hw, cfs, times)` does.
 - Unmarked contract and portfolio duration, DV01, and convexity default to
   `Effective()`, including `duration(DV01(), target, curve)`. Use `Spread()`
   explicitly for spread risk. The key-rate forms `duration(DV01(), KeyRates(tenors),

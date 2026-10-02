@@ -653,6 +653,9 @@ ForwardDiff can differentiate the simulated valuation through Hull–White path
 generation. These derivatives describe the Monte Carlo estimate, which remains
 subject to sampling and time-discretization error.
 
+A `HullWhite` model on its own is a curve: every measure values it on its discount
+function, as it does any other yield model. Wrap it in [`Scenarios`](@ref) to simulate.
+
 ### What is being differentiated?
 
 The curve-risk API differentiates continuous-zero bumps at the supplied tenors.
@@ -660,7 +663,7 @@ For a stochastic valuation:
 
 ```julia
 hw = ShortRate.HullWhite(0.1, 0.01, zrc)
-sensitivities(KeyRates(tenors), hw, cfs, times; n_scenarios=500, rng=Xoshiro(42))
+sensitivities(KeyRates(tenors), Scenarios(hw; n_scenarios=500, rng=Xoshiro(42)), cfs, times)
 ```
 
 the chain of differentiation is:
@@ -717,13 +720,10 @@ the simulated value's sensitivity to curve bumps:
 
 ```@example sensitivities
 # Key rate sensitivities of E[V] under Hull-White dynamics
-hw_curve = ZeroRateCurve(mc_rates, mc_tenors)
-hw       = ShortRate.HullWhite(0.1, 0.01, hw_curve)
-hw_result = sensitivities(KeyRates(mc_tenors), hw, mc_cfs, mc_tenors;
-                          n_scenarios = 500,
-                          timestep    = 1/12,
-                          horizon     = 6.0,
-                          rng         = Xoshiro(42))
+hw_curve  = ZeroRateCurve(mc_rates, mc_tenors)
+hw        = ShortRate.HullWhite(0.1, 0.01, hw_curve)
+scenarios = Scenarios(hw; n_scenarios = 500, timestep = 1/12, horizon = 6.0, rng = Xoshiro(42))
+hw_result = sensitivities(KeyRates(mc_tenors), scenarios, mc_cfs, mc_tenors)
 
 (durations = hw_result.durations,
  sum_durations = sum(hw_result.durations))
@@ -733,12 +733,21 @@ This uses nested AD: curve-risk derivatives pass through the forward-rate
 derivatives used to calibrate Hull–White drift. ForwardDiff's
 [tag system](https://github.com/JuliaDiff/ForwardDiff.jl/issues/83) separates them.
 
+For a valuation that is not a fixed cashflow stream, pass a callback; it receives the
+vector of simulated paths:
+
+```@example sensitivities
+sensitivities(KeyRates(mc_tenors), Scenarios(hw; n_scenarios = 500, horizon = 6.0, rng = Xoshiro(42))) do paths
+    sum(pv(p, mc_cfs, mc_tenors) for p in paths) / length(paths)
+end
+```
+
 ### Comparison: deterministic vs model-based sensitivities
 
 Compare simulated sensitivities with direct discounting for fixed cashflows:
 
 ```@example sensitivities
-# Deterministic: discount directly off the initial curve
+# Deterministic: discount directly off the initial curve (or `hw` itself)
 det_result = sensitivities(KeyRates(mc_tenors), hw_curve, mc_cfs, mc_tenors)
 
 # Model-based: average across simulated rate paths (computed above as hw_result)

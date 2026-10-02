@@ -69,7 +69,7 @@ using FinanceModels: ShortRate
 using Random: Xoshiro
 
 hw = ShortRate.HullWhite(0.1, 0.01, zrc)
-hw_result = sensitivities(KeyRates(tenors), hw, cfs, tenors; n_scenarios=1000, rng=Xoshiro(42))
+hw_result = sensitivities(KeyRates(tenors), Scenarios(hw; n_scenarios=1000, rng=Xoshiro(42)), cfs, tenors)
 hw_result.durations   # key rate durations under stochastic dynamics
 ```
 

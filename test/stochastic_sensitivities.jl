@@ -29,8 +29,8 @@
     @test hw_result.value ≈ det.value atol = 0.5
 end
 
-@testset "Hull-White convenience method: pathwise consistency" begin
-    # The four `sensitivities(KeyRates, hw, ...)` convenience methods snapshot
+@testset "Hull-White scenarios: pathwise consistency" begin
+    # The four `sensitivities(..., KeyRates, Scenarios(hw), ...)` methods snapshot
     # one UInt64 from the user's rng and rebuild Xoshiro(seed) inside each AD
     # evaluation. Two calls seeded the same way must produce bit-identical
     # results — otherwise ForwardDiff's many evaluations of the closure each
@@ -41,48 +41,55 @@ end
     zrc = FM.ZeroRateCurve(rates, tenors)
     hw = FM.ShortRate.HullWhite(0.1, 0.01, zrc)
 
-    r1 = sensitivities(
-        KeyRates(tenors), hw, cfs, tenors;
-        n_scenarios = 500, rng = Xoshiro(42)
-    )
-    r2 = sensitivities(
-        KeyRates(tenors), hw, cfs, tenors;
-        n_scenarios = 500, rng = Xoshiro(42)
-    )
+    r1 = sensitivities(KeyRates(tenors), Scenarios(hw; n_scenarios = 500, rng = Xoshiro(42)), cfs, tenors)
+    r2 = sensitivities(KeyRates(tenors), Scenarios(hw; n_scenarios = 500, rng = Xoshiro(42)), cfs, tenors)
     @test r1.value ≈ r2.value
     @test r1.durations ≈ r2.durations
     @test r1.convexities ≈ r2.convexities
 
     # DV01 form
-    d1 = sensitivities(
-        DV01(), KeyRates(tenors), hw, cfs, tenors;
-        n_scenarios = 500, rng = Xoshiro(42)
-    )
-    d2 = sensitivities(
-        DV01(), KeyRates(tenors), hw, cfs, tenors;
-        n_scenarios = 500, rng = Xoshiro(42)
-    )
+    d1 = sensitivities(DV01(), KeyRates(tenors), Scenarios(hw; n_scenarios = 500, rng = Xoshiro(42)), cfs, tenors)
+    d2 = sensitivities(DV01(), KeyRates(tenors), Scenarios(hw; n_scenarios = 500, rng = Xoshiro(42)), cfs, tenors)
     @test d1.value ≈ d2.value
     @test d1.dv01s ≈ d2.dv01s
     @test d1.convexities ≈ d2.convexities
 
     # Different seeds give different MC samples (sanity check the seed is actually used)
-    r3 = sensitivities(
-        KeyRates(tenors), hw, cfs, tenors;
-        n_scenarios = 500, rng = Xoshiro(43)
-    )
+    r3 = sensitivities(KeyRates(tenors), Scenarios(hw; n_scenarios = 500, rng = Xoshiro(43)), cfs, tenors)
     @test !(r1.value ≈ r3.value && r1.durations ≈ r3.durations)
 
-    # Omitted times default to periods 1:n, and wrapped cashflows simulate under Hull-White
-    # too. Before v6.0 a `Cashflow` vector without times treated `hw` as a discount curve.
+    # Omitted times default to periods 1:n, and wrapped cashflows simulate too.
     wrapped = FC.Cashflow.(cfs, tenors)
+    scenarios() = Scenarios(hw; n_scenarios = 500, rng = Xoshiro(42))
     for m in ((), (DV01(),))
-        seeded = sensitivities(m..., KeyRates(tenors), hw, cfs, tenors; n_scenarios = 500, rng = Xoshiro(42))
-        @test isequal(sensitivities(m..., KeyRates(tenors), hw, cfs; n_scenarios = 500, rng = Xoshiro(42)), seeded)
-        @test _same_sensitivity(sensitivities(m..., KeyRates(tenors), hw, wrapped; n_scenarios = 500, rng = Xoshiro(42)), seeded)
+        seeded = sensitivities(m..., KeyRates(tenors), scenarios(), cfs, tenors)
+        @test isequal(sensitivities(m..., KeyRates(tenors), scenarios(), cfs), seeded)
+        @test _same_sensitivity(sensitivities(m..., KeyRates(tenors), scenarios(), wrapped), seeded)
     end
-    @test !(
-        sensitivities(KeyRates(tenors), hw, wrapped; n_scenarios = 500, rng = Xoshiro(42)).durations ≈
-            sensitivities(KeyRates(tenors), hw.curve, wrapped).durations
-    )
+    @test !(sensitivities(KeyRates(tenors), scenarios(), wrapped).durations ≈ sensitivities(KeyRates(tenors), hw.curve, wrapped).durations)
+
+    # A callback receives the simulated paths, from one seed per call.
+    value(paths) = sum(FC.pv(p, cfs, tenors) for p in paths) / length(paths)
+    for m in ((), (DV01(),))
+        s = Scenarios(hw; n_scenarios = 50, timestep = 0.25, horizon = 6.0, rng = Xoshiro(1))
+        first_call, second_call = sensitivities(value, m..., KeyRates(tenors), s), sensitivities(value, m..., KeyRates(tenors), s)
+        @test isequal(sensitivities(value, m..., KeyRates(tenors), Scenarios(hw; n_scenarios = 50, timestep = 0.25, horizon = 6.0, rng = Xoshiro(1))), first_call)
+        @test !isequal(first_call, second_call)
+    end
+end
+
+@testset "A bare Hull-White model is a curve" begin
+    tenors = [1.0, 2.0, 3.0, 4.0, 5.0]
+    cfs = [5.0, 5.0, 5.0, 5.0, 105.0]
+    zrc = FM.ZeroRateCurve(fill(0.03, 5), tenors)
+    hw = FM.ShortRate.HullWhite(0.1, 0.01, zrc)
+    kr = KeyRates(tenors)
+    value(c) = FC.pv(c, cfs, tenors)
+    # Without `Scenarios`, every measure values `hw` on its discount function.
+    @test !(Scenarios(hw) isa FM.Yield.AbstractYieldModel)
+    @test sensitivities(kr, hw, cfs, tenors) == sensitivities(kr, zrc, cfs, tenors)
+    @test sensitivities(DV01(), kr, hw, cfs, tenors) == sensitivities(DV01(), kr, zrc, cfs, tenors)
+    @test sensitivities(kr, hw, cfs, tenors).durations == duration(kr, hw, cfs, tenors)
+    @test _same_sensitivity(sensitivities(value, kr, hw), sensitivities(value, kr, zrc))
+    @test _same_sensitivity(sensitivities(value, DV01(), kr, hw), sensitivities(value, DV01(), kr, zrc))
 end

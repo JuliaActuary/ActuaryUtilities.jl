@@ -161,10 +161,10 @@ end
     fallback = [0.0, 0.25, 0.5]
     hw = FM.ShortRate.HullWhite(0.1, 0.01, curve)
     kr = KeyRates([1.0, 2.0, 5.0])
-    for args in ((kr, hw), (DV01(), kr, hw)), supplied in (fallback, [7.0, 8.0, 9.0, 100.0])
+    for m in ((), (DV01(),)), supplied in (fallback, [7.0, 8.0, 9.0, 100.0])
         rng_numeric, rng_wrapped = MersenneTwister(42), MersenneTwister(42)
-        numeric = sensitivities(args..., cfs, times; n_scenarios = 8, timestep = 0.5, rng = rng_numeric)
-        actual = sensitivities(args..., wrapped, supplied; n_scenarios = 8, timestep = 0.5, rng = rng_wrapped)
+        numeric = sensitivities(m..., kr, Scenarios(hw; n_scenarios = 8, timestep = 0.5, rng = rng_numeric), cfs, times)
+        actual = sensitivities(m..., kr, Scenarios(hw; n_scenarios = 8, timestep = 0.5, rng = rng_wrapped), wrapped, supplied)
         @test _same_sensitivity(actual, numeric)
         @test rand(rng_numeric) == rand(rng_wrapped)
     end

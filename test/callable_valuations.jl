@@ -80,9 +80,10 @@ _same_sensitivity(a::NamedTuple, b::NamedTuple) =
     # The scenario callback is also a callable object; use identical MC draws.
     hw = FM.ShortRate.HullWhite(0.1, 0.01, curve)
     value = ScenarioValue(CashflowValue([5.0, 105.0], [1.0, 3.0]))
+    scenarios() = Scenarios(hw; n_scenarios = 8, timestep = 0.5, horizon = 3.0, rng = Random.Xoshiro(1234))
     for prefix in ((), (DV01(),))
-        result = sensitivities(value, prefix..., kr, hw; n_scenarios = 8, timestep = 0.5, horizon = 3.0, rng = Random.Xoshiro(1234))
-        reference = sensitivities(s -> value(s), prefix..., kr, hw; n_scenarios = 8, timestep = 0.5, horizon = 3.0, rng = Random.Xoshiro(1234))
+        result = sensitivities(value, prefix..., kr, scenarios())
+        reference = sensitivities(s -> value(s), prefix..., kr, scenarios())
         @test _same_sensitivity(result, reference)
     end
     @test isempty(Test.detect_ambiguities(ActuaryUtilities; recursive = true))

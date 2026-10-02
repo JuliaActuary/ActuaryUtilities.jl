@@ -136,8 +136,8 @@ FC.discount(::ZeroCashflowTestCurve, t) = iszero(t) ? one(float(t)) : error("zer
         for (cfs, times) in ((Float64[], Float64[]), (Float64[], [1.0, 2.0]), (zeros(2), [1.0, 2.0]), (zeros(2), [1.0, 2.0, NaN]))
             rng = MersenneTwister(123)
             untouched = copy(rng)
-            @test isequal(sensitivities(kr, hw, cfs, times; rng), (; value = 0.0, durations = z, convexities = zz))
-            @test isequal(sensitivities(DV01(), kr, hw, cfs, times; rng), (; value = 0.0, dv01s = z, convexities = zz))
+            @test isequal(sensitivities(kr, Scenarios(hw; rng), cfs, times), (; value = 0.0, durations = z, convexities = zz))
+            @test isequal(sensitivities(DV01(), kr, Scenarios(hw; rng), cfs, times), (; value = 0.0, dv01s = z, convexities = zz))
             @test rand(rng) == rand(untouched)
         end
     end
@@ -174,13 +174,13 @@ end
 
     # A trailing time must not extend the inferred horizon or change RNG use.
     hw = FM.ShortRate.HullWhite(0.1, 0.01, flat)
-    for args in ((kr, hw), (DV01(), kr, hw))
+    for m in ((), (DV01(),))
         rng_short, rng_long = MersenneTwister(42), MersenneTwister(42)
-        short = sensitivities(args..., cfs, times; n_scenarios = 8, timestep = 0.25, rng = rng_short)
-        long = sensitivities(args..., cfs, extra; n_scenarios = 8, timestep = 0.25, rng = rng_long)
+        short = sensitivities(m..., kr, Scenarios(hw; n_scenarios = 8, timestep = 0.25, rng = rng_short), cfs, times)
+        long = sensitivities(m..., kr, Scenarios(hw; n_scenarios = 8, timestep = 0.25, rng = rng_long), cfs, extra)
         @test isequal(short, long)
         @test rand(rng_short) == rand(rng_long)
-        @test_throws DimensionMismatch sensitivities(args..., cfs, [1.0])
+        @test_throws DimensionMismatch sensitivities(m..., kr, Scenarios(hw), cfs, [1.0])
     end
 end
 
