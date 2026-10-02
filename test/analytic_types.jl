@@ -10,7 +10,7 @@
     for r in (0.04, big"0.04")
         curve = makecurve(r)
         an = sensitivities(kr, curve, cfs, times)
-        ad = sensitivities(kr, value, curve)
+        ad = sensitivities(value, kr, curve)
         @test an.value ≈ ad.value
         @test an.durations ≈ ad.durations
         @test an.convexities ≈ ad.convexities
@@ -25,7 +25,7 @@
     end
 
     analytic(r) = sensitivities(kr, makecurve(r), cfs, times)
-    automatic(r) = sensitivities(kr, value, makecurve(r))
+    automatic(r) = sensitivities(value, kr, makecurve(r))
     for field in (:durations, :convexities)
         fa(r) = sum(getproperty(analytic(r), field))
         fd(r) = sum(getproperty(automatic(r), field))
@@ -58,8 +58,9 @@
     end
 end
 
+# Empty streams query the curve only at time zero, for their result's numeric type.
 struct EmptyCashflowTestCurve <: FM.Yield.AbstractYieldModel end
-FC.discount(::EmptyCashflowTestCurve, t) = error("empty streams must not evaluate the curve")
+FC.discount(::EmptyCashflowTestCurve, t) = iszero(t) ? one(float(t)) : error("empty streams do not value payments")
 
 @testset "Empty key-rate cashflows have zero value and risk" begin
     kernel = ActuaryUtilities.FinancialMath._ncurve_analytic
@@ -83,10 +84,10 @@ FC.discount(::EmptyCashflowTestCurve, t) = error("empty streams must not evaluat
         @test duration(CS01(), kr, curve, curve, cfs, times) == z
         @test convexity(kr, curve, cfs, times) == zz
         @test convexity(kr, curve, curve, cfs, times) == (; base = zz, credit = zz, cross = zz)
-        @test iszero(duration(curve, tenors, cfs, times))
-        @test iszero(duration(DV01(), curve, tenors, cfs, times))
-        @test iszero(convexity(curve, tenors, cfs, times))
-        @test convexity(curve, curve, tenors, cfs, times) == (; base = 0.0, credit = 0.0, cross = 0.0)
+        @test iszero(duration(curve, cfs, times))
+        @test iszero(duration(DV01(), curve, cfs, times))
+        @test iszero(convexity(curve, cfs, times))
+        @test convexity(curve, curve, cfs, times) == (; base = 0.0, credit = 0.0, cross = 0.0)
 
         single = sensitivities(kr, curve, cfs, times)
         @test single == (; value = 0.0, durations = z, convexities = zz)
@@ -119,7 +120,7 @@ FC.discount(::EmptyCashflowTestCurve, t) = error("empty streams must not evaluat
         @test duration(kr, curve, cfs) == z
         @test convexity(kr, curve, cfs) == zz
         @test sensitivities(kr, curve, cfs) == (; value = 0.0, durations = z, convexities = zz)
-        @test iszero(convexity(curve, tenors, cfs))
+        @test iszero(convexity(curve, cfs))
     end
 
     # Zero net value alone does not imply an empty portfolio or zero exposure.

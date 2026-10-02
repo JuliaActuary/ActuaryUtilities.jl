@@ -7,13 +7,13 @@
     fb = FM.Bond.Fixed(0.04, FC.Periodic(1), 5.0)
 
     @testset "par floater: effective ≈ 0, spread ≈ maturity" begin
-        @test duration(Effective(), fl0, curve, tenors) ≈ 0.0 atol = 1.0e-8
-        @test duration(Spread(), fl0, curve, tenors) > 4.0
-        @test convexity(Effective(), fl0, curve, tenors) ≈ 0.0 atol = 1.0e-6
+        @test duration(Effective(), fl0, curve) ≈ 0.0 atol = 1.0e-8
+        @test duration(Spread(), fl0, curve) > 4.0
+        @test convexity(Effective(), fl0, curve) ≈ 0.0 atol = 1.0e-6
     end
 
     @testset "bundle: effective = forward + spread; sums; dollar <-> year" begin
-        s = sensitivities(flm, curve, tenors)
+        s = sensitivities(KeyRates(tenors), flm, curve)
         @test s.effective_duration ≈ s.forward_duration + s.spread_duration atol = 1.0e-10
         @test s.effective_dv01 ≈ s.effective_duration * s.value / 10_000 atol = 1.0e-12
         @test sum(s.effective_key_rate) ≈ s.effective_duration atol = 1.0e-10
@@ -21,58 +21,70 @@
     end
 
     @testset "fixed bond: effective == spread == modified, forward == 0" begin
-        s = sensitivities(fb, curve, tenors)
-        modified = duration(curve, tenors, collect(FM.Projection(fb, curve, FM.CashflowProjection())))
+        s = sensitivities(KeyRates(tenors), fb, curve)
+        modified = duration(curve, collect(FM.Projection(fb, curve, FM.CashflowProjection())))
         @test s.effective_duration ≈ modified atol = 1.0e-8
         @test s.spread_duration ≈ modified atol = 1.0e-8
         @test s.forward_duration ≈ 0.0 atol = 1.0e-8
     end
 
-    @testset "floater: effective convexity (dynamic cashflows under reproject)" begin
-        # The new `convexity(::Effective)` routes through TenorShift +
-        # ForwardDiff on a closure that calls `reproject(target, c)` — i.e.
-        # cashflows are themselves curve-dependent (the coupon resets follow
-        # the bumped curve). The result must still equal the matrix-sum form
-        # (same AD chain, just unrolled). Locks the dynamic-cashflow path.
-        _cvalue_flm(c) = FC.present_value(c, ActuaryUtilities.reproject(flm, c))
-        @test convexity(Effective(), flm, curve, tenors) ≈
-            sum(convexity(KeyRates(tenors), _cvalue_flm, curve)) atol = 1.0e-10
+    @testset "floater: effective convexity (coupons reset under each shock)" begin
+        # Reproject coupons under each shock; scalar and matrix-sum risk must agree.
+        flm_value(c) = FC.present_value(FM.Models(c; index = c), flm)
+        @test convexity(Effective(), flm, curve) ≈
+            sum(convexity(flm_value, KeyRates(tenors), curve)) atol = 1.0e-10
     end
 
-    @testset "fixed bond: effective convexity matches matrix-sum (POU equivalence regression guard)" begin
-        # Under partition of unity of the KRD hat functions, sum(N×N key-rate
-        # Hessian) = continuous-shock parallel-shift second derivative by the
-        # chain rule. The optimized `convexity(::Effective, …)` computes that
-        # scalar directly via TenorShift, in O(1) rather than O(N²) AD work.
-        # Locks the numerical equivalence in for future refactors of either
-        # path. Note: `convexity(curve, cfs)` uses a *periodic* shock and is
-        # NOT equivalent here — see `_parallel_continuous_convexity` for why.
+    @testset "fixed bond: effective convexity equals the key-rate matrix sum" begin
+        # The hats sum to one, so contract, scalar, and full matrix risk agree.
         cfs = collect(FM.Projection(fb, curve, FM.CashflowProjection()))
         amts = FC.amount.(cfs); times = FC.timepoint.(cfs)
-        @test convexity(Effective(), fb, curve, tenors) ≈
+        @test convexity(Effective(), fb, curve) ≈
             sum(convexity(KeyRates(tenors), curve, amts, times)) atol = 1.0e-8
+        @test convexity(curve, cfs) ≈
+            convexity(Effective(), fb, curve) atol = 1.0e-8
     end
 
     @testset "default duration & dv01 verb" begin
-        @test duration(flm, curve, tenors) ≈ duration(Effective(), flm, curve, tenors)
-        @test dv01(Effective(), flm, curve, tenors) ≈ sensitivities(flm, curve, tenors).effective_dv01
+        for target in (fb, flm, [fb, flm])
+            @test duration(target, curve) ≈ duration(Effective(), target, curve)
+            @test dv01(target, curve) ≈ dv01(Effective(), target, curve)
+            @test duration(DV01(), target, curve) ≈ dv01(Effective(), target, curve)
+            @test convexity(target, curve) ≈ convexity(Effective(), target, curve)
+            # The parallel measures equal the sums of the key-rate bundle.
+            s = sensitivities(KeyRates(tenors), target, curve)
+            @test duration(target, curve) ≈ s.effective_duration atol = 1.0e-12
+            @test duration(Spread(), target, curve) ≈ s.spread_duration atol = 1.0e-12
+            @test dv01(Spread(), target, curve) ≈ s.spread_dv01 atol = 1.0e-12
+            # Unmarked key-rate DV01s and convexities are effective risk too.
+            kr = KeyRates(tenors)
+            @test duration(DV01(), kr, target, curve) ≈ s.effective_key_rate .* s.value ./ 10_000 atol = 1.0e-12
+            @test dv01(kr, target, curve) == duration(DV01(), kr, target, curve)
+            @test sum(convexity(kr, target, curve)) ≈ convexity(target, curve) atol = 1.0e-10
+        end
+        @test (@inferred dv01(fb, curve)) isa Float64
+        @test (@inferred convexity(fb, curve)) isa Float64
+        @test dv01(Effective(), flm, curve) ≈ sensitivities(KeyRates(tenors), flm, curve).effective_dv01
+        # A contract under Hull-White is valued on the model's discount function, as its duration is.
+        hw = FM.ShortRate.HullWhite(0.1, 0.01, curve)
+        @test sensitivities(KeyRates(tenors), flm, hw).effective_key_rate == duration(KeyRates(tenors), flm, hw)
         @test dv01(0.05, [5.0, 5.0, 105.0]) ≈ duration(DV01(), 0.05, [5.0, 5.0, 105.0])   # cashflow fallback
     end
 
     @testset "portfolio: one-pass == value-weighted" begin
         port = [flm, fb]
-        dport = duration(port, curve, tenors)
-        vfl = FC.present_value(curve, reproject(flm, curve)); vfb = FC.present_value(curve, fb)
-        dfl = duration(flm, curve, tenors); dfb = duration(fb, curve, tenors)
+        dport = duration(port, curve)
+        vfl = FC.present_value(FM.Models(curve; index = curve), flm); vfb = FC.present_value(curve, fb)
+        dfl = duration(flm, curve); dfb = duration(fb, curve)
         @test dport ≈ (vfl * dfl + vfb * dfb) / (vfl + vfb) atol = 1.0e-8
     end
 
     @testset "multi-curve: structured == do-block; additive layers" begin
         credit = FM.Yield.Constant(FC.Continuous(0.01))
         ilp = FM.Yield.Constant(FC.Continuous(0.004))
-        rs = sensitivities(flm, tenors; discount = (; rf = curve, credit = credit, ilp = ilp), index = curve)
-        rd = sensitivities((; rf = curve, credit = credit, ilp = ilp, index = curve); tenors) do c
-            FC.present_value(c.rf + c.credit + c.ilp, reproject(flm, c.index))
+        rs = sensitivities(KeyRates(tenors), flm; discount = (; rf = curve, credit = credit, ilp = ilp), index = curve)
+        rd = sensitivities(KeyRates(tenors), (; rf = curve, credit = credit, ilp = ilp, index = curve)) do c
+            FC.present_value(FM.Models(c.rf + c.credit + c.ilp; index = c.index), flm)
         end
         @test rs.duration.rf ≈ rd.duration.rf atol = 1.0e-10
         @test rs.duration.index ≈ rd.duration.index atol = 1.0e-10
@@ -82,21 +94,21 @@
     end
 
     @testset "z-spread round-trips; locked ≈ next reset" begin
-        pvm = FC.present_value(curve, reproject(flm, curve))
+        pvm = FC.present_value(FM.Models(curve; index = curve), flm)
         @test zspread(flm, curve, pvm).zspread ≈ 0.0 atol = 1.0e-8
         z = zspread(flm, curve, pvm - 0.03)
         @test z.zspread > 0.0
-        reprice = FC.present_value(curve + ((zz, t) -> zz + FC.Continuous(z.zspread)), reproject(flm, curve))
+        reprice = FC.present_value(FM.Models(curve + ((zz, t) -> zz + FC.Continuous(z.zspread)); index = curve), flm)
         @test reprice ≈ pvm - 0.03 atol = 1.0e-10
-        @test duration(Effective(), locked_floater(fl0, 0.05, 1.0), curve, tenors) ≈ 1.0 atol = 0.1
+        @test duration(Effective(), locked_floater(fl0, 0.05, 1.0), curve) ≈ 1.0 atol = 0.1
     end
 
     @testset "effective: AD == central finite difference (re-projecting)" begin
         Δ = 1.0e-4
         up = curve + ((z, t) -> z + FC.Continuous(+Δ)); dn = curve + ((z, t) -> z + FC.Continuous(-Δ))
-        rj(crv) = FC.present_value(crv, reproject(flm, crv))
+        rj(crv) = FC.present_value(FM.Models(crv; index = crv), flm)
         eff_fd = (rj(dn) - rj(up)) / (2Δ * rj(curve))
-        @test duration(Effective(), flm, curve, tenors) ≈ eff_fd atol = 1.0e-4
+        @test duration(Effective(), flm, curve) ≈ eff_fd atol = 1.0e-4
     end
 end
 
@@ -151,19 +163,19 @@ end
     ir01_ref = (pv_ir(-bp) - pv_ir(bp)) / 2          # dv01 ≈ (V(−1bp) − V(+1bp)) / 2
     cs01_ref = (pv_cs(-bp) - pv_cs(bp)) / 2
 
-    s = sensitivities(fl, rf, credit, tenors)
+    s = sensitivities(KeyRates(tenors), fl, rf, credit)
 
     @testset "reproduces OpenGamma eq.(3)+(4) price" begin
         @test s.value ≈ pv_ref atol = 1.0e-12
-        @test FC.present_value(credit, reproject(fl, rf)) ≈ pv_ref atol = 1.0e-12
+        @test FC.present_value(FM.Models(credit; index = rf), fl) ≈ pv_ref atol = 1.0e-12
         @test pv_ref ≈ 0.9760496203 atol = 1.0e-9                       # regression anchor
     end
 
     @testset "IR01 ⇒ Effective, CS01 ⇒ Spread (vs eq.(3)+(4) 1bp bump)" begin
         @test s.effective_dv01 ≈ ir01_ref rtol = 1.0e-4
         @test s.spread_dv01 ≈ cs01_ref rtol = 1.0e-4
-        @test dv01(Effective(), fl, rf, credit, tenors) ≈ ir01_ref rtol = 1.0e-4   # public verbs
-        @test dv01(Spread(), fl, rf, credit, tenors) ≈ cs01_ref rtol = 1.0e-4
+        @test dv01(Effective(), fl, rf, credit) ≈ ir01_ref rtol = 1.0e-4   # public verbs
+        @test dv01(Spread(), fl, rf, credit) ≈ cs01_ref rtol = 1.0e-4
         @test s.effective_dv01 ≈ s.forward_dv01 + s.spread_dv01 atol = 1.0e-12      # eff = fwd + spr
         @test s.effective_dv01 ≈ -2.381601e-6 rtol = 1.0e-5            # regression anchors
         @test s.spread_dv01 ≈ 4.585068e-4 rtol = 1.0e-5
