@@ -38,38 +38,32 @@ end
 Scenarios(model::HW; n_scenarios = 1000, timestep = 1 / 12, horizon = nothing, rng = Random.default_rng()) =
     Scenarios(model, n_scenarios, timestep, horizon, rng)
 
-# Draw one seed per call and reset Xoshiro inside the valuation. Every AD evaluation must use
-# the same random draws for value and derivatives to agree. The bumped curve replaces the
-# model's own; its other parameters stay fixed.
-function _simulated(valuation_fn::F, s::Scenarios, horizon) where {F}
+# Draw one seed per call; every AD evaluation rebuilds `Xoshiro(seed)`, so value and derivatives
+# share the same draws. The engine bumps `s.model` itself: `_bumped` moves a Hull–White curve.
+function _simulated(valuation_fn::F, s::Scenarios, horizon = something(s.horizon, 30.0)) where {F}
     seed = rand(s.rng, UInt64)
-    return function (curve)
-        model = ConstructionBase.setproperties(s.model; curve)
-        paths = FinanceModels.simulate(model; s.n_scenarios, s.timestep, horizon, rng = Random.Xoshiro(seed))
-        return valuation_fn(paths)
-    end
+    return model -> valuation_fn(FinanceModels.simulate(model; s.n_scenarios, s.timestep, horizon, rng = Random.Xoshiro(seed)))
 end
 
-sensitivities(valuation_fn::F, kr::KeyRates, s::Scenarios) where {F} =
-    sensitivities(_simulated(valuation_fn, s, something(s.horizon, 30.0)), kr, s.model.curve)
-sensitivities(valuation_fn::F, ::DV01, kr::KeyRates, s::Scenarios) where {F} =
-    sensitivities(_simulated(valuation_fn, s, something(s.horizon, 30.0)), DV01(), kr, s.model.curve)
+sensitivities(valuation_fn::F, kr::KeyRates, s::Scenarios) where {F} = sensitivities(_simulated(valuation_fn, s), kr, s.model)
+sensitivities(valuation_fn::F, ::DV01, kr::KeyRates, s::Scenarios) where {F} = sensitivities(_simulated(valuation_fn, s), DV01(), kr, s.model)
 
+# Zero streams are valued on `s.model` without simulating: its discount factors are its curve's.
 function sensitivities(kr::KeyRates, s::Scenarios, cfs::AbstractVector, times = eachindex(cfs))
-    times = _cashflow_times(cfs, times)
-    _iszero_cashflow_stream(cfs) && return sensitivities(kr, s.model.curve, cfs, times)
-    return sensitivities(_simulated_pv(s, cfs, times), kr, s.model.curve)
+    _check_cashflow_times(cfs, times)
+    _iszero_cashflow_stream(cfs) && return sensitivities(kr, s.model, cfs, times)
+    return sensitivities(_simulated_pv(s, cfs, times), kr, s.model)
 end
 function sensitivities(::DV01, kr::KeyRates, s::Scenarios, cfs::AbstractVector, times = eachindex(cfs))
-    times = _cashflow_times(cfs, times)
-    _iszero_cashflow_stream(cfs) && return sensitivities(DV01(), kr, s.model.curve, cfs, times)
-    return sensitivities(_simulated_pv(s, cfs, times), DV01(), kr, s.model.curve)
+    _check_cashflow_times(cfs, times)
+    _iszero_cashflow_stream(cfs) && return sensitivities(DV01(), kr, s.model, cfs, times)
+    return sensitivities(_simulated_pv(s, cfs, times), DV01(), kr, s.model)
 end
 
 # The mean present value of fixed cashflows across the paths, simulated to one year past the
 # last payment unless `s` sets a horizon.
 function _simulated_pv(s::Scenarios, cfs, times)
-    horizon = s.horizon === nothing ? _maximum_cashflow_time(cfs, times) + 1.0 : Float64(s.horizon)
+    horizon = something(s.horizon, _maximum_cashflow_time(cfs, times) + 1.0)
     return _simulated(s, horizon) do paths
         sum(FinanceCore.pv(p, cfs, times) for p in paths) / s.n_scenarios
     end

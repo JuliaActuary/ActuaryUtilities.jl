@@ -15,13 +15,6 @@ function _check_cashflow_times(cfs, times)
     return nothing
 end
 
-# Trim trailing times before delegating to code that consumes the full grid.
-# Keep the original input when lengths match.
-@inline function _cashflow_times(cfs, times)
-    _check_cashflow_times(cfs, times)
-    return length(times) == length(cfs) ? times : view(times, eachindex(cfs))
-end
-
 # Call after bounds validation and the zero-stream return. Derived grids and
 # simulation horizons must use the same embedded payment times as valuation.
 _maximum_cashflow_time(cfs, times) = maximum(k -> FinanceCore.timepoint(cfs[k], times[k]), eachindex(cfs))
