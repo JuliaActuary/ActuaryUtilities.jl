@@ -42,8 +42,8 @@ _bumped(curve, tenors, bumps) = FinanceModels.Yield.TenorShift(
 _bumped(hw::HW, tenors, bumps) =
     ConstructionBase.setproperties(hw; curve = _bumped(hw.curve, tenors, bumps))
 
-# A one-knot grid is an exact parallel shift: its hat is flat everywhere. The
-# scalar two-curve forms use it so they match the sums of the key-rate results.
+# A one-knot grid is an exact parallel shift: its hat is flat everywhere. Every
+# yield-model parallel shift uses it, so parallel results are ≈ the sums of key-rate results.
 const _PARALLEL_GRID = 1.0:1.0
 
 # Shift every continuous zero rate of a yield model by `shift`. Converting an annual-rate

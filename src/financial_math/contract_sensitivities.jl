@@ -4,8 +4,9 @@
 
 const _Contractish = Union{FinanceCore.AbstractContract, AbstractVector{<:FinanceCore.AbstractContract}}
 
-# `discount` discounts and prices; every model a contract reads by key is `index`, so floating
-# coupons reset on the bumped index curve. Closed forms, composites and portfolios value linearly.
+# `discount` discounts and prices; `index` serves every model a contract reads by key, so floating
+# coupons reset on the bumped index curve. A closed-form contract uses its own
+# `present_value(ctx, c)`; composites and portfolios are valued as the sums of their parts.
 _value(target, index, discount) = FinanceCore.present_value(FinanceModels.Models(discount; index), target)
 
 """
@@ -18,11 +19,13 @@ bumped curves. Project coupons on `forward` and discount on `credit`, or pass on
 
   - `value`
   - `effective_duration` / `effective_dv01` / `effective_key_rate` — bump both curves
-    (coupons re-fix): the interest-rate duration (≈ next reset for a floater).
-  - `spread_duration` / `spread_dv01` / `spread_key_rate` — bump the discount only:
-    the discount-margin / credit duration (≈ maturity for a floater).
-  - `forward_duration` / `forward_dv01` / `forward_key_rate` — bump the index only;
-    `effective = forward + spread` (first order).
+    (coupons re-fix): the interest-rate duration. It is small for a new floater; see
+    [`locked_floater`](@ref) for one whose current coupon is fixed.
+  - `spread_duration` / `spread_dv01` / `spread_key_rate` — bump the discount curve only:
+    the discount-margin / credit duration, close to that of a fixed-rate bond with the
+    same maturity.
+  - `forward_duration` / `forward_dv01` / `forward_key_rate` — bump the index curve only;
+    `effective = forward + spread`.
 
 Durations are in years; DV01s are in dollars per basis point. Dollar risk uses
 signed value derivatives and remains defined at zero value, where normalized
@@ -70,7 +73,7 @@ _contract_parallel_value(::Spread, target, forward, credit, s) =
     convexity(KeyRates(tenors), target, curve)             # effective key-rate convexity matrix
 
 Effective (rate) and spread (credit) duration / DV01 for a contract or portfolio,
-re-projecting cashflows under continuous-zero parallel shifts. Two-curve forms
+reprojecting cashflows under continuous-zero parallel shifts. Two-curve forms
 project coupons on `forward` and discount on `credit`. Unmarked contract and
 portfolio calls use `Effective()` for duration, DV01, and convexity; spread risk
 requires an explicit `Spread()` marker. Parallel measures take no tenor grid; use
@@ -120,11 +123,12 @@ function sensitivities(kr::KeyRates, target::_Contractish; discount::NamedTuple,
 end
 
 """
-    zspread(contract, credit, market_price; forward=credit) -> (; zspread, zspread_dv01)
+    zspread(contract, credit, market_price; forward = credit, s0 = 0.0, tol = 1e-12, maxiter = 100) -> (; zspread, zspread_dv01)
 
 Constant continuously-compounded spread `s` on the `credit` (discount) curve such that
 the model price equals `market_price`, with coupons estimated on `forward` (held fixed).
-Returns the spread and its sensitivity (\\\$/1bp parallel move of `credit + s`). Newton + AD.
+`zspread_dv01` is `-∂V/∂s / 10000` at the solved spread: the value lost per basis point
+of `s`. The solve takes Newton steps from `s0` with ForwardDiff derivatives.
 
 The solve stops once a Newton step is smaller than `tol` in rate units (not currency), so the
 result does not depend on the contract's notional and is defined for a zero `market_price`.

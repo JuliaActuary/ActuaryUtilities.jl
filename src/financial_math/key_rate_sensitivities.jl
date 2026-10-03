@@ -118,14 +118,12 @@ Return normalized key-rate durations `-∂V/∂rᵢ / V` for an `AbstractYieldMo
 Each `rᵢ` is a triangular continuous-zero bump at `kr.tenors[i]`. The base curve
 is used directly, without resampling or refitting.
 
-Empty collections and collections whose amounts are all exactly zero return zero
-key-rate durations by convention, with one entry per tenor, without valuing any payment.
-Every cashflow needs a time; unused trailing times are ignored.
-Wrapped `Cashflow` objects use their embedded amounts and payment times, including
-when explicit `times` are supplied. Numeric amounts use the explicit times, which
-default to `eachindex(cfs)` (periods `1:n`). The same holds for every key-rate,
+Empty and all-zero cashflow streams return zero key-rate durations, one per tenor;
+see [Zero cashflow streams](@ref). Every cashflow needs a time; unused trailing times
+are ignored. Wrapped `Cashflow` objects use their embedded amounts and payment times,
+including when explicit `times` are supplied. Numeric amounts use the explicit times,
+which default to `eachindex(cfs)` (periods `1:n`). The same holds for every key-rate,
 two-curve, and named-curve cashflow form.
-See [Zero cashflow streams](@ref) for numeric types and zero-net-value portfolios.
 
 # Tenor grid
 
@@ -140,7 +138,7 @@ support `[tenors[i-1], tenors[i+1]]` for interior knots. Endpoint bumps stay
 constant beyond the grid. All sensitivity after the last tenor belongs to its
 bucket; extend the grid to separate exposures at longer maturities.
 
-The hats sum to one, so the sum of key-rate durations equals parallel duration.
+The hats sum to one, so the sum of key-rate durations is ≈ the parallel duration.
 These are sensitivities to the specified bumps, not to spline parameters.
 
 # Example
@@ -166,7 +164,7 @@ end
     duration(::DV01, kr::KeyRates, curve::AbstractYieldModel, cfs, times) -> Vector
 
 Per-knot signed DV01s for any `AbstractYieldModel`: the `KeyRates` variants of
-`duration` in dollars per basis point. Their sum is the parallel DV01,
+`duration` in dollars per basis point. Their sum is ≈ the parallel DV01,
 `duration(DV01(), curve, cfs, times)`.
 """
 function duration(valuation_fn::F, ::DV01, kr::KeyRates, curve::AYM) where {F}
@@ -214,33 +212,30 @@ duration(valuation_fn::F, ::CS01, kr::KeyRates, base::AYM, credit::AYM) where {F
     convexity(base::AbstractYieldModel, credit::AbstractYieldModel, cfs, times) -> NamedTuple
     convexity(valuation_fn, kr::KeyRates, base, credit) -> NamedTuple
     convexity(kr::KeyRates, base, credit, cfs, times) -> NamedTuple
-    convexity(kr::KeyRates, curves::NamedTuple, cfs, times) -> NamedTuple{roles}{roles}
+    convexity(kr::KeyRates, curves::NamedTuple, cfs, times) -> nested NamedTuple of matrices (result.role1.role2)
 
 Return normalized convexity for a yield model, a pair of curves, or named
 discount layers. Matrix entries are `(∂²V/∂rᵢ∂rⱼ) / V`. For a single curve's
 scalar parallel convexity, use `convexity(curve, cfs, times)` or
 `convexity(valuation_fn, curve)`.
 
-Empty collections and collections whose amounts are all exactly zero return zero
-convexity by convention, retaining the usual scalar, matrix, or named-block shape
-without valuing any payment. Nonzero amounts that offset to zero present value
-still have undefined normalized convexity (`NaN`/`Inf`).
+Empty and all-zero cashflow streams return zero convexity in the usual shape; see
+[Zero cashflow streams](@ref).
 
-For the `NamedTuple` form, every named curve must be a discount-role layer
-(multiplicatively composed); do not pass `:index`. Per-pair outputs have equal
-values under multiplicative composition, but each matrix is independent and can
-be mutated without changing another block.
+For the `NamedTuple` form, every named curve must be a discount layer: each payment
+is discounted by the product of their discount factors. Do not pass an index curve.
+The per-pair blocks have equal values, but each matrix is independent and can be
+mutated without changing another block.
 
 The two-curve scalar forms return the parallel blocks `(; base, credit, cross)`,
 each `(∂²V/∂sᵢ∂sⱼ) / V` for continuous-zero parallel shifts of the named curves.
-They equal the sums of the corresponding `KeyRates` blocks, including cross terms.
+They are ≈ the sums of the corresponding `KeyRates` blocks, including cross terms.
 `cross` is the mixed derivative divided by `V`, without an extra factor of two.
 For decimal shifts `u` and `v`, the second-order P&L is
 `V / 2 * (base * u^2 + 2 * cross * u * v + credit * v^2)`.
-For fixed cashflows discounted at `base + credit`, all three blocks coincide
-where normalization is defined; key-rate block equality also requires matching
-grids and bump functions. Shifting both curves by one basis point shifts their
-combined continuous zero rates by two basis points. See [Two-curve convexity blocks](@ref).
+For fixed cashflows discounted at `base + credit`, all three blocks are equal when
+the value is nonzero. Shifting both curves by one basis point shifts their combined
+continuous zero rates by two basis points. See [Two-curve convexity blocks](@ref).
 Use [`sensitivities`](@ref) to also obtain value and duration or DV01 from the same
 derivatives.
 """
@@ -294,25 +289,18 @@ end
 Calculate value, key-rate durations or DV01s, and convexity together on the
 [`KeyRates`](@ref) grid. Callbacks use AD; fixed cashflows use analytic derivatives.
 
-For the `NamedTuple` cashflow form, every named curve is a multiplicatively
-composed discount layer. Per-role durations and per-pair convexity matrices
-have equal values but independent storage, so modifying one does not affect
-another. Relative durations and convexities are invariant to a change of
-position sign; dollar DV01s change sign with the position.
+For the `NamedTuple` cashflow form, every named curve is a discount layer, as in
+[`convexity`](@ref). Per-role durations and per-pair convexity matrices have equal
+values but independent storage, so modifying one does not affect another. Normalized
+durations and convexities do not change when the position's sign does; dollar DV01s
+change sign with the position.
 
-Empty collections and collections whose amounts are all exactly zero have zero
-value and dollar risk; normalized duration and convexity are zero by convention.
-Every cashflow needs a time; unused trailing times are ignored.
-Shapes are preserved without valuing any payment. Zero-stream results have the
-numeric type a nonempty stream's would: amounts, times, tenor grid, and the curve,
-which is queried once at time zero. An untyped empty collection takes its type from
-the curve. The zero check includes automatic-differentiation partials.
-
-Nonzero amounts that offset to zero present value retain dollar exposures and have
-undefined normalized risk (`NaN`/`Inf`). For portfolio risk, sum values and dollar
-derivatives before normalizing. A zero callback or contract value alone does not
-identify an empty or all-zero cashflow stream.
-See [Zero cashflow streams](@ref) for batch numeric types and simulation RNG behavior.
+Empty and all-zero cashflow streams return zero value and risk in the usual shapes; see
+[Zero cashflow streams](@ref) for their numeric types. Nonzero amounts that offset to
+zero present value keep their dollar risk but have undefined normalized risk
+(`NaN`/`Inf`); for portfolio risk, sum values and dollar derivatives before
+normalizing. Callback and contract forms do not use the zero-stream convention: a zero
+value from them gives undefined normalized risk.
 """
 function sensitivities(valuation_fn::F, kr::KeyRates, curve::AYM) where {F}
     return _single_curve_sensitivities(_keyrate((; curve), kr.tenors, valuation_fn; order = 2))

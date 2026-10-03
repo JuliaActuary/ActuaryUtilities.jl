@@ -1,4 +1,4 @@
-## Hull-White scenario sensitivities
+## Hull–White scenario sensitivities
 #
 # A bare `HullWhite` is a curve everywhere: a bump moves `hw.curve` and keeps the model
 # (curve_shifts.jl). `Scenarios` asks for simulation: the shared continuous-zero shocks

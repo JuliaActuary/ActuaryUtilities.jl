@@ -1,21 +1,21 @@
 ## Constant spread between two curves
 
 """
-    spread(curve1,curve2,cashflows)
+    spread(curve1, curve2, cashflows, times = eachindex(cashflows); tol = 1e-12, maxiter = 100)
 
 Find the constant spread to add to `curve1` so the cashflows have the same present
 value as under `curve2`.
 
 The spread is found via a damped Newton iteration on the pricing residual. A candidate is accepted
 once the undamped Newton step is smaller than `tol` in rate units (not currency) **and** the
-candidate reprices the cashflows: its pricing residual must be within `sqrt(eps)` of the gross
-discounted value `Σ|cfᵢ|⋅dfᵢ` under each curve. Both tests are unchanged by scaling the cashflows,
-and the gross scale is nonzero for zero-price and mixed-sign streams. A small step alone is not
-enough: near a combined annual rate of -100% the price derivative is so large that the step is tiny
-far from the root. Steps never go more than halfway to the edge of the spread's domain (the spread
-itself must exceed -1, and so must the combined rate when a periodic base is added nominally). An
-`ErrorException` is thrown if the valuation or its derivative is `NaN`, or if no candidate is
-accepted within `maxiter` iterations.
+candidate reprices the cashflows: its pricing residual must be at most `sqrt(eps)` times the sum
+of the gross discounted values `Σ|cfᵢ|⋅dfᵢ` under the two curves. Both tests are unchanged by
+scaling the cashflows, and the gross scale is nonzero for zero-price and mixed-sign streams. A
+small step alone is not enough: near a combined annual rate of -100% the price derivative is so
+large that the step is tiny far from the root. Steps never go more than halfway to the edge of
+the spread's domain (the spread must exceed -1, and so must the combined rate per period when it
+is added to a periodic base). An `ErrorException` is thrown if the valuation or its derivative is
+`NaN`, or if no candidate is accepted within `maxiter` iterations.
 
 !!! note
     For mixed-sign cashflows the pricing residual can have more than one exact root (e.g. a duration-neutral asset/liability pair); the root reached from a starting spread of zero is returned.
@@ -24,7 +24,7 @@ accepted within `maxiter` iterations.
 
 ```julia-repl
 julia> spread(0.04, 0.05, fill(10.0, 10))
-Periodic(0.010000000000000009, 1)
+Periodic(0.009999999999999964, 1)
 ```
 """
 function spread(curve1, curve2, cashflows, times = eachindex(cashflows); tol = 1.0e-12, maxiter = 100)

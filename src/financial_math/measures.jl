@@ -20,12 +20,12 @@ struct DV01 <: Duration end
     IR01 <: Duration
 
 Interest Rate 01: signed dollar risk for a one-basis-point parallel shift in the
-risk-free (base) curve, holding the credit spread constant.
+risk-free (base) curve, holding the credit curve fixed.
 
-Requires both a base curve and a credit spread. For fixed cashflows discounted at
-`base + spread`, IR01, CS01, and the DV01 of the combined rate are equal; the
-measures separate in the callback, key-rate, and contract forms, where the curves
-play different roles.
+Takes a base curve and a credit curve. For fixed cashflows discounted at
+`base + credit`, IR01, CS01 and the combined rate's DV01 are equal. They can differ
+only in the callback forms, where the two curves can play different roles. For
+contracts, use `Effective()` and `Spread()`.
 
 See also: [`CS01`](@ref), [`DV01`](@ref)
 """
@@ -35,12 +35,12 @@ struct IR01 <: Duration end
     CS01 <: Duration
 
 Credit Spread 01: signed dollar risk for a one-basis-point parallel shift in the
-credit spread, holding the risk-free (base) curve constant.
+credit curve, holding the risk-free (base) curve fixed.
 
-Requires both a base curve and a credit spread. For fixed cashflows discounted at
-`base + spread`, CS01, IR01, and the DV01 of the combined rate are equal; the
-measures separate in the callback, key-rate, and contract forms, where the curves
-play different roles.
+Takes a base curve and a credit curve. For fixed cashflows discounted at
+`base + credit`, CS01, IR01 and the combined rate's DV01 are equal. They can differ
+only in the callback forms, where the two curves can play different roles. For
+contracts, use `Effective()` and `Spread()`.
 
 See also: [`IR01`](@ref), [`DV01`](@ref)
 """
@@ -61,9 +61,9 @@ struct Effective <: Duration end
 """
     Spread <: Duration
 
-Spread (credit) duration: bumps the discount curve only, holding the projected
-(index) cashflows fixed. For a floating-rate bond this is ≈ time to maturity — the
-discount-margin / credit sensitivity.
+Spread (credit) duration: bumps the discount curve only; cashflows projected on the
+index curve stay fixed. For a floating-rate bond it is close to the duration of a
+fixed-rate bond with the same maturity.
 
 See also: [`Effective`](@ref), [`sensitivities`](@ref).
 """
@@ -79,9 +79,9 @@ increasing knot times in years.
 
 ```julia
 tenors = [1.0, 2.0, 5.0, 10.0, 30.0]
-duration(KeyRates(tenors), curve, cfs, times)            # vector of key rate durations
-duration(DV01(), KeyRates(tenors), curve, cfs, times)    # vector of key rate DV01s
-convexity(KeyRates(tenors), curve, cfs, times)           # matrix of key rate convexities
+duration(KeyRates(tenors), curve, cfs, times)            # vector of key-rate durations
+duration(DV01(), KeyRates(tenors), curve, cfs, times)    # vector of key-rate DV01s
+convexity(KeyRates(tenors), curve, cfs, times)           # matrix of key-rate convexities
 sensitivities(KeyRates(tenors), curve, cfs, times)       # value + durations + convexities
 ```
 

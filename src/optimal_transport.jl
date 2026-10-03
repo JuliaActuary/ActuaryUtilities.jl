@@ -106,10 +106,11 @@ function wasserstein(
 end
 
 # The quantile gap |x - y| in the accumulator's float type `T`. Equal values give an exact zero,
-# also when both are infinite. Integer samples subtract exactly and round once: converting each to
-# `T` first rounds `typemax(Int) - 1` and `typemax(Int)` to the same float, and subtracting in their
-# own type wraps around (`UInt8(0) - UInt8(1)` is 255). One integer type subtracts in its wider type;
-# two different ones, whose arithmetic also wraps (`Int8(-100) - UInt8(100)` is 56), in `BigInt`.
+# also when both are infinite. Two `Signed` or `Unsigned` integers subtract exactly and round once.
+# Converting each to `T` first rounds `typemax(Int) - 1` and `typemax(Int)` to the same float, and
+# subtracting in their own type wraps (`UInt8(0) - UInt8(1)` is 255). One integer type subtracts in
+# its wider type; two different ones (`Int8(-100) - UInt8(100)` is 56) subtract in `BigInt`. Other
+# pairs, including `Bool` and integer–float pairs, convert to `T` first.
 _gap(::Type{T}, x, y) where {T} = x == y ? zero(T) : abs(T(x) - T(y))
 _gap(::Type{T}, x::I, y::I) where {T, I <: Union{Signed, Unsigned}} =
     T(x > y ? widen(x) - widen(y) : widen(y) - widen(x))

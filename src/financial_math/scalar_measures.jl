@@ -14,8 +14,8 @@ _cashflow_vector(cfs::Union{Tuple, Base.Generator}) = _cashflow_vector(collect(c
     duration(Macaulay(),interest_rate,cfs,times)
     duration(Modified(),interest_rate,cfs,times)
     duration(DV01(),interest_rate,cfs,times)
-    duration(IR01(),base_curve,credit_spread,cfs,times)
-    duration(CS01(),base_curve,credit_spread,cfs,times)
+    duration(IR01(),base,credit,cfs,times)
+    duration(CS01(),base,credit,cfs,times)
     duration(interest_rate,cfs,times)             # Modified Duration
     duration(valuation_function,interest_rate)    # Modified Duration
     duration(valuation_function,DV01(),interest_rate)
@@ -31,28 +31,26 @@ must still contain an entry for each cashflow; unused trailing entries are ignor
 Scalar cashflow methods accept arrays, tuples, and finite generators. Arrays are
 flattened in column-major order; generators are collected once before valuation.
 Use `collect` for other iterables, such as `Iterators.take` or `skipmissing`.
-Relative duration is unchanged when the position sign reverses; dollar DV01,
+Normalized duration is unchanged when the position sign reverses; dollar DV01,
 IR01, and CS01 reverse sign with the position.
 
-Empty collections and collections whose amounts are all exactly zero return zero
-risk without valuing any payment. Every cashflow needs a time; unused trailing
-times are ignored. See [Zero cashflow streams](@ref) for the normalization convention,
-numeric types, and zero-net-value portfolios. Dollar sensitivities differentiate
-the signed value directly, including at zero present value; normalized duration
-remains undefined there. A zero callback value alone does not identify a zero stream.
+Empty and all-zero cashflow streams return zero risk; see [Zero cashflow streams](@ref).
+Dollar sensitivities differentiate the signed value directly, so they stay defined at
+zero present value, where normalized duration is not. Callback forms do not use the
+zero-stream convention: a zero value from them gives undefined normalized risk.
 
 The default measure is `Modified()`.
 
-- Modified duration: the relative change per point of yield change.
+- Modified duration: `-∂V/∂r / V`, the relative value lost per unit increase in the shocked rate.
 - Macaulay: the present-value-weighted average payment time.
-- DV01: the signed dollar change per basis point (hundredth of a percentage point), defined as `-∂V/∂r / 10000`.
-- IR01: the signed dollar change per basis point shift in the risk-free (base) curve, holding credit spread constant.
-- CS01: the signed dollar change per basis point shift in the credit spread, holding the risk-free (base) curve constant.
+- DV01: `-∂V/∂r / 10000`, the first-order value lost for a one-basis-point increase.
+- IR01: the first-order value lost for a one-basis-point increase in the base curve, holding the credit curve fixed.
+- CS01: the first-order value lost for a one-basis-point increase in the credit curve, holding the base curve fixed.
 
 # Shock coordinates
 
-Single-rate inputs are shocked in their native form; fixed-cashflow IR01/CS01 use
-the combined rate's coordinate. See [Shock coordinates](@ref):
+Each single-rate input moves in its own shock coordinate; fixed-cashflow IR01/CS01
+move the combined rate in its coordinate. See [Shock coordinates](@ref):
 
 - Scalars are annual effective rates: Modified = Macaulay / (1 + y).
 - `Periodic(y, m)` shocks its nominal rate: Modified = Macaulay / (1 + y/m).
@@ -95,7 +93,7 @@ julia> duration(Modified(),0.03,cfs,times)
 4.854368932038835
 
 julia> convexity(0.03,cfs,times)
-28.277877274012635
+28.277877274012628
 
 ```
 
@@ -105,13 +103,13 @@ Using any given value function, passed first so that do-block syntax works:
 julia> lump_sum_value(amount,years,i) = amount / (1 + i ) ^ years
 julia> my_lump_sum_value(i) = lump_sum_value(100,5,i)
 julia> duration(my_lump_sum_value,0.03)
-4.854368932038835
+4.8543689320388355
 julia> convexity(my_lump_sum_value,0.03)
 28.277877274012642
 julia> duration(0.03) do i
            lump_sum_value(100,5,i)
        end
-4.854368932038835
+4.8543689320388355
 
 ```
 """
@@ -124,11 +122,11 @@ duration(d::Union{Macaulay, Modified, DV01}, yield::_YieldInput, cfs::_CashflowC
     duration(d, yield, _cashflow_vector(cfs), times)
 
 ## Analytic measures for fixed cashflows
-# Each single-rate input moves in its own shock coordinate (docs: "Shock coordinates"):
-# the moved rate's compounding gives the convexity weight t(t + 1/m), with 1/m = 0 for a
-# continuous coordinate, and the divisor 1 + y/m turns Macaulay into modified duration
-# (m = 1 for scalars; 1 for continuous rates and every yield model, which take a
-# continuous-zero shift). Tests compare these formulas with the callback derivatives.
+# Each single-rate input moves in its own shock coordinate (docs: "Shock coordinates").
+# A rate compounded m times a year gives the convexity weight t(t + 1/m), and the divisor
+# 1 + y/m turns Macaulay into modified duration. Scalars have m = 1. Continuous rates and
+# every yield model take a continuous-zero shift: 1/m = 0 and the divisor is 1. Tests
+# compare these formulas with the callback derivatives.
 _coordinate(yield::Real) = (; inv_m = 1, divisor = 1 + yield)
 function _coordinate(yield::FinanceCore.Rate{<:Real, FinanceCore.Periodic})
     m = yield.compounding.frequency
@@ -158,7 +156,7 @@ function duration(valuation_function::F, yield::_YieldInput) where {F}
 end
 
 function duration(valuation_function::F, ::DV01, yield::_YieldInput) where {F}
-    # Dollar risk is defined even when value is zero and relative duration is not.
+    # Dollar risk is defined even when value is zero and normalized duration is not.
     return -ForwardDiff.derivative(i -> valuation_function(_parallel_bumped(yield, i)), 0.0) / 10_000
 end
 
@@ -215,46 +213,23 @@ finite generators; use `collect` for other iterables.
 Wrapped `Cashflow` objects use their embedded payment times even when `times` is
 supplied. Numeric amounts use the corresponding explicit time.
 
-A scalar or `Rate` input is shocked in its own compounding space. An
-`AbstractYieldModel` input is instead shocked additively in continuously
-compounded zero-rate space, the same coordinate as the key-rate APIs; scalar
-curve convexity equals the sum of the full key-rate convexity matrix. See
+A scalar or `Rate` input moves in its own shock coordinate. An `AbstractYieldModel`
+input takes an additive continuous-zero shift, the same coordinate as the key-rate
+APIs, so its convexity is ≈ the sum of the full key-rate convexity matrix. See
 [Shock coordinates](@ref).
 
-Empty collections and collections whose amounts are all exactly zero return zero
-by convention, without valuing any payment. Every cashflow needs a time; unused
-trailing times are ignored. See [Zero cashflow streams](@ref) for numeric types and
-zero-net-value portfolios.
+Empty and all-zero cashflow streams return zero; see [Zero cashflow streams](@ref).
+Every cashflow needs a time; unused trailing times are ignored.
 
 # Examples
 
-Using vectors of cashflows and times
 ```julia-repl
-julia> times = 1:5
-julia> cfs = [0,0,0,0,100]
-julia> duration(0.03,cfs,times)
-4.854368932038834
-julia> duration(Macaulay(),0.03,cfs,times)
-5.0
-julia> duration(Modified(),0.03,cfs,times)
-4.854368932038835
-julia> convexity(0.03,cfs,times)
-28.277877274012635
+julia> convexity(0.03, [0, 0, 0, 0, 100], 1:5)
+28.277877274012628
 
-```
-
-Using any given value function:
-
-```julia-repl
-julia> lump_sum_value(amount,years,i) = amount / (1 + i ) ^ years
-julia> my_lump_sum_value(i) = lump_sum_value(100,5,i)
-julia> duration(my_lump_sum_value,0.03)
-4.854368932038835
-julia> convexity(my_lump_sum_value,0.03)
+julia> convexity(i -> 100 / (1 + i)^5, 0.03)
 28.277877274012642
-
 ```
-
 """
 convexity(yield::_YieldInput, cfs::_CashflowCollection) = convexity(yield, _cashflow_vector(cfs))
 convexity(yield::_YieldInput, cfs::_CashflowCollection, times) = convexity(yield, _cashflow_vector(cfs), times)

@@ -56,14 +56,9 @@ price(x1, x2, x3) = FinanceCore.present_value(x1, x2, x3) |> abs
     breakeven(yield, cashflows::Vector)
     breakeven(yield, cashflows::Vector,times::Vector)
 
-Return the payment time when accumulated cashflows break even at the given yield.
-
-Assumptions:
-
-- cashflows occur at the end of the period
-- cashflows are evenly spaced from time zero if `times` is omitted
-
-Returns `nothing` if cashflow stream never breaks even.
+Return the payment time from which the balance accumulated at `yield` stays
+nonnegative, or `nothing` if it never does. Without `times`, cashflow `k` is paid at
+time `k - 1`.
 
 ```julia-repl
 julia> breakeven(0.10, [-10,1,2,3,4,8])
@@ -111,7 +106,7 @@ end
 
 The multiple on invested capital ("moic") is the un-discounted sum of distributions divided by the sum of the contributions. The function assumes that negative numbers in the array represent contributions and positive numbers represent distributions.
 
-A sum over no terms contributes zero, so a total loss (contributions only) has a moic of `0.0`. Without contributions the ratio divides by zero, and in floating-point arithmetic that gives `Inf` for positive distributions and `NaN` (an undefined ratio) when distributions are zero too, as for an empty or all-zero stream. Neither is a meaningful multiple.
+A total loss (contributions only) has a moic of `0.0`. With no contributions the ratio divides by zero: `Inf` when distributions are positive, and `NaN` for an empty or all-zero stream. Neither is a meaningful multiple.
 
 # Examples
 
