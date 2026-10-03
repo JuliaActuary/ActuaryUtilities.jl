@@ -108,7 +108,7 @@ function dv01(metric::Union{Effective, Spread}, target::_Contractish, forward::A
     return -ForwardDiff.derivative(s -> _contract_parallel_value(metric, target, forward, credit, s), 0.0) / 10_000
 end
 dv01(metric::Union{Effective, Spread}, target::_Contractish, curve::AYM) = dv01(metric, target, curve, curve)
-dv01(args...; kwargs...) = duration(DV01(), args...; kwargs...)
+dv01(args...) = duration(DV01(), args...)
 
 function sensitivities(kr::KeyRates, target::_Contractish; discount::NamedTuple, index)
     layers = keys(discount)

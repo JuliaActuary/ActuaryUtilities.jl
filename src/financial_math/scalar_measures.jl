@@ -8,9 +8,6 @@ const _CashflowCollection = Union{AbstractArray, Tuple, Base.Generator}
 # Indexed kernels share one representation; materialize generators before AD
 # reevaluates a valuation, including generators backed by a stateful iterator.
 _cashflow_vector(cfs::AbstractArray) = vec(cfs)
-# Empty tuples collect to Union{}[], whose element type also matches Cashflow. Treat them as
-# an untyped empty collection before dispatch derives embedded times.
-_cashflow_vector(::AbstractArray{Union{}}) = Any[]
 _cashflow_vector(cfs::Union{Tuple, Base.Generator}) = _cashflow_vector(collect(cfs))
 
 """
