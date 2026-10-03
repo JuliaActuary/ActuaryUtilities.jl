@@ -166,24 +166,25 @@ function duration(valuation_function::F, ::DV01, yield::_YieldInput) where {F}
 end
 
 """
-    duration(IR01(), base_curve, credit_spread, cfs, times)
-    duration(IR01(), base_curve, credit_spread, cfs)
+    duration(IR01(), base, credit, cfs, times = eachindex(cfs))
+    duration(CS01(), base, credit, cfs, times = eachindex(cfs))
+    duration(IR01(), kr::KeyRates, base::AbstractYieldModel, credit::AbstractYieldModel, cfs, times = eachindex(cfs)) -> Vector
+    duration(CS01(), kr::KeyRates, base::AbstractYieldModel, credit::AbstractYieldModel, cfs, times = eachindex(cfs)) -> Vector
 
-Calculate fixed-cashflow IR01 (Interest Rate 01) using the combined-rate shock
-convention: `-∂V/∂s / 10000`, the first-order value lost per basis point increase.
+Fixed-cashflow IR01 or CS01: `-∂V/∂s / 10000`, the first-order value lost per basis point.
+The cashflows are discounted at `base + credit`. Both measures shift that combined rate by one
+basis point in its own coordinate, so they equal each other and
+`duration(DV01(), base + credit, cfs, times)`; the `KeyRates` forms equal
+`duration(DV01(), kr, base + credit, cfs, times)`.
 
-Fixed cashflows are discounted at `base_curve + credit_spread`. This method defines
-the base-rate move as a one-basis-point shift in that combined rate's coordinate,
-so it equals [`CS01`](@ref) and the DV01 of the combined rate. Scalars add as annual
-rates, a `Rate` sum takes the left operand's compounding, and any yield-model
-component makes the sum a yield model with a continuous-zero shock.
+The combined rate's coordinate is continuous zero when either input is a yield model. Otherwise
+it is annual effective for two scalars, and the `Rate`'s compounding when one input is a `Rate`
+(the left one's when both are). With mixed compounding this is not a bump of either input's own
+nominal rate. Credit here is an additive discount spread, not a CDS quote or a hazard rate.
 
-For mixed-compounding inputs, this is not an independent bump to the base input's
-original nominal rate. With two yield models, it is a continuous-zero parallel
-shift of the base curve with credit held fixed. Use the callback or contract forms
-when the curves also affect projected payments. This discount-spread convention
-does not imply equality with market-quote risk after recalibration. See
-[Two curves: IR01 and CS01](@ref).
+When the curves play different roles, use the callback forms, or the contract measures
+`Effective()` and `Spread()`. For quote risk after recalibration, see [Market Inputs](@ref).
+See [Two curves: IR01 and CS01](@ref).
 
 # Examples
 
@@ -199,49 +200,10 @@ julia> duration(IR01(), 0.03, 0.02, cfs, times) ≈ duration(DV01(), 0.05, cfs, 
 true
 ```
 """
-function duration(::IR01, base_curve, credit_spread, cfs::_CashflowCollection, times...)
-    # Shock the combined rate in its own coordinate so IR01 and CS01 measure the
-    # same one-basis-point move whatever the component input types.
-    return duration(DV01(), base_curve + credit_spread, cfs, times...)
-end
-
-"""
-    duration(CS01(), base_curve, credit_spread, cfs, times)
-    duration(CS01(), base_curve, credit_spread, cfs)
-
-Calculate fixed-cashflow CS01 (Credit Spread 01) using the combined-rate shock
-convention: `-∂V/∂s / 10000`, the first-order value lost per basis point increase.
-
-Fixed cashflows are discounted at `base_curve + credit_spread`. This method defines
-the spread move as a one-basis-point shift in that combined rate's coordinate,
-so it equals [`IR01`](@ref) and the DV01 of the combined rate. The coordinate is
-annual effective for scalar sums, the left operand's compounding for `Rate` sums,
-and continuous zero when a yield-model component is present.
-
-For mixed-compounding inputs, this is not an independent bump to the credit input's
-original nominal rate. With two yield models, it is a continuous-zero parallel
-shift of credit with the base curve held fixed. Credit here is an additive discount
-spread, not a CDS par quote or hazard-rate parameter. Use the callback, key-rate,
-or contract forms when the curves play different roles, and [Market Inputs](@ref)
-for sensitivity to quotes used in calibration. See [Two curves: IR01 and CS01](@ref).
-
-# Examples
-
-```julia-repl
-julia> cfs = [5, 5, 5, 105];
-
-julia> times = 1:4;
-
-julia> duration(CS01(), 0.03, 0.02, cfs, times)
-0.0354595050416236
-
-julia> duration(CS01(), 0.03, 0.02, cfs, times) ≈ duration(DV01(), 0.05, cfs, times)
-true
-```
-"""
-function duration(::CS01, base_curve, credit_spread, cfs::_CashflowCollection, times...)
-    return duration(DV01(), base_curve + credit_spread, cfs, times...)
-end
+duration(::Union{IR01, CS01}, base, credit, cfs::_CashflowCollection, times...) =
+    duration(DV01(), base + credit, cfs, times...)
+duration(::Union{IR01, CS01}, kr::KeyRates, base::AYM, credit::AYM, cfs::AbstractVector, times = eachindex(cfs)) =
+    duration(DV01(), kr, base + credit, cfs, times)
 
 """
     convexity(yield,cfs,times)

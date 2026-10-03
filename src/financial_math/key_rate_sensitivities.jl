@@ -178,28 +178,21 @@ function duration(::DV01, kr::KeyRates, curve::AYM, cfs::AbstractVector, times =
     return _per_bp(r, r.gradient.curve)
 end
 
-# The curve role each two-curve measure bumps.
-_role(::IR01) = :base
-_role(::CS01) = :credit
-
 """
     duration(valuation_fn, ::IR01, base::AbstractYieldModel, credit::AbstractYieldModel) -> scalar
     duration(valuation_fn, ::IR01, kr::KeyRates, base, credit) -> Vector
-    duration(::IR01, kr::KeyRates, base, credit, cfs, times) -> Vector
-    duration(valuation_fn, ::CS01, ...), duration(::CS01, ...) -> ...
+    duration(valuation_fn, ::CS01, ...) -> ...
 
-Two-curve signed IR01/CS01 for any `AbstractYieldModel` pair. IR01 applies a
-continuous-zero bump to the base (risk-free) curve only; CS01 bumps the credit
-(spread) curve only. The callback receives `(base, credit)`, so the two curves can
-play different roles. The scalar callback forms apply a parallel bump and equal the
-sums of the `KeyRates` vectors. For fixed cashflows discounted at `base + credit`,
-use the scalar cashflow form `duration(IR01(), base, credit, cfs, times)`.
+Two-curve IR01 and CS01 of a valuation callback that receives `(base, credit)`:
+`-∂V/∂s / 10000`, the first-order value lost per basis point. IR01 shifts the continuous zero
+rates of the base curve and holds the credit curve fixed; CS01 shifts the credit curve and holds
+the base curve fixed. Each is the callback's DV01 in its one curve. The scalar forms apply a
+parallel shift and are ≈ the sums of the `KeyRates` vectors.
 
-Both measures use `-∂V/∂s / 10000`. For fixed cashflows discounted at `base + credit`,
-their values coincide under matching continuous-zero bumps (and the same grid for
-key-rate results). A callback can give different values when the curves affect
-payments differently. These curve shifts do not recalibrate to bumped market
-quotes; see [Two curves: IR01 and CS01](@ref) and [Market Inputs](@ref).
+For fixed cashflows discounted at `base + credit`, IR01 and CS01 are equal; a callback can give
+different values when the curves affect payments differently. These curve shifts do not
+recalibrate to bumped market quotes; see [Two curves: IR01 and CS01](@ref) and
+[Market Inputs](@ref).
 
 ```julia
 duration(IR01(), base, credit) do b, c
@@ -213,10 +206,6 @@ duration(valuation_fn::F, ::IR01, kr::KeyRates, base::AYM, credit::AYM) where {F
     duration(b -> valuation_fn(b, credit), DV01(), kr, base)
 duration(valuation_fn::F, ::CS01, kr::KeyRates, base::AYM, credit::AYM) where {F} =
     duration(c -> valuation_fn(base, c), DV01(), kr, credit)
-function duration(m::Union{IR01, CS01}, kr::KeyRates, base::AYM, credit::AYM, cfs::AbstractVector, times = eachindex(cfs))
-    r = _keyrate((; base, credit), kr.tenors, cfs, times)
-    return _per_bp(r, r.gradient[_role(m)])
-end
 
 """
     convexity(valuation_fn, kr::KeyRates, curve::AbstractYieldModel) -> Matrix
