@@ -1,8 +1,3 @@
-# Zero streams query the curve once, at time zero, for their result's numeric type; they
-# never value a payment.
-struct ZeroCashflowTestCurve <: FM.Yield.AbstractYieldModel end
-FC.discount(::ZeroCashflowTestCurve, t) = iszero(t) ? one(float(t)) : error("zero cashflows do not value payments")
-
 @testset "Zero cashflow streams" begin
     curve = ZeroCashflowTestCurve()
     tenors = [1.0, 3.0, 7.0]

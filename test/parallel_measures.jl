@@ -22,6 +22,8 @@
         @test duration(CS01(), base, spread, amounts, times) == ir01
         @test duration(DV01(), base + spread, amounts, times) == ir01
         @test duration(IR01(), base, spread, FC.Cashflow.(amounts, times)) == ir01
+        @test duration(CS01(), base, spread, FC.Cashflow.(amounts, times)) == ir01
+        @test duration(CS01(), base, spread, amounts) ≈ ir01 rtol = 1.0e-14   # times default to 1:3
     end
 end
 

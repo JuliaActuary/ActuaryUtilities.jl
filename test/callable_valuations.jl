@@ -1,19 +1,3 @@
-struct CashflowValue{C, T}
-    cashflows::C
-    times::T
-end
-(v::CashflowValue)(curve) = FC.pv(curve, v.cashflows, v.times)
-(v::CashflowValue)(base, credit) = v(base + credit)
-
-struct ScenarioValue{V}
-    value::V
-end
-(v::ScenarioValue)(scenarios) = sum(v.value, scenarios) / length(scenarios)
-
-_same_sensitivity(a, b) = isapprox(a, b; rtol = 1.0e-12, atol = 1.0e-12)
-_same_sensitivity(a::NamedTuple, b::NamedTuple) =
-    keys(a) == keys(b) && all(map(_same_sensitivity, values(a), values(b)))
-
 @testset "Callable valuations and cashflow dispatch" begin
     curve = FM.Yield.Constant(FC.Continuous(0.04))
     credit = FM.Yield.Constant(FC.Continuous(0.01))
@@ -86,5 +70,4 @@ _same_sensitivity(a::NamedTuple, b::NamedTuple) =
         reference = sensitivities(s -> value(s), prefix..., kr, scenarios())
         @test _same_sensitivity(result, reference)
     end
-    @test isempty(Test.detect_ambiguities(ActuaryUtilities; recursive = true))
 end

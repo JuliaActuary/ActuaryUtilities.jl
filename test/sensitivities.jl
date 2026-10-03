@@ -318,7 +318,7 @@ end
         c2 = FM.ZeroRateCurve(rates2, tenors, FM.Spline.Linear())
         c3 = FM.ZeroRateCurve(rates .+ 0.002, tenors, FM.Spline.Linear())
         nt = (; rf = c1, credit = c2, ilp = c3)
-        ad_v, ad_g = NCAD(
+        ad = NCAD(
             c -> sum(
                 amts[k] * FC.discount(c.rf, times[k]) *
                     FC.discount(c.credit, times[k]) *
@@ -328,12 +328,20 @@ end
             nt, tenors
         )
         an = KRA_N(nt, tenors, amts, times; order = 2)
-        @test ad_v ≈ an.value rtol = 1.0e-12
+        @test ad.value ≈ an.value rtol = 1.0e-12
         # Per-role gradients from the AD path all agree with the single shared
         # gradient returned by the analytic helper.
         for r in (:rf, :credit, :ilp)
-            @test maximum(abs.(ad_g[r] .- an.gradient)) < 1.0e-12
+            @test maximum(abs.(ad.gradient[r] .- an.gradient)) < 1.0e-12
         end
+
+        # The public NamedTuple forms return the same derivatives.
+        sens = sensitivities(KeyRates(tenors), nt, amts, times)
+        @test sens.value ≈ ad.value rtol = 1.0e-12
+        @test maximum(abs.(sens.durations.rf .- (-ad.gradient.rf ./ ad.value))) < 1.0e-12
+        conv = convexity(KeyRates(tenors), nt, amts, times)
+        @test conv.rf.rf isa AbstractMatrix
+        @test conv.rf.credit ≈ conv.credit.rf  # symmetric under multiplicative discount
     end
 end
 

@@ -192,22 +192,7 @@ end
     @test_throws ErrorException zspread(FC.Cashflow(1.0, 2.0), base, exp(-0.1); maxiter = 1)
 end
 
-@testset "spread solves do not depend on notional" begin
-    base = FM.Yield.Constant(FC.Continuous(0.03))
-    for n in (1.0e-12, 1.0, 1.0e10)
-        # a two-year payment priced at a 5% force is 2% over the 3% base
-        z = zspread(FC.Cashflow(n, 2.0), base, n * exp(-0.1))
-        @test z.zspread ≈ 0.02 atol = 1.0e-14
-        @test z.zspread_dv01 ≈ n * 2 * exp(-0.1) / 10_000 rtol = 1.0e-12
-        @test FC.rate(spread(0.04, 0.05, n .* fill(10.0, 10))) ≈ 0.01 atol = 1.0e-14
-        # zero price, mixed signs: 100 at 1 and -95 at 2 have zero value at a force of log(0.95)
-        mixed = FM.Composite(FC.Cashflow(100n, 1.0), FC.Cashflow(-95n, 2.0))
-        @test zspread(mixed, base, 0.0).zspread ≈ log(0.95) - 0.03 atol = 1.0e-14
-        @test FC.rate(spread(0.03, -0.05, n .* [100.0, -95.0], [1.0, 2.0])) ≈ -0.08 atol = 1.0e-14
-    end
-end
-
-@testset "spread and zspread are scale-equivariant" begin
+@testset "spread and zspread do not depend on notional" begin
     # Scaling every cashflow by k scales values and dollar sensitivities by k and leaves the
     # spreads unchanged. Each case is also checked against an independent closed form.
     base = FM.Yield.Constant(FC.Continuous(0.03))
@@ -219,6 +204,10 @@ end
     unit_z = zspread(stream(1.0), base, price)
     unit_s = spread(curve, curve + 0.01, cfs, times)
     for k in (1.0e-12, 1.0, 1.0e10)
+        # a two-year payment priced at a 5% force is 2% over the 3% base
+        z = zspread(FC.Cashflow(k, 2.0), base, k * exp(-0.1))
+        @test z.zspread ≈ 0.02 atol = 1.0e-14
+        @test z.zspread_dv01 ≈ k * 2 * exp(-0.1) / 10_000 rtol = 1.0e-12
         z = zspread(stream(k), base, k * price)
         @test z.zspread ≈ 0.02 atol = 1.0e-14
         @test z.zspread ≈ unit_z.zspread atol = 1.0e-15
@@ -229,6 +218,11 @@ end
         @test FC.rate(s) ≈ 0.01 atol = 1.0e-14
         @test FC.rate(s) ≈ FC.rate(unit_s) atol = 1.0e-15
         @test FC.pv(curve + s, k .* cfs, times) ≈ k * FC.pv(curve + 0.01, cfs, times) rtol = 1.0e-12
+        @test FC.rate(spread(0.04, 0.05, k .* fill(10.0, 10))) ≈ 0.01 atol = 1.0e-14
+        # zero price, mixed signs: 100 at 1 and -95 at 2 have zero value at a force of log(0.95)
+        mixed = FM.Composite(FC.Cashflow(100k, 1.0), FC.Cashflow(-95k, 2.0))
+        @test zspread(mixed, base, 0.0).zspread ≈ log(0.95) - 0.03 atol = 1.0e-14
+        @test FC.rate(spread(0.03, -0.05, k .* [100.0, -95.0], [1.0, 2.0])) ≈ -0.08 atol = 1.0e-14
     end
 end
 

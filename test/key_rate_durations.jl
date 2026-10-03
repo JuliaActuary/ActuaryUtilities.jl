@@ -12,15 +12,15 @@
     @test duration(KeyRates(1:5), c, cfo) ≈ krds
 
     # Hat shape: flat before the first knot, triangular between knots, and flat
-    # after the last knot.
-    tenors = 1:10
-    bumps(i) = [k == i ? 0.001 : 0.0 for k in tenors]
-    @test FinancialMath._hat_bump(tenors, bumps(5), 5.0) ≈ 0.001
-    @test FinancialMath._hat_bump(tenors, bumps(5), 4.5) ≈ 0.0005
-    @test FinancialMath._hat_bump(tenors, bumps(5), 6.0) ≈ 0.0 atol = 1.0e-16
-    @test FinancialMath._hat_bump(tenors, bumps(1), 0.5) ≈ 0.001
-    @test FinancialMath._hat_bump(tenors, bumps(10), 11.0) ≈ 0.001
-    @test sum(FinancialMath._hat_bump(tenors, bumps(i), 4.25) for i in tenors) ≈ 0.001
+    # after the last knot. A single payment's key-rate durations split its time by
+    # the hat weights at that time, which sum to one.
+    krds_at(t) = duration(KeyRates(1:10), c, [100.0], [t])
+    unit(i) = [k == i ? 1.0 : 0.0 for k in 1:10]
+    @test krds_at(5.0) ≈ 5.0 * unit(5) atol = 1.0e-12
+    @test krds_at(4.5) ≈ 4.5 * (0.5 * unit(4) + 0.5 * unit(5)) atol = 1.0e-12
+    @test krds_at(4.25) ≈ 4.25 * (0.75 * unit(4) + 0.25 * unit(5)) atol = 1.0e-12
+    @test krds_at(0.5) ≈ 0.5 * unit(1) atol = 1.0e-12
+    @test krds_at(11.0) ≈ 11.0 * unit(10) atol = 1.0e-12
 end
 
 @testset "ZeroRateCurve duration" begin
@@ -95,23 +95,6 @@ end
         @test liability_scalar ≈ liability_curve atol = 1.0e-12
         @test liability_curve ≈ sum(liability_key_rates) atol = 1.0e-12
         @test liability_do_block ≈ liability_curve atol = 1.0e-12
-    end
-
-    @testset "Scalar IR01 and CS01 preserve position sign" begin
-        base, spread = 0.03, 0.02
-        times = [1.0, 2.0, 3.0]
-        asset_cfs = [5.0, 5.0, 105.0]
-        # Independent derivative of the annual-compounded present value.
-        expected = sum(t * cf / (1 + base + spread)^(t + 1) for (cf, t) in zip(asset_cfs, times)) / 10000
-
-        for measure in (IR01(), CS01()), sign in (-1, 1)
-            cfs = sign * asset_cfs
-            cashflows = FC.Cashflow.(cfs, times)
-            @test duration(measure, base, spread, cfs, times) ≈ sign * expected
-            @test duration(measure, base, spread, cfs) ≈ sign * expected
-            @test duration(measure, base, spread, cashflows) ≈ sign * expected
-            @test duration(measure, base, spread, cfs, times) ≈ duration(DV01(), base + spread, cfs, times)
-        end
     end
 
     @testset "do-block custom valuation (callable bond)" begin
@@ -301,43 +284,6 @@ end
         dur_cub = duration(KeyRates(tenors), zrc_cub, cfs, tenors)
 
         @test dur_lin ≈ dur_cub atol = 1.0e-4
-    end
-
-    @testset "multi-curve NamedTuple: analytic ≈ _ncurve_ad (gradient/Hessian)" begin
-        # _ncurve_analytic must agree with _ncurve_ad on the vanilla cashflow
-        # case (static cfs, multiplicative discount product). Regression guard
-        # for the closed-form derivation of multi-curve KRD.
-        rates = fill(0.03, 5)
-        tenors = [1.0, 2.0, 3.0, 4.0, 5.0]
-        zrc1 = FM.ZeroRateCurve(rates, tenors, FM.Spline.Linear())
-        zrc2 = FM.ZeroRateCurve(rates .+ 0.005, tenors, FM.Spline.Linear())
-        zrc3 = FM.ZeroRateCurve(rates .+ 0.002, tenors, FM.Spline.Linear())
-        amts = [5.0, 5.0, 5.0, 5.0, 105.0]
-        times = [1.0, 2.0, 3.0, 4.0, 5.0]
-        nt3 = (; rf = zrc1, credit = zrc2, ilp = zrc3)
-
-        vf(c) = sum(
-            amts[k] * FC.discount(c.rf, times[k]) *
-                FC.discount(c.credit, times[k]) *
-                FC.discount(c.ilp, times[k]) for k in eachindex(amts)
-        )
-        v_ad, g_ad = ActuaryUtilities.FinancialMath._ncurve_ad(vf, nt3, tenors)
-        an = ActuaryUtilities.FinancialMath._ncurve_analytic(nt3, tenors, amts, times; order = 2)
-
-        @test v_ad ≈ an.value rtol = 1.0e-12
-        # The analytic helper returns a single shared gradient vector — under
-        # multiplicative discount composition the per-role gradients coincide.
-        for r in (:rf, :credit, :ilp)
-            @test maximum(abs.(g_ad[r] .- an.gradient)) < 1.0e-12
-        end
-
-        # Public API surfaces accept the NamedTuple form.
-        sens = sensitivities(KeyRates(tenors), nt3, amts, times)
-        @test sens.value ≈ v_ad rtol = 1.0e-12
-        @test maximum(abs.(sens.durations.rf .- (-g_ad.rf ./ v_ad))) < 1.0e-12
-        conv = convexity(KeyRates(tenors), nt3, amts, times)
-        @test conv.rf.rf isa AbstractMatrix
-        @test conv.rf.credit ≈ conv.credit.rf  # symmetric under multiplicative discount
     end
 end
 
