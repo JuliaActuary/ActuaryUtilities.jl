@@ -1,10 +1,8 @@
 ## Hull-White scenario sensitivities
 #
 # A bare `HullWhite` is a curve everywhere: a bump moves `hw.curve` and keeps the model
-# (key_rate_sensitivities.jl). `Scenarios` asks for simulation: the shared continuous-zero shocks
+# (curve_shifts.jl). `Scenarios` asks for simulation: the shared continuous-zero shocks
 # move `hw.curve`, and the valuation sees the paths simulated from each shocked model.
-
-const HW = FinanceModels.ShortRate.HullWhite
 
 """
     Scenarios(hw::HullWhite; n_scenarios = 1000, timestep = 1/12, horizon = nothing, rng = Random.default_rng())

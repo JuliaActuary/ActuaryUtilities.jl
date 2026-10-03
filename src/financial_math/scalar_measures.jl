@@ -2,7 +2,7 @@
 
 # Cashflow routes accept the yield inputs supported by present_value; this
 # distinguishes them from metric-first and callable-valuation signatures.
-const _YieldInput = Union{Real, FinanceCore.Rate, FinanceModels.Yield.AbstractYieldModel}
+const _YieldInput = Union{Real, FinanceCore.Rate, AYM}
 const _CashflowCollection = Union{AbstractArray, Tuple, Base.Generator}
 
 # Indexed kernels share one representation; materialize generators before AD
@@ -137,7 +137,7 @@ function _coordinate(yield::FinanceCore.Rate{<:Real, FinanceCore.Periodic})
     m = yield.compounding.frequency
     return (; inv_m = 1 / m, divisor = 1 + FinanceCore.rate(yield) / m)
 end
-_coordinate(::Union{FinanceCore.Rate{<:Real, FinanceCore.Continuous}, FinanceModels.Yield.AbstractYieldModel}) =
+_coordinate(::Union{FinanceCore.Rate{<:Real, FinanceCore.Continuous}, AYM}) =
     (; inv_m = false, divisor = 1)
 
 duration(::Macaulay, yield::_YieldInput, cfs::AbstractVector, times = eachindex(cfs)) =
@@ -159,10 +159,6 @@ function duration(valuation_function::F, yield::_YieldInput) where {F}
     D(i) = log(abs(valuation_function(_parallel_bumped(yield, i))))
     return -ForwardDiff.derivative(D, 0.0)
 end
-
-# A scalar or `Rate` moves in its own coordinate; yield models move every continuous
-# zero rate (key_rate_sensitivities.jl).
-_parallel_bumped(yield, shift) = yield + shift
 
 function duration(valuation_function::F, ::DV01, yield::_YieldInput) where {F}
     # Dollar risk is defined even when value is zero and relative duration is not.

@@ -17,6 +17,7 @@ export irr, internal_rate_of_return, spread,
 
 include("financial_math/cashflow_risk.jl")
 include("financial_math/measures.jl")
+include("financial_math/curve_shifts.jl")
 include("financial_math/derivatives.jl")
 include("financial_math/valuation.jl")
 include("financial_math/scalar_measures.jl")
