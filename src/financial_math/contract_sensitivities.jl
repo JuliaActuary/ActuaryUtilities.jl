@@ -111,6 +111,8 @@ dv01(metric::Union{Effective, Spread}, target::_Contractish, curve::AYM) = dv01(
 dv01(args...) = duration(DV01(), args...)
 
 function sensitivities(kr::KeyRates, target::_Contractish; discount::NamedTuple, index)
+    # `merge` would replace a layer named `index` with the projection curve.
+    haskey(discount, :index) && throw(ArgumentError("a discount layer cannot be named :index"))
     layers = keys(discount)
     return sensitivities(kr, merge(discount, (; index = index))) do c
         _value(target, c.index, reduce(+, getfield(c, r) for r in layers))

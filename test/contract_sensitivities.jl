@@ -94,6 +94,8 @@
         @test rs.duration.rf ≈ rs.duration.credit atol = 1.0e-8       # additive layers ⇒ equal discount sensitivity
         @test rs.duration.credit ≈ rs.duration.ilp atol = 1.0e-8
         @test rs.duration.index < 0.0                                # bumping the index raises coupons → raises value
+        # The projection curve is the `index` role, so no discount layer may take that name.
+        @test_throws ArgumentError sensitivities(KeyRates(tenors), flm; discount = (; index = curve, credit), index = curve)
     end
 
     @testset "z-spread round-trips; locked ≈ next reset" begin

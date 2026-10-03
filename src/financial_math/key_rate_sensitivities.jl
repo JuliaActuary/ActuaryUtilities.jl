@@ -385,7 +385,9 @@ Differentiate `valuation(curves)` with respect to each named curve. Return value
 per-role parallel duration and DV01, and per-role key-rate duration and DV01
 vectors on the `kr.tenors` grid. The contract form sums the `discount` layers and
 projects coupons using `index`. For example, `discount = (; rf, credit, ilp)`
-produces separate risk-free, credit, liquidity, and index sensitivities.
+produces separate risk-free, credit, liquidity, and index sensitivities. The result
+names the projection curve `index`, so a discount layer with that name throws an
+`ArgumentError`.
 
 Every named value must be an `AbstractYieldModel`. To differentiate with respect
 to market inputs that the valuation turns into curves, pass named input vectors
