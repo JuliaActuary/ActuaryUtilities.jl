@@ -81,8 +81,9 @@ function duration(metric::Union{Effective, Spread}, target::_Contractish, forwar
     return -derivative / value
 end
 duration(metric::Union{Effective, Spread}, target::_Contractish, curve::AYM) = duration(metric, target, curve, curve)
-duration(::Effective, kr::KeyRates, target::_Contractish, curve::AYM) = sensitivities(kr, target, curve).effective_key_rate
-duration(::Spread, kr::KeyRates, target::_Contractish, curve::AYM) = sensitivities(kr, target, curve).spread_key_rate
+# One curve role each: Effective bumps the curve that projects and discounts, Spread only discounting.
+duration(::Effective, kr::KeyRates, target::_Contractish, curve::AYM) = duration(c -> _value(target, c, c), kr, curve)
+duration(::Spread, kr::KeyRates, target::_Contractish, curve::AYM) = duration(c -> _value(target, curve, c), kr, curve)
 # Unmarked contract and portfolio calls use Effective().
 duration(target::_Contractish, curve::AYM) = duration(Effective(), target, curve)
 duration(kr::KeyRates, target::_Contractish, curve::AYM) = duration(Effective(), kr, target, curve)

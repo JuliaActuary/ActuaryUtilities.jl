@@ -254,14 +254,12 @@ duration(IR01(), base, credit) do b, c
 end
 ```
 """
-function duration(valuation_fn::F, m::Union{IR01, CS01}, base::AYM, credit::AYM) where {F}
-    r = _keyrate((; base, credit), _PARALLEL_GRID, valuation_fn)
-    return _per_bp(r, only(r.gradient[_role(m)]))
-end
-function duration(valuation_fn::F, m::Union{IR01, CS01}, kr::KeyRates, base::AYM, credit::AYM) where {F}
-    r = _keyrate((; base, credit), kr.tenors, valuation_fn)
-    return _per_bp(r, r.gradient[_role(m)])
-end
+duration(valuation_fn::F, ::IR01, base::AYM, credit::AYM) where {F} = duration(b -> valuation_fn(b, credit), DV01(), base)
+duration(valuation_fn::F, ::CS01, base::AYM, credit::AYM) where {F} = duration(c -> valuation_fn(base, c), DV01(), credit)
+duration(valuation_fn::F, ::IR01, kr::KeyRates, base::AYM, credit::AYM) where {F} =
+    duration(b -> valuation_fn(b, credit), DV01(), kr, base)
+duration(valuation_fn::F, ::CS01, kr::KeyRates, base::AYM, credit::AYM) where {F} =
+    duration(c -> valuation_fn(base, c), DV01(), kr, credit)
 function duration(m::Union{IR01, CS01}, kr::KeyRates, base::AYM, credit::AYM, cfs::AbstractVector, times = eachindex(cfs))
     r = _keyrate((; base, credit), kr.tenors, cfs, times)
     return _per_bp(r, r.gradient[_role(m)])

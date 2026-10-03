@@ -56,8 +56,11 @@
             @test duration(target, curve) ≈ s.effective_duration atol = 1.0e-12
             @test duration(Spread(), target, curve) ≈ s.spread_duration atol = 1.0e-12
             @test dv01(Spread(), target, curve) ≈ s.spread_dv01 atol = 1.0e-12
-            # Unmarked key-rate DV01s and convexities are effective risk too.
+            # Key-rate durations match the bundle; unmarked key-rate risk is effective risk.
             kr = KeyRates(tenors)
+            @test duration(Effective(), kr, target, curve) ≈ s.effective_key_rate atol = 1.0e-12
+            @test duration(kr, target, curve) == duration(Effective(), kr, target, curve)
+            @test duration(Spread(), kr, target, curve) ≈ s.spread_key_rate atol = 1.0e-12
             @test duration(DV01(), kr, target, curve) ≈ s.effective_key_rate .* s.value ./ 10_000 atol = 1.0e-12
             @test dv01(kr, target, curve) == duration(DV01(), kr, target, curve)
             @test sum(convexity(kr, target, curve)) ≈ convexity(target, curve) atol = 1.0e-10
@@ -67,7 +70,7 @@
         @test dv01(Effective(), flm, curve) ≈ sensitivities(KeyRates(tenors), flm, curve).effective_dv01
         # A contract under Hull-White is valued on the model's discount function, as its duration is.
         hw = FM.ShortRate.HullWhite(0.1, 0.01, curve)
-        @test sensitivities(KeyRates(tenors), flm, hw).effective_key_rate == duration(KeyRates(tenors), flm, hw)
+        @test sensitivities(KeyRates(tenors), flm, hw).effective_key_rate ≈ duration(KeyRates(tenors), flm, hw) atol = 1.0e-12
         @test dv01(0.05, [5.0, 5.0, 105.0]) ≈ duration(DV01(), 0.05, [5.0, 5.0, 105.0])   # cashflow fallback
     end
 
