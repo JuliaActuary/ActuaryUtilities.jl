@@ -66,6 +66,25 @@ end
     end
 end
 
+@testset "Hull–White closed forms keep their pricing under bumps" begin
+    curve = FM.Yield.Constant(FC.Continuous(0.03))
+    hw = FM.ShortRate.HullWhite(0.1, 0.01, curve)
+    kr = KeyRates([1.0, 2.0, 3.0, 6.0])
+    # A bump moves the curve the model is calibrated to; mean reversion and volatility stay fixed.
+    on(c) = FM.ShortRate.HullWhite(hw.a, hw.σ, c)
+    cap, swaption = FM.Option.Cap(0.03, 4, 3.0), FM.Option.Swaption(1.0, 6.0, 0.035, 1)
+    for target in (cap, swaption)
+        value(c) = FC.pv(on(c), target)
+        @test duration(Effective(), target, hw) ≈ duration(value, curve)
+        @test dv01(target, hw) ≈ duration(value, DV01(), curve)
+        @test duration(Effective(), FC.Composite(target, target), hw) ≈ duration(value, curve)
+        @test sensitivities(kr, target, hw).effective_key_rate ≈ duration(value, kr, curve)
+    end
+    @test convexity(Effective(), cap, hw) ≈ convexity(c -> FC.pv(on(c), cap), curve)
+    # FinanceModels differentiates the swaption's critical rate to first order only.
+    @test_throws "first-order ForwardDiff derivatives only" convexity(Effective(), swaption, hw)
+end
+
 # At t = 2, pays principal plus the index forward rate from t = 1 to 2, valued in closed form
 # against the valuation context: it discounts on `ctx` and reads its index curve by key.
 struct ClosedFormFloater <: FC.AbstractContract

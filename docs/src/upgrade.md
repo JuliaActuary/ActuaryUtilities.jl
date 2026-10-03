@@ -113,7 +113,8 @@ v6 requires FinanceModels 7 and FinanceCore 3.
   **Migration:** to change payment dates, construct updated `Cashflow` objects or
   pass numeric amounts with the desired times.
 - **Hull–White simulation is requested with `Scenarios`.** A bare `HullWhite` model is
-  now a curve everywhere, valued on its discount function. In v5 it was a curve to
+  now a curve everywhere: a bump moves `hw.curve`, cashflows are discounted on it, and caps and
+  swaptions keep their Hull–White closed forms on the bumped curve. In v5 it was a curve to
   `duration`, `convexity`, and the cashflow forms without times, but a scenario
   generator to `sensitivities` callbacks and to cashflow forms with times, so two
   believable key-rate vectors could come back for the same position. The simulation

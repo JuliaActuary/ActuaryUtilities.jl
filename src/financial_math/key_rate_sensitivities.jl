@@ -35,6 +35,11 @@ _bumped(curve, tenors, bumps) = FinanceModels.Yield.TenorShift(
     curve,
     (z, t) -> FinanceCore.Continuous(_hat_bump(tenors, bumps, t)) + z,
 )
+# A Hull–White model prices on the curve it is calibrated to, so a bump moves that curve and keeps
+# the model, with its mean reversion, volatility and closed forms (caps, swaptions); a shift layered
+# over the model would hide them. Its discount factors are the bumped curve's either way.
+_bumped(hw::FinanceModels.ShortRate.HullWhite, tenors, bumps) =
+    ConstructionBase.setproperties(hw; curve = _bumped(hw.curve, tenors, bumps))
 
 # A one-knot grid is an exact parallel shift: its hat is flat everywhere. The
 # scalar two-curve forms use it so they match the sums of the key-rate results.
