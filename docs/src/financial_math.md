@@ -108,11 +108,14 @@ zero(shifted, 1.0)
 
 ### Periodic rate arithmetic
 
-Rate arithmetic automatically handles compounding conversion — a `Periodic(0.01, 1)` bump converts to continuous internally:
+`Rate + Rate` adds in the left operand's convention. With a continuous `z`, adding `Periodic(0.01, 1)`
+adds its continuous equivalent, log(1.01), which multiplies the accumulation factor by 1.01. To add
+100 bp in annual-effective terms, convert, add and convert back:
 
 ```@example transformations
-shifted_p = base + (z, t) -> z + Periodic(0.01, 1)
-zero(shifted_p, 5.0)   # ≈ Continuous(0.05 + log(1.01))
+shifted_p = base + (z, t) -> z + Periodic(0.01, 1)                     # adds log(1.01)
+shifted_ae = base + (z, t) -> Continuous(Periodic(1)(z) + 0.01)        # +100 bp annual effective
+zero(shifted_p, 5.0), zero(shifted_ae, 5.0)
 ```
 
 ### Tenor-dependent twist
