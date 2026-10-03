@@ -88,6 +88,14 @@ end
     @test wasserstein(Int8[-100], Int8[100]) == 200
     @test wasserstein(Int8[-100], Int8[100]; p = Inf) == 200
     @test wasserstein([typemin(Int)], [typemax(Int)]) == Float64(typemax(Int)) - Float64(typemin(Int))
+    # Adjacent integers at the top of their type: subtracting before converting keeps the unit gap
+    # that converting each to Float64 first rounded away (it gave 0.0).
+    for T in (Int64, UInt64), p in (1, 2, Inf)
+        @test wasserstein([typemax(T) - one(T)], [typemax(T)]; p) == 1
+        @test wasserstein([typemax(T)], [typemax(T) - one(T)]; p) == 1
+    end
+    # Two integer types, whose mixed arithmetic wraps around
+    @test wasserstein(Int8[-100], UInt8[100]) == 200
     # The same samples in any representation give the same distance, in either order:
     # equal sizes, unequal sizes, and finite discrete laws.
     equal_a, equal_b = [0, 3, 7, 120], [5, 1, 127, 0]
