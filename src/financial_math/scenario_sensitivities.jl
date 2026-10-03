@@ -59,10 +59,12 @@ function sensitivities(::DV01, kr::KeyRates, s::Scenarios, cfs::AbstractVector, 
 end
 
 # The mean present value of fixed cashflows across the paths, simulated to one year past the
-# last payment unless `s` sets a horizon.
+# last payment unless `s` sets a horizon. FinanceCore pairs equal lengths only, so the unused
+# trailing times of a shared grid are left out.
 function _simulated_pv(s::Scenarios, cfs, times)
     horizon = something(s.horizon, _maximum_cashflow_time(cfs, times) + 1.0)
+    paid = view(times, eachindex(cfs))
     return _simulated(s, horizon) do paths
-        sum(FinanceCore.pv(p, cfs, times) for p in paths) / s.n_scenarios
+        sum(FinanceCore.pv(p, cfs, paid) for p in paths) / s.n_scenarios
     end
 end
