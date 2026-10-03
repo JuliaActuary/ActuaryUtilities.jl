@@ -12,10 +12,10 @@ times    = [1, 2, 3]
 
 discount_rate = 0.03
 
-present_value(discount_rate, cfs, times)           # 105.65
+present_value(discount_rate, cfs, times)           # 105.66
 duration(Macaulay(), discount_rate, cfs, times)    #   2.86
 duration(discount_rate, cfs, times)                #   2.78
-convexity(discount_rate, cfs, times)               #  10.62
+convexity(discount_rate, cfs, times)               #  10.63
 ```
 
 See [Convexity Conventions](@ref) for rate-shock definitions and worked examples.
@@ -47,7 +47,7 @@ Empty cashflows are valid with either an empty or populated time grid.
 
 Scalar DV01 differentiates signed value directly. It remains defined at zero
 present value when the valuation has a finite derivative; IR01 and CS01 use the
-same calculation. Relative duration and convexity are still undefined there.
+same calculation. Normalized duration and convexity are still undefined there.
 
 ```jldoctest zero_value_dollar_risk
 julia> using ActuaryUtilities, FinanceModels, FinanceCore
@@ -73,8 +73,8 @@ The zero check uses exact `iszero` on amounts, including AD partials. Both `0.0`
 and `-0.0` count as zero; tiny nonzero amounts do not. Assigned zero duration is a
 convention, not the limit as amounts shrink. Explicit tenor grids are still validated.
 
-Zero streams value no payments and skip Hull–White simulation. Linearity forces
-their value, zero. Its numeric type is a convention: the type the same measure
+Zero streams value no payments and skip Hull–White simulation. Their value is zero
+by linearity; its numeric type is a convention: the type the same measure
 returns for a nonempty stream with the same amount, time, and rate or curve types
 (plus the tenor grid for key-rate risk). The rate or curve is queried once, at time
 zero, for that type, so a curve that cannot be evaluated at time zero cannot value a
@@ -87,8 +87,9 @@ Independently assigned RNG streams avoid dependence on preceding contracts.
 
 To aggregate portfolio risk, sum values and dollar derivatives before normalizing
 once. This also preserves exposures from positions whose net value is zero.
-An unweighted average of contract durations is not portfolio duration. A zero
-callback or contract value alone does not identify an empty or all-zero stream.
+An unweighted average of contract durations is not portfolio duration. Callback and
+contract forms do not use this convention: a zero value from them gives undefined
+normalized risk.
 
 ## Curve Transformations
 

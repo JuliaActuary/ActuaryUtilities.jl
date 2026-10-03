@@ -8,31 +8,31 @@ pp. 3–4, for the role of compounding in rate sensitivities.
 
 Yield-model inputs use additive **continuously compounded zero-rate shifts**.
 Plain scalar inputs use annual compounding; explicit `Rate` inputs use their
-specified compounding. A curve's initial discount factors are preserved.
+specified compounding. The shift is layered on the curve without refitting it.
 
-In v6.0, scalar convexity changes for every yield-model type. Both
-`convexity(curve, cfs, times)` and `convexity(valuation_function, curve)` equal
-the sum of the full key-rate convexity matrix. See [Shock coordinates](@ref) for
-the coordinate each input uses.
+Since v6.0, curve convexity uses continuous-zero shocks; see the
+[Version Upgrade Guide](@ref). Both `convexity(curve, cfs, times)` and
+`convexity(valuation_function, curve)` are ≈ the sum of the full key-rate
+convexity matrix. See [Shock coordinates](@ref) for the coordinate each input uses.
 
 ## Why the analytic formula contains t²
 
 For fixed cashflows ``CF_i`` paid at fixed times ``t_i`` in years, write their
 initial present values as ``PV_i = CF_i D(0,t_i)``. A parallel continuous-zero
-shift ``s`` changes the price to
+shift ``s`` changes the value to
 
 ```math
-P(s) = \sum_i PV_i e^{-s t_i}.
+V(s) = \sum_i PV_i e^{-s t_i}.
 ```
 
 Differentiating twice gives
 
 ```math
-P''(0) = \sum_i t_i^2 PV_i,
+V''(0) = \sum_i t_i^2 PV_i,
 \qquad
-C = \frac{P''(0)}{P(0)} = \sum_i w_i t_i^2,
+C = \frac{V''(0)}{V(0)} = \sum_i w_i t_i^2,
 \qquad
-w_i = \frac{PV_i}{P(0)}.
+w_i = \frac{PV_i}{V(0)}.
 ```
 
 Each derivative contributes a factor ``-t_i``. Payments at years 1, 2, and 3
@@ -93,13 +93,10 @@ true
 The last line describes moving both curves by the same amount: the combined
 shift doubles, so its second-order contribution is four times that of shifting
 one curve alone. Equal blocks do not mean that the cross contribution can be
-omitted. For key-rate blocks, equality also requires matching grids and bump
-functions. [Two curves: IR01 and CS01](@ref) gives a floater example where the
+omitted. [Two curves: IR01 and CS01](@ref) gives a floater example where the
 curves have different roles and their convexities differ.
 
-When nonzero cashflows offset to zero present value, the normalized blocks are
-undefined even if their dollar second derivatives are finite. Empty and all-zero
-streams return zero normalized risk by the [Zero cashflow streams](@ref) convention.
+Empty and all-zero streams follow the [Zero cashflow streams](@ref) convention.
 
 ## Worked example: 11.26, 8.40, and annual-yield convexity
 
@@ -119,7 +116,7 @@ julia> valuation(c) = pv(c, cfs, times);
 julia> kr = KeyRates(times);
 
 julia> results = (convexity(curve, cfs, times),       # analytic fast path
-                 convexity(valuation, curve),       # scalar AutoDiff
+                 convexity(valuation, curve),       # scalar AD
                  sum(convexity(kr, curve, cfs, times)),
                  sum(convexity(valuation, kr, curve)));
 
@@ -160,7 +157,7 @@ spot-rate approach of [Ho (1992)](https://doi.org/10.3905/jfi.1992.408049),
 2(2), pp. 29–44. The hats, including the flat endpoint extrapolations, sum to one.
 An equal shift to every key rate therefore produces the parallel shock.
 
-For ``K_{jk}=P^{-1}\partial^2 P/\partial s_j\partial s_k``, the chain rule gives
+For ``K_{jk}=V^{-1}\partial^2 V/\partial s_j\partial s_k``, the chain rule gives
 
 ```math
 C_{\mathrm{parallel}} = \mathbf{1}^{\mathsf T} K \mathbf{1}
