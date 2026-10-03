@@ -562,10 +562,16 @@ sensitivities(KeyRates(tenors), (; rf, credit, ilp, index = zrc)) do c
 end
 ```
 
-Use [`zspread`](@ref) to fit the discount margin to a market price:
+Use [`zspread`](@ref) to fit the discount margin to a market price. The margin is a
+`Continuous` rate, so `zrc + z.zspread` is the discount curve that reprices; `zspread_dv01` is a
+number:
 
 ```@example sensitivities
-zspread(floater, zrc, 0.99)
+z = zspread(floater, zrc, 0.99)
+```
+
+```@example sensitivities
+present_value(Models(zrc + z.zspread; index = zrc), floater)
 ```
 
 ## Portfolio Sensitivity

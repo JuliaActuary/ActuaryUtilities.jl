@@ -206,10 +206,10 @@ end
     for k in (1.0e-12, 1.0, 1.0e10)
         # a two-year payment priced at a 5% force is 2% over the 3% base
         z = zspread(FC.Cashflow(k, 2.0), base, k * exp(-0.1))
-        @test z.zspread ≈ 0.02 atol = 1.0e-14
+        @test FC.rate(z.zspread) ≈ 0.02 atol = 1.0e-14
         @test z.zspread_dv01 ≈ k * 2 * exp(-0.1) / 10_000 rtol = 1.0e-12
         z = zspread(stream(k), base, k * price)
-        @test z.zspread ≈ 0.02 atol = 1.0e-14
+        @test FC.rate(z.zspread) ≈ 0.02 atol = 1.0e-14
         @test z.zspread ≈ unit_z.zspread atol = 1.0e-15
         @test z.zspread_dv01 ≈ k * dv01 rtol = 1.0e-12
         @test z.zspread_dv01 ≈ k * unit_z.zspread_dv01 rtol = 1.0e-12
@@ -221,7 +221,7 @@ end
         @test FC.rate(spread(0.04, 0.05, k .* fill(10.0, 10))) ≈ 0.01 atol = 1.0e-14
         # zero price, mixed signs: 100 at 1 and -95 at 2 have zero value at a force of log(0.95)
         mixed = FM.Composite(FC.Cashflow(100k, 1.0), FC.Cashflow(-95k, 2.0))
-        @test zspread(mixed, base, 0.0).zspread ≈ log(0.95) - 0.03 atol = 1.0e-14
+        @test FC.rate(zspread(mixed, base, 0.0).zspread) ≈ log(0.95) - 0.03 atol = 1.0e-14
         @test FC.rate(spread(0.03, -0.05, k .* [100.0, -95.0], [1.0, 2.0])) ≈ -0.08 atol = 1.0e-14
     end
 end

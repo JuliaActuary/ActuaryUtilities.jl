@@ -165,6 +165,15 @@ v6 requires FinanceModels 7 and FinanceCore 3.
   depend on the notional: at a notional of `1e-10`, a true 2% z-spread previously came
   back as about 1.96%. A zero `market_price` now works. Pass `tol` as a rate if you set
   it explicitly.
+- **`zspread` returns its spread as a `Continuous` rate**, as `spread` returns a `Periodic`
+  one. A number added to a curve is read as an annual rate, so `credit + result.zspread`
+  mispriced: for a 5-year 5% semiannual bond at a 1% spread over a 4% continuous curve, by
+  2.2e-4 per unit of face. The typed spread reprices. `zspread_dv01` stays a number, and `s0`
+  may be a number (continuous) or a `Rate`.
+
+  | v5 call | v6 replacement |
+  |:--|:--|
+  | `zspread(...).zspread` (a number) | `FinanceCore.rate(zspread(...).zspread)`; `credit + zspread(...).zspread` takes the typed rate directly |
 - **Contract measures value in FinanceModels valuation contexts.** They differentiate
   `present_value(Models(discount; index), contract)`. The bumped discount curve discounts
   cashflows and values closed forms. Every key the contract reads returns the bumped

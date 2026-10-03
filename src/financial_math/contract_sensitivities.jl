@@ -127,8 +127,11 @@ end
 
 Constant continuously-compounded spread `s` on the `credit` (discount) curve such that
 the model price equals `market_price`, with coupons estimated on `forward` (held fixed).
-`zspread_dv01` is `-∂V/∂s / 10000` at the solved spread: the value lost per basis point
-of `s`. The solve takes Newton steps from `s0` with ForwardDiff derivatives.
+`zspread` is `s` as a `Continuous` rate, so `credit + result.zspread` is the spread curve;
+`FinanceCore.rate(result.zspread)` is the number. `zspread_dv01` is a number,
+`-∂V/∂s / 10000` at the solved spread: the value lost per basis point of `s`. The solve takes
+Newton steps from `s0`, a number read as continuously compounded or a `Rate`, with ForwardDiff
+derivatives.
 
 The solve stops once a Newton step is smaller than `tol` in rate units (not currency), so the
 result does not depend on the contract's notional and is defined for a zero `market_price`.
@@ -137,8 +140,8 @@ An `ErrorException` is thrown if that does not happen within `maxiter` steps.
 function zspread(contract::FinanceCore.AbstractContract, credit::AYM, market_price; forward::AYM = credit, s0 = 0.0, tol = 1.0e-12, maxiter = 100)
     pvs(s) = _contract_parallel_value(Spread(), contract, forward, credit, s)
     f(s) = pvs(s) - market_price
-    result(s) = (; zspread = s, zspread_dv01 = -ForwardDiff.derivative(pvs, s) / 10_000)
-    s = float(s0)
+    result(s) = (; zspread = FinanceCore.Continuous(s), zspread_dv01 = -ForwardDiff.derivative(pvs, s) / 10_000)
+    s = float(FinanceCore.rate(FinanceCore.Continuous(s0)))
     step = oftype(s, NaN)
     for _ in 1:maxiter
         fs, dfs = _value_and_derivative(f, s)

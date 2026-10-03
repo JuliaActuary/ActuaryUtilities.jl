@@ -21,7 +21,7 @@
         spread = 0.007
         target = FC.pv(FM.Models(credit + FC.Continuous(spread); index), c)
         solved = zspread(c, credit, target; forward = index)
-        @test solved.zspread ≈ spread atol = 1.0e-10
+        @test FC.rate(solved.zspread) ≈ spread atol = 1.0e-10
         @test solved.zspread_dv01 ≈
             -ForwardDiff.derivative(s -> FC.pv(FM.Models(credit + FC.Continuous(s); index), c), spread) / 10_000
     end

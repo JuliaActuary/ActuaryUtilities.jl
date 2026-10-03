@@ -64,7 +64,7 @@ end
     market_price = FC.pv(FM.Yield.Constant(FC.Continuous(log1p(0.04) + spread)), bond)
     result = zspread(bond, curve, market_price)
     expected = zspread(bond, reference, market_price)
-    @test result.zspread ≈ spread atol = 1.0e-10
+    @test FC.rate(result.zspread) ≈ spread atol = 1.0e-10
     @test result.zspread_dv01 ≈ expected.zspread_dv01
 end
 

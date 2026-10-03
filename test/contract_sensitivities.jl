@@ -100,12 +100,25 @@
 
     @testset "z-spread round-trips; locked ≈ next reset" begin
         pvm = FC.present_value(FM.Models(curve; index = curve), flm)
-        @test zspread(flm, curve, pvm).zspread ≈ 0.0 atol = 1.0e-8
+        @test FC.rate(zspread(flm, curve, pvm).zspread) ≈ 0.0 atol = 1.0e-8
         z = zspread(flm, curve, pvm - 0.03)
-        @test z.zspread > 0.0
+        @test FC.rate(z.zspread) > 0.0
         reprice = FC.present_value(FM.Models(curve + ((zz, t) -> zz + FC.Continuous(z.zspread)); index = curve), flm)
         @test reprice ≈ pvm - 0.03 atol = 1.0e-10
         @test duration(Effective(), locked_floater(fl0, 0.05, 1.0), curve) ≈ 1.0 atol = 0.1
+    end
+
+    @testset "z-spread is a Continuous rate; s0 may be a Rate" begin
+        base = FM.Yield.Constant(FC.Continuous(0.03))
+        price = FC.pv(base + FC.Continuous(0.012), fb)
+        z = zspread(fb, base, price)
+        @test z.zspread isa FC.Rate{Float64, FC.Continuous} && z.zspread_dv01 isa Float64
+        @test FC.rate(z.zspread) ≈ 0.012 atol = 1.0e-12
+        # the typed spread adds to the curve in its own convention (a number would be annual)
+        @test FC.pv(base + z.zspread, fb) ≈ price rtol = 1.0e-14
+        # a typed start is its continuous value
+        @test zspread(fb, base, price; s0 = FC.Continuous(0.01)) == zspread(fb, base, price; s0 = 0.01)
+        @test zspread(fb, base, price; s0 = FC.Periodic(0.01, 1)) == zspread(fb, base, price; s0 = log1p(0.01))
     end
 
     @testset "effective: AD == central finite difference (re-projecting)" begin
