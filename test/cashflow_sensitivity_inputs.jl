@@ -12,26 +12,22 @@
     for curve in curves, sign in (-1, 1)
         cfs = sign .* [5.0, 5.0, 105.0]
         wrapped = FC.Cashflow.(cfs, times)
-        layers = (; base = curve, credit, liquidity = credit)
+        layered = curve + credit
         calls = (
             (cf, ts) -> duration(curve, cf, ts),
             (cf, ts) -> duration(DV01(), curve, cf, ts),
             (cf, ts) -> duration(kr, curve, cf, ts),
             (cf, ts) -> duration(DV01(), kr, curve, cf, ts),
-            (cf, ts) -> duration(IR01(), curve, credit, cf, ts),
-            (cf, ts) -> duration(CS01(), curve, credit, cf, ts),
-            (cf, ts) -> duration(IR01(), kr, curve, credit, cf, ts),
-            (cf, ts) -> duration(CS01(), kr, curve, credit, cf, ts),
+            (cf, ts) -> duration(DV01(), layered, cf, ts),
+            (cf, ts) -> duration(DV01(), kr, layered, cf, ts),
             (cf, ts) -> convexity(curve, cf, ts),
             (cf, ts) -> convexity(kr, curve, cf, ts),
-            (cf, ts) -> convexity(curve, credit, cf, ts),
-            (cf, ts) -> convexity(kr, curve, credit, cf, ts),
-            (cf, ts) -> convexity(kr, layers, cf, ts),
+            (cf, ts) -> convexity(layered, cf, ts),
+            (cf, ts) -> convexity(kr, layered, cf, ts),
             (cf, ts) -> sensitivities(kr, curve, cf, ts),
             (cf, ts) -> sensitivities(DV01(), kr, curve, cf, ts),
-            (cf, ts) -> sensitivities(kr, curve, credit, cf, ts),
-            (cf, ts) -> sensitivities(DV01(), kr, curve, credit, cf, ts),
-            (cf, ts) -> sensitivities(kr, layers, cf, ts),
+            (cf, ts) -> sensitivities(kr, layered, cf, ts),
+            (cf, ts) -> sensitivities(DV01(), kr, layered, cf, ts),
         )
         for f in calls
             expected = f(cfs, times)
@@ -45,7 +41,7 @@
         @test _same_sensitivity(sensitivities(kr, curve, wrapped, fallback), sensitivities(value, kr, curve))
         @test sum(convexity(kr, curve, wrapped, fallback)) ≈ convexity(value, curve)
         @test duration(kr, curve, wrapped) ≈ duration(kr, curve, wrapped, fallback)
-        @test _same_sensitivity(sensitivities(kr, layers, wrapped), sensitivities(kr, layers, wrapped, fallback))
+        @test _same_sensitivity(sensitivities(kr, layered, wrapped), sensitivities(kr, layered, wrapped, fallback))
     end
 end
 
@@ -54,23 +50,20 @@ end
     kr = KeyRates(tenors)
     curve = FM.ZeroRateCurve([0.02, 0.03, 0.04], tenors)
     credit = FM.Yield.Constant(FC.Continuous(0.01))
-    layers = (; base = curve, credit)
+    layered = curve + credit
     cfs = [5.0, 5.0, 105.0]
     wrapped = FC.Cashflow.(cfs, [0.5, 1.5, 3.5])
     calls = (
         (x...) -> duration(kr, curve, x...),
         (x...) -> duration(DV01(), kr, curve, x...),
-        (x...) -> duration(IR01(), kr, curve, credit, x...),
-        (x...) -> duration(CS01(), kr, curve, credit, x...),
+        (x...) -> duration(DV01(), kr, layered, x...),
         (x...) -> convexity(kr, curve, x...),
-        (x...) -> convexity(curve, credit, x...),
-        (x...) -> convexity(kr, curve, credit, x...),
-        (x...) -> convexity(kr, layers, x...),
+        (x...) -> convexity(layered, x...),
+        (x...) -> convexity(kr, layered, x...),
         (x...) -> sensitivities(kr, curve, x...),
         (x...) -> sensitivities(DV01(), kr, curve, x...),
-        (x...) -> sensitivities(kr, curve, credit, x...),
-        (x...) -> sensitivities(DV01(), kr, curve, credit, x...),
-        (x...) -> sensitivities(kr, layers, x...),
+        (x...) -> sensitivities(kr, layered, x...),
+        (x...) -> sensitivities(DV01(), kr, layered, x...),
     )
     for f in calls
         # Numeric amounts are paid at periods 1:n, as in the scalar measures.

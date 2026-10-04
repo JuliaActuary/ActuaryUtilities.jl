@@ -3,7 +3,7 @@
     tenors = [1.0, 3.0, 7.0]
     kr = KeyRates(tenors)
     z, zz = zeros(3), zeros(3, 3)
-    kernel = ActuaryUtilities.FinancialMath._ncurve_analytic
+    kernel = ActuaryUtilities.FinancialMath._keyrate_analytic
     positive_zero(x) = isequal(x, zero(x))
 
     @testset "Scalar measures and legacy key rates" begin
@@ -26,41 +26,19 @@
                 @test positive_zero(convexity(yield, cfs, times))
                 @test positive_zero(convexity(yield, cfs))
             end
-            for measure in (IR01(), CS01())
-                @test positive_zero(duration(measure, curve, curve, cfs, times))
-                @test positive_zero(duration(measure, curve, curve, cfs))
-            end
             @test isequal(present_values(curve, cfs, times), zeros(length(cfs)))
         end
     end
 
-    @testset "One, two, and named discount layers" begin
-        layers = (; base = curve, credit = curve, liquidity = curve)
+    @testset "Key-rate results" begin
         for (cfs, times) in ((Float64[], Float64[]), (Float64[], [1.0, 2.0]), ([0.0, -0.0], [0.0, 2.0]), ([0.0, -0.0], [0.0, 2.0, NaN]))
             @test isequal(duration(kr, curve, cfs, times), z)
             @test isequal(duration(DV01(), kr, curve, cfs, times), z)
-            @test isequal(duration(IR01(), kr, curve, curve, cfs, times), z)
-            @test isequal(duration(CS01(), kr, curve, curve, cfs, times), z)
             @test isequal(convexity(kr, curve, cfs, times), zz)
-            @test isequal(convexity(kr, curve, curve, cfs, times), (; base = zz, credit = zz, cross = zz))
             @test positive_zero(duration(curve, cfs, times))
             @test positive_zero(convexity(curve, cfs, times))
-            @test isequal(convexity(curve, curve, cfs, times), (; base = 0.0, credit = 0.0, cross = 0.0))
             @test isequal(sensitivities(kr, curve, cfs, times), (; value = 0.0, durations = z, convexities = zz))
             @test isequal(sensitivities(DV01(), kr, curve, cfs, times), (; value = 0.0, dv01s = z, convexities = zz))
-            two = sensitivities(kr, curve, curve, cfs, times)
-            @test positive_zero(two.value)
-            @test isequal(two.base_durations, z) && isequal(two.credit_durations, z)
-            @test isequal(two.convexities, (; base = zz, credit = zz, cross = zz))
-            @test two.convexities.base !== two.convexities.credit
-            dollar = sensitivities(DV01(), kr, curve, curve, cfs, times)
-            @test isequal(dollar.base_dv01s, z) && isequal(dollar.credit_dv01s, z)
-            @test isequal(dollar.convexities, two.convexities)
-            multi = sensitivities(kr, layers, cfs, times)
-            @test positive_zero(multi.value)
-            @test all(v -> isequal(v, z), values(multi.durations))
-            @test all(blocks -> all(v -> isequal(v, zz), values(blocks)), values(multi.convexities))
-            @test isequal(convexity(kr, layers, cfs, times), multi.convexities)
         end
         cfs = FC.Cashflow.([0.0, -0.0], [0.0, 2.0])
         @test isequal(duration(kr, curve, cfs), z)
@@ -98,7 +76,7 @@
     @testset "Zero amounts differ from zero net value" begin
         flat = FM.Yield.Constant(FC.Continuous(0.0))
         cfs, times = [100.0, -100.0], [1.0, 2.0]
-        raw = kernel((; flat), tenors, cfs, times; order = 2)
+        raw = kernel(flat, tenors, cfs, times; order = 2)
         result = sensitivities(kr, flat, cfs, times)
         @test iszero(raw.value)
         @test any(!iszero, raw.gradient) && any(!iszero, raw.hessian)
@@ -118,7 +96,7 @@
         # A zero primal amount with a nonzero partial still carries exposure.
         dollar(x) = sum(duration(DV01(), kr, flat, [x, zero(x)], [2.0, 3.0]))
         @test ForwardDiff.derivative(dollar, 0.0) ≈ 2 * FC.discount(flat, 2.0) / 10_000
-        value(x) = kernel((; flat), tenors, [x], [2.0]).value
+        value(x) = kernel(flat, tenors, [x], [2.0]).value
         @test ForwardDiff.derivative(value, 0.0) ≈ FC.discount(flat, 2.0)
         squared_value(x) = value(x * x)
         @test ForwardDiff.derivative(x -> ForwardDiff.derivative(squared_value, x), 0.0) ≈ 2 * FC.discount(flat, 2.0)
@@ -154,18 +132,12 @@ end
         @test_throws DimensionMismatch convexity(yield, cfs, [1.0])
         @test present_values(yield, cfs, extra) ≈ present_values(yield, cfs, times)
     end
-    for measure in (IR01(), CS01())
-        @test duration(measure, curve, flat, cfs, extra) ≈ duration(measure, curve, flat, cfs, times)
-        @test_throws DimensionMismatch duration(measure, curve, flat, cfs, [1.0])
-        @test duration(measure, kr, curve, flat, cfs, extra) == duration(measure, kr, curve, flat, cfs, times)
-    end
-    for args in ((kr, curve), (DV01(), kr, curve), (kr, curve, flat), (DV01(), kr, curve, flat), (kr, (; base = curve, credit = flat)))
+    for args in ((kr, curve), (DV01(), kr, curve))
         @test isequal(sensitivities(args..., cfs, extra), sensitivities(args..., cfs, times))
         @test_throws DimensionMismatch sensitivities(args..., cfs, [1.0])
     end
     @test convexity(kr, curve, cfs, extra) == convexity(kr, curve, cfs, times)
     @test convexity(curve, cfs, extra) == convexity(curve, cfs, times)
-    @test convexity(curve, flat, cfs, extra) == convexity(curve, flat, cfs, times)
 
     # A trailing time must not extend the inferred horizon or change RNG use.
     hw = FM.ShortRate.HullWhite(0.1, 0.01, flat)

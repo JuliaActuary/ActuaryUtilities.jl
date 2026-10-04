@@ -1,4 +1,4 @@
-@testset "Scalar IR01 and CS01 measure the combined rate" begin
+@testset "Fixed cashflows on two curves have the combined rate's DV01" begin
     cfs = [5.0, 5.0, 105.0]
     times = [1.0, 2.0, 3.0]
     tenors = [1.0, 2.0, 3.0]
@@ -17,13 +17,10 @@
     )
     for (base, spread, expected) in cases, sign in (-1, 1)
         amounts = sign .* cfs
-        ir01 = duration(IR01(), base, spread, amounts, times)
-        @test ir01 ≈ sign * expected rtol = 1.0e-12
-        @test duration(CS01(), base, spread, amounts, times) == ir01
-        @test duration(DV01(), base + spread, amounts, times) == ir01
-        @test duration(IR01(), base, spread, FC.Cashflow.(amounts, times)) == ir01
-        @test duration(CS01(), base, spread, FC.Cashflow.(amounts, times)) == ir01
-        @test duration(CS01(), base, spread, amounts) ≈ ir01 rtol = 1.0e-14   # times default to 1:3
+        dv01 = duration(DV01(), base + spread, amounts, times)
+        @test dv01 ≈ sign * expected rtol = 1.0e-12
+        @test duration(DV01(), base + spread, FC.Cashflow.(amounts, times)) == dv01
+        @test duration(DV01(), base + spread, amounts) ≈ dv01 rtol = 1.0e-14   # times default to 1:3
     end
 end
 
@@ -112,11 +109,11 @@ end
     @test blocks.credit ≈ sum(matrices.credit) rtol = 1.0e-10
     @test blocks.cross ≈ sum(matrices.cross) rtol = 1.0e-10
 
-    fixed = convexity(base, credit, cfs, times)
-    fixed_matrices = convexity(kr, base, credit, cfs, times)
+    fixed_value(b, c) = FC.present_value(b + c, cfs, times)
+    fixed = convexity(fixed_value, base, credit)
+    fixed_matrices = convexity(fixed_value, kr, base, credit)
     @test fixed.base ≈ sum(fixed_matrices.base) rtol = 1.0e-12
     @test fixed.cross ≈ fixed.base
-    @test convexity(base, credit, FC.Cashflow.(cfs, times)) == fixed
     @test fixed.base ≈ convexity(base + credit, cfs, times) rtol = 1.0e-12
 end
 
@@ -138,6 +135,16 @@ end
         () -> duration(IR01(), curve, credit, tenors, cfs, times),
         () -> duration(IR01(), curve, credit, tenors, wrapped),
         () -> duration(CS01(), curve, credit, tenors, wrapped),
+        # Fixed cashflows on several curves are valued on the combined curve.
+        () -> duration(IR01(), curve, credit, cfs, times),
+        () -> duration(CS01(), curve, credit, wrapped),
+        () -> duration(IR01(), KeyRates(tenors), curve, credit, cfs, times),
+        () -> convexity(curve, credit, cfs, times),
+        () -> convexity(KeyRates(tenors), curve, credit, cfs, times),
+        () -> sensitivities(KeyRates(tenors), curve, credit, cfs, times),
+        () -> sensitivities(DV01(), KeyRates(tenors), curve, credit, cfs, times),
+        () -> sensitivities(KeyRates(tenors), (; curve, credit), cfs, times),
+        () -> convexity(KeyRates(tenors), (; curve, credit), cfs, times),
         () -> convexity(curve, tenors, cfs, times),
         () -> convexity(curve, tenors, wrapped),
         () -> convexity(FM.Yield.Constant(0.03), tenors, wrapped),

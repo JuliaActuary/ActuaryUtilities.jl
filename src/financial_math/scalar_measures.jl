@@ -14,13 +14,11 @@ _cashflow_vector(cfs::Union{Tuple, Base.Generator}) = _cashflow_vector(collect(c
     duration(Macaulay(),interest_rate,cfs,times)
     duration(Modified(),interest_rate,cfs,times)
     duration(DV01(),interest_rate,cfs,times)
-    duration(IR01(),base,credit,cfs,times)
-    duration(CS01(),base,credit,cfs,times)
     duration(interest_rate,cfs,times)             # Modified Duration
     duration(valuation_function,interest_rate)    # Modified Duration
     duration(valuation_function,DV01(),interest_rate)
 
-Calculate Macaulay or modified duration, or signed dollar DV01, IR01, or CS01.
+Calculate Macaulay or modified duration, or signed dollar DV01.
 For numeric amounts, omitted `times` default to `1:length(cfs)`.
 
 `cfs` can be an `AbstractVector{<:Cashflow}` (from FinanceCore), in which case
@@ -31,8 +29,8 @@ must still contain an entry for each cashflow; unused trailing entries are ignor
 Scalar cashflow methods accept arrays, tuples, and finite generators. Arrays are
 flattened in column-major order; generators are collected once before valuation.
 Use `collect` for other iterables, such as `Iterators.take` or `skipmissing`.
-Normalized duration is unchanged when the position sign reverses; dollar DV01,
-IR01, and CS01 reverse sign with the position.
+Normalized duration is unchanged when the position sign reverses; dollar DV01
+reverses sign with the position.
 
 Empty and all-zero cashflow streams return zero risk; see [Zero cashflow streams](@ref).
 Dollar sensitivities differentiate the signed value directly, so they stay defined at
@@ -44,13 +42,14 @@ The default measure is `Modified()`.
 - Modified duration: `-∂V/∂r / V`, the relative value lost per unit increase in the shocked rate.
 - Macaulay: the present-value-weighted average payment time.
 - DV01: `-∂V/∂r / 10000`, the first-order value lost for a one-basis-point increase.
-- IR01: the first-order value lost for a one-basis-point increase in the base curve, holding the credit curve fixed.
-- CS01: the first-order value lost for a one-basis-point increase in the credit curve, holding the base curve fixed.
+
+For fixed cashflows discounted at `base + credit`, IR01 and CS01 both equal
+`duration(DV01(), base + credit, cfs, times)`. Use the [`IR01`](@ref)/[`CS01`](@ref) callback
+forms when the curves play different roles.
 
 # Shock coordinates
 
-Each single-rate input moves in its own shock coordinate; fixed-cashflow IR01/CS01
-move the combined rate in its coordinate. See [Shock coordinates](@ref):
+Each single-rate input moves in its own shock coordinate. See [Shock coordinates](@ref):
 
 - Scalars are annual effective rates: Modified = Macaulay / (1 + y).
 - `Periodic(y, m)` shocks its nominal rate: Modified = Macaulay / (1 + y/m).
@@ -159,46 +158,6 @@ function duration(valuation_function::F, ::DV01, yield::_YieldInput) where {F}
     # Dollar risk is defined even when value is zero and normalized duration is not.
     return -ForwardDiff.derivative(i -> valuation_function(_parallel_bumped(yield, i)), 0.0) / 10_000
 end
-
-"""
-    duration(IR01(), base, credit, cfs, times = eachindex(cfs))
-    duration(CS01(), base, credit, cfs, times = eachindex(cfs))
-    duration(IR01(), kr::KeyRates, base::AbstractYieldModel, credit::AbstractYieldModel, cfs, times = eachindex(cfs)) -> Vector
-    duration(CS01(), kr::KeyRates, base::AbstractYieldModel, credit::AbstractYieldModel, cfs, times = eachindex(cfs)) -> Vector
-
-Fixed-cashflow IR01 or CS01: `-∂V/∂s / 10000`, the first-order value lost per basis point.
-The cashflows are discounted at `base + credit`. Both measures shift that combined rate by one
-basis point in its own coordinate, so they equal each other and
-`duration(DV01(), base + credit, cfs, times)`; the `KeyRates` forms equal
-`duration(DV01(), kr, base + credit, cfs, times)`.
-
-The combined rate's coordinate is continuous zero when either input is a yield model. Otherwise
-it is annual effective for two scalars, and the `Rate`'s compounding when one input is a `Rate`
-(the left one's when both are). With mixed compounding this is not a bump of either input's own
-nominal rate. Credit here is an additive discount spread, not a CDS quote or a hazard rate.
-
-When the curves play different roles, use the callback forms, or the contract measures
-`Effective()` and `Spread()`. For quote risk after recalibration, see [Market Inputs](@ref).
-See [Two curves: IR01 and CS01](@ref).
-
-# Examples
-
-```julia-repl
-julia> cfs = [5, 5, 5, 105];
-
-julia> times = 1:4;
-
-julia> duration(IR01(), 0.03, 0.02, cfs, times)
-0.0354595050416236
-
-julia> duration(IR01(), 0.03, 0.02, cfs, times) ≈ duration(DV01(), 0.05, cfs, times)
-true
-```
-"""
-duration(::Union{IR01, CS01}, base, credit, cfs::_CashflowCollection, times...) =
-    duration(DV01(), base + credit, cfs, times...)
-duration(::Union{IR01, CS01}, kr::KeyRates, base::AYM, credit::AYM, cfs::AbstractVector, times = eachindex(cfs)) =
-    duration(DV01(), kr, base + credit, cfs, times)
 
 """
     convexity(yield,cfs,times)

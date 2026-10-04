@@ -292,11 +292,11 @@ end
     credit = FM.Yield.Constant(0.015)
     cfs = [5.0, 5.0, 105.0]
     times = [1.0, 2.0, 3.0]
-    an = convexity(base, credit, cfs, times)
-    # the AD callback form computes the same blocks from a 2×2 parallel Hessian
+    # every block of the AD callback's 2×2 parallel Hessian is the combined curve's convexity
+    an = convexity(base + credit, cfs, times)
     vf2 = (b, c) -> sum(cf * b(t) * c(t) for (cf, t) in zip(cfs, times))
     ad = convexity(vf2, base, credit)
-    @test an.base ≈ ad.base rtol = 1.0e-10
-    @test an.credit ≈ ad.credit rtol = 1.0e-10
-    @test an.cross ≈ ad.cross rtol = 1.0e-10
+    @test an ≈ ad.base rtol = 1.0e-10
+    @test an ≈ ad.credit rtol = 1.0e-10
+    @test an ≈ ad.cross rtol = 1.0e-10
 end

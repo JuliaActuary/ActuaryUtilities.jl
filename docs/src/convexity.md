@@ -49,8 +49,7 @@ use a callback or contract so the derivative includes changes in the payments.
 ## Two-curve convexity blocks
 
 For parallel continuous-zero shifts ``u`` to the base curve and ``v`` to the
-credit curve, `convexity(base, credit, cfs, times)` and the callback form return
-`(; base, credit, cross)`. With nonzero initial value ``V``, these are
+credit curve, `convexity(valuation, base, credit)` returns `(; base, credit, cross)`. With nonzero initial value ``V``, these are
 
 ```math
 C_{bb} = \frac{V_{uu}}{V}, \qquad
@@ -79,7 +78,7 @@ julia> using ActuaryUtilities, FinanceModels, FinanceCore
 
 julia> base = Yield.Constant(Continuous(0.03)); credit = Yield.Constant(Continuous(0.02));
 
-julia> blocks = convexity(base, credit, [100.0], [5.0]);
+julia> blocks = convexity((b, c) -> pv(b + c, [100.0], [5.0]), base, credit);
 
 julia> all(c -> c ≈ 25, values(blocks))
 true

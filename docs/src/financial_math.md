@@ -61,8 +61,8 @@ julia> pv(curve, cfs, times)
 
 julia> (duration(DV01(), curve, cfs, times),
         duration(c -> pv(c, cfs, times), DV01(), curve),
-        duration(IR01(), curve, curve, cfs, times),
-        duration(CS01(), curve, curve, cfs, times))
+        duration((b, c) -> pv(b + c, cfs, times), IR01(), curve, curve),
+        duration((b, c) -> pv(b + c, cfs, times), CS01(), curve, curve))
 (0.0001, 0.0001, 0.0001, 0.0001)
 
 julia> !isfinite(duration(curve, cfs, times))

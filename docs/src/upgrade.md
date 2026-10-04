@@ -24,13 +24,13 @@ v6 requires FinanceModels 7 and FinanceCore 3.
   **Migration:** aggregate `asset_dv01 + liability_dv01`, not
   `asset_dv01 - liability_dv01`. Remove sign corrections added to compensate for
   the former use of absolute value.
-- **Scalar IR01 and CS01 shock the combined rate.** For fixed cashflows,
-  `duration(IR01(), base, credit, cfs, times)` and the matching CS01 both equal
-  `duration(DV01(), base + credit, cfs, times)`. Scalar-only inputs are unchanged.
-  Mixed inputs change: a yield-model component now gives a continuous-zero shock (v5
-  shocked a scalar spread as an annual rate, so CS01 was about IR01 / (1 + spread)),
-  and a sum of `Rate`s takes the left one's compounding. Use the callback forms when
-  the curves play different roles. See [Two curves: IR01 and CS01](@ref).
+- **Fixed-cashflow IR01 and CS01 are the combined rate's DV01.** For fixed cashflows,
+  `duration(IR01(), base, credit, cfs, times)` and the matching CS01 are replaced by
+  `duration(DV01(), base + credit, cfs, times)` (see the removed forms below). Scalar-only
+  inputs give v5's values. Mixed inputs change: a yield-model component gives a
+  continuous-zero shock (v5 shocked a scalar spread as an annual rate, so CS01 was about
+  IR01 / (1 + spread)), and a sum of `Rate`s takes the left one's compounding. Use the
+  callback forms when the curves play different roles. See [Two curves: IR01 and CS01](@ref).
 - **Tenor grids appear only where results have a tenor dimension.** Parallel
   measures no longer accept a `tenors` argument; the grid never changed their
   values, and its position let swapped arguments return wrong numbers silently.
@@ -40,9 +40,9 @@ v6 requires FinanceModels 7 and FinanceCore 3.
   |:--|:--|
   | `duration(curve, tenors, cfs, times)`, `duration(curve, tenors, cashflows)` | `duration(curve, cfs, times)`, `duration(curve, cashflows)` |
   | `duration(DV01(), curve, tenors, cfs, times)` | `duration(DV01(), curve, cfs, times)` |
-  | `duration(IR01(), base, credit, tenors, cfs, times)` (and `CS01`) | `duration(IR01(), base, credit, cfs, times)` |
+  | `duration(IR01(), base, credit, tenors, cfs, times)` (and `CS01`) | `duration(DV01(), base + credit, cfs, times)` |
   | `convexity(curve, tenors, cfs, times)` | `convexity(curve, cfs, times)` |
-  | `convexity(base, credit, tenors, cfs, times)` | `convexity(base, credit, cfs, times)` |
+  | `convexity(base, credit, tenors, cfs, times)` | `convexity(base + credit, cfs, times)` |
   | `duration(valuation, curve, tenors)` | `duration(valuation, curve)` or `duration(curve) do c ... end` |
   | `duration(DV01(), valuation, curve, tenors)` | `duration(valuation, DV01(), curve)` or `duration(DV01(), curve) do c ... end` |
   | `duration(IR01(), valuation, base, credit, tenors)` (and `CS01`) | `duration(valuation, IR01(), base, credit)` or `duration(IR01(), base, credit) do b, c ... end` |
@@ -191,6 +191,21 @@ v6 requires FinanceModels 7 and FinanceCore 3.
 - **`price` is removed.** It was `abs(present_value(...))`; write that instead, or use
   `present_value` when the position's sign matters.
 - **The unused `Duration` supertype of the measure markers is removed.**
+- **Fixed-cashflow forms that repeated one result per curve are removed.** For cashflows
+  discounted at `base + credit`, every role has the same derivatives, so these forms
+  returned one number or matrix several times. They now throw `MethodError`:
+
+  | Removed call | Replacement |
+  |:--|:--|
+  | `duration(IR01(), base, credit, cfs, times)` (and `CS01`) | `duration(DV01(), base + credit, cfs, times)` |
+  | `duration(IR01(), KeyRates(tenors), base, credit, cfs, times)` (and `CS01`) | `duration(DV01(), KeyRates(tenors), base + credit, cfs, times)` |
+  | `convexity(base, credit, cfs, times)` | `convexity(base + credit, cfs, times)`, which each block equaled |
+  | `convexity(KeyRates(tenors), base, credit, cfs, times)` | `convexity(KeyRates(tenors), base + credit, cfs, times)` |
+  | `sensitivities(KeyRates(tenors), base, credit, cfs, times)` (and `DV01()`) | `sensitivities(KeyRates(tenors), base + credit, cfs, times)` |
+  | `sensitivities(KeyRates(tenors), curves::NamedTuple, cfs, times)`, `convexity(KeyRates(tenors), curves, cfs, times)` | the same with `reduce(+, curves)` as the curve |
+
+  The `IR01`/`CS01` callback forms remain for valuations in which the curves play different
+  roles.
 - **`duration(issue_date, date)` is renamed `policy_duration(issue_date, date)`**, so `duration`
   means only interest-rate duration. The old call throws `MethodError`.
 - **`reproject` is removed**, because it duplicated FinanceModels' valuation contexts.

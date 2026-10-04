@@ -11,20 +11,13 @@ end
 
 ## Analytic derivatives for fixed cashflows
 # After locating its hat interval, each payment updates at most two gradient
-# entries and a 2×2 Hessian block.
-
-# Value is Σ cf(t) * ∏ discount(curve, t). Every curve must be a discount layer;
-# an index curve that projects coupons does not belong here. All curve roles
-# have identical gradients and Hessian blocks, stored once internally.
+# entries and a 2×2 Hessian block. The value is Σ cf(t) * discount(curve, t).
 # Inline to eliminate result tuples across derivative-order and zero-stream branches.
-@inline function _ncurve_analytic(
-        curves::NamedTuple, tenors::AbstractVector,
-        cfs::AbstractVector, times; order = 1
-    )
+@inline function _keyrate_analytic(curve, tenors::AbstractVector, cfs::AbstractVector, times; order = 1)
     _validate_tenors(tenors)
     _check_cashflow_times(cfs, times)
     n = length(tenors)
-    disc(t) = prod(c -> FinanceCore.discount(c, t), values(curves))
+    disc(t) = FinanceCore.discount(curve, t)
     zero_stream = _iszero_cashflow_stream(cfs)
     if zero_stream
         value = _zero_cashflow_value(disc, cfs, times)
@@ -47,7 +40,6 @@ end
     V = zero(cfd0)
     @inbounds for k in eachindex(cfs)
         t = FinanceCore.timepoint(cfs[k], times[k])
-        # Tuple reduction specializes each curve type, avoiding per-payment boxing.
         d = disc(t)
         cfd = _cf_value(cfs[k]) * d
         V += cfd
@@ -74,23 +66,17 @@ end
     end
 end
 
-# The analytic kernel's derivatives are the same for every curve role and stored once. Keyed by
-# role (without copying), they take the shape of `_ncurve_ad`'s result.
-@inline function _role_keyed(an, ::NamedTuple{roles}) where {roles}
-    k = length(roles)
-    gradient = NamedTuple{roles}(ntuple(_ -> an.gradient, k))
-    haskey(an, :hessian) || return (; an.value, gradient, an.zero_stream)
-    hessian = NamedTuple{roles}(ntuple(_ -> NamedTuple{roles}(ntuple(_ -> an.hessian, k)), k))
-    return (; an.value, gradient, hessian, an.zero_stream)
-end
-
 ## Key-rate results
-# Derivatives on the key-rate grid keyed by curve role, in the shape of `_ncurve_ad`'s result: from a
-# valuation callback, which receives the curves in order (AD), or from fixed cashflows (analytic).
+# Derivatives on the key-rate grid from a valuation callback, which receives the curves in order
+# (AD), keyed by curve role. One curve's result, and the analytic result for fixed cashflows, is
+# unkeyed: `(; value, gradient, hessian, zero_stream)` with a vector and a matrix.
 @inline _keyrate(curves::NamedTuple, tenors, valuation::F; order = 1) where {F} =
     _ncurve_ad(c -> valuation(values(c)...), curves, tenors; order)
-@inline _keyrate(curves::NamedTuple, tenors, cfs::AbstractVector, times; order = 1) =
-    _role_keyed(_ncurve_analytic(curves, tenors, cfs, times; order), curves)
+@inline _keyrate(curve, tenors, valuation::F; order = 1) where {F} =
+    _only_role(_keyrate((; curve), tenors, valuation; order))
+_only_role(r) = haskey(r, :hessian) ?
+    (; r.value, gradient = only(r.gradient), hessian = only(only(r.hessian)), r.zero_stream) :
+    (; r.value, gradient = only(r.gradient), r.zero_stream)
 
 # Normalized risk from part of a key-rate result `r`: a role's gradient, a block of its Hessian, or
 # `only` of one on the parallel grid. Durations and convexities are relative to the value; DV01s are
@@ -151,12 +137,12 @@ end
 ```
 """
 function duration(valuation_fn::F, kr::KeyRates, curve::AYM) where {F}
-    r = _keyrate((; curve), kr.tenors, valuation_fn)
-    return _relative(r, r.gradient.curve; negate = true)
+    r = _keyrate(curve, kr.tenors, valuation_fn)
+    return _relative(r, r.gradient; negate = true)
 end
 function duration(kr::KeyRates, curve::AYM, cfs::AbstractVector, times = eachindex(cfs))
-    r = _keyrate((; curve), kr.tenors, cfs, times)
-    return _relative(r, r.gradient.curve; negate = true)
+    r = _keyrate_analytic(curve, kr.tenors, cfs, times)
+    return _relative(r, r.gradient; negate = true)
 end
 
 """
@@ -168,12 +154,12 @@ Per-knot signed DV01s for any `AbstractYieldModel`: the `KeyRates` variants of
 `duration(DV01(), curve, cfs, times)`.
 """
 function duration(valuation_fn::F, ::DV01, kr::KeyRates, curve::AYM) where {F}
-    r = _keyrate((; curve), kr.tenors, valuation_fn)
-    return _per_bp(r, r.gradient.curve)
+    r = _keyrate(curve, kr.tenors, valuation_fn)
+    return _per_bp(r, r.gradient)
 end
 function duration(::DV01, kr::KeyRates, curve::AYM, cfs::AbstractVector, times = eachindex(cfs))
-    r = _keyrate((; curve), kr.tenors, cfs, times)
-    return _per_bp(r, r.gradient.curve)
+    r = _keyrate_analytic(curve, kr.tenors, cfs, times)
+    return _per_bp(r, r.gradient)
 end
 
 """
@@ -187,8 +173,9 @@ rates of the base curve and holds the credit curve fixed; CS01 shifts the credit
 the base curve fixed. Each is the callback's DV01 in its one curve. The scalar forms apply a
 parallel shift and are ≈ the sums of the `KeyRates` vectors.
 
-For fixed cashflows discounted at `base + credit`, IR01 and CS01 are equal; a callback can give
-different values when the curves affect payments differently. These curve shifts do not
+For fixed cashflows discounted at `base + credit`, IR01 and CS01 both equal
+`duration(DV01(), base + credit, cfs, times)`; a callback can give different values when the
+curves affect payments differently. These curve shifts do not
 recalibrate to bumped market quotes; see [Two curves: IR01 and CS01](@ref) and
 [Market Inputs](@ref).
 
@@ -209,23 +196,14 @@ duration(valuation_fn::F, ::CS01, kr::KeyRates, base::AYM, credit::AYM) where {F
     convexity(valuation_fn, kr::KeyRates, curve::AbstractYieldModel) -> Matrix
     convexity(kr::KeyRates, curve::AbstractYieldModel, cfs, times) -> Matrix
     convexity(valuation_fn, base::AbstractYieldModel, credit::AbstractYieldModel) -> NamedTuple
-    convexity(base::AbstractYieldModel, credit::AbstractYieldModel, cfs, times) -> NamedTuple
     convexity(valuation_fn, kr::KeyRates, base, credit) -> NamedTuple
-    convexity(kr::KeyRates, base, credit, cfs, times) -> NamedTuple
-    convexity(kr::KeyRates, curves::NamedTuple, cfs, times) -> nested NamedTuple of matrices (result.role1.role2)
 
-Return normalized convexity for a yield model, a pair of curves, or named
-discount layers. Matrix entries are `(∂²V/∂rᵢ∂rⱼ) / V`. For a single curve's
-scalar parallel convexity, use `convexity(curve, cfs, times)` or
-`convexity(valuation_fn, curve)`.
+Return normalized convexity for a yield model or a pair of curves. Matrix entries are
+`(∂²V/∂rᵢ∂rⱼ) / V`. For a single curve's scalar parallel convexity, use
+`convexity(curve, cfs, times)` or `convexity(valuation_fn, curve)`.
 
 Empty and all-zero cashflow streams return zero convexity in the usual shape; see
 [Zero cashflow streams](@ref).
-
-For the `NamedTuple` form, every named curve must be a discount layer: each payment
-is discounted by the product of their discount factors. Do not pass an index curve.
-The per-pair blocks have equal values, but each matrix is independent and can be
-mutated without changing another block.
 
 The two-curve scalar forms return the parallel blocks `(; base, credit, cross)`,
 each `(∂²V/∂sᵢ∂sⱼ) / V` for continuous-zero parallel shifts of the named curves.
@@ -233,47 +211,29 @@ They are ≈ the sums of the corresponding `KeyRates` blocks, including cross te
 `cross` is the mixed derivative divided by `V`, without an extra factor of two.
 For decimal shifts `u` and `v`, the second-order P&L is
 `V / 2 * (base * u^2 + 2 * cross * u * v + credit * v^2)`.
-For fixed cashflows discounted at `base + credit`, all three blocks are equal when
-the value is nonzero. Shifting both curves by one basis point shifts their combined
-continuous zero rates by two basis points. See [Two-curve convexity blocks](@ref).
+For fixed cashflows discounted at `base + credit`, all three blocks equal
+`convexity(base + credit, cfs, times)` when the value is nonzero. Shifting both curves by one
+basis point shifts their combined continuous zero rates by two basis points. See
+[Two-curve convexity blocks](@ref).
 Use [`sensitivities`](@ref) to also obtain value and duration or DV01 from the same
 derivatives.
 """
 function convexity(valuation_fn::F, kr::KeyRates, curve::AYM) where {F}
-    r = _keyrate((; curve), kr.tenors, valuation_fn; order = 2)
-    return _relative(r, r.hessian.curve.curve)
+    r = _keyrate(curve, kr.tenors, valuation_fn; order = 2)
+    return _relative(r, r.hessian)
 end
 function convexity(kr::KeyRates, curve::AYM, cfs::AbstractVector, times = eachindex(cfs))
-    r = _keyrate((; curve), kr.tenors, cfs, times; order = 2)
-    return _relative(r, r.hessian.curve.curve)
+    r = _keyrate_analytic(curve, kr.tenors, cfs, times; order = 2)
+    return _relative(r, r.hessian)
 end
 
 function convexity(valuation_fn::F, base::AYM, credit::AYM) where {F}
     r = _keyrate((; base, credit), _PARALLEL_GRID, valuation_fn; order = 2)
     return _base_credit_cross(r, only)
 end
-function convexity(base::AYM, credit::AYM, cfs::AbstractVector, times = eachindex(cfs))
-    # Fixed cashflows have analytic base, credit, and cross derivatives.
-    r = _keyrate((; base, credit), _PARALLEL_GRID, cfs, times; order = 2)
-    return _base_credit_cross(r, only)
-end
-
 function convexity(valuation_fn::F, kr::KeyRates, base::AYM, credit::AYM) where {F}
     r = _keyrate((; base, credit), kr.tenors, valuation_fn; order = 2)
     return _base_credit_cross(r)
-end
-function convexity(kr::KeyRates, base::AYM, credit::AYM, cfs::AbstractVector, times = eachindex(cfs))
-    r = _keyrate((; base, credit), kr.tenors, cfs, times; order = 2)
-    return _base_credit_cross(r)
-end
-
-# Multi-curve NamedTuple cashflow form. Per-role and per-role-pair convexities
-# for static cashflows. Values coincide under multiplicative discount
-# composition; each public block owns an independent matrix.
-function convexity(kr::KeyRates, curves::NamedTuple, cfs::AbstractVector, times = eachindex(cfs))
-    r = _keyrate(curves, kr.tenors, cfs, times; order = 2)
-    n = _scale(r)
-    return map(row -> map(h -> _relative(n, h), row), r.hessian)
 end
 
 """
@@ -281,19 +241,12 @@ end
     sensitivities(kr::KeyRates, curve::AbstractYieldModel, cfs, times) -> NamedTuple
     sensitivities(valuation_fn, ::DV01, kr::KeyRates, curve::AbstractYieldModel) -> NamedTuple
     sensitivities(valuation_fn, kr::KeyRates, base::AbstractYieldModel, credit::AbstractYieldModel) -> NamedTuple
-    sensitivities(kr::KeyRates, base::AbstractYieldModel, credit::AbstractYieldModel, cfs, times) -> NamedTuple
     sensitivities(valuation_fn, ::DV01, kr::KeyRates, base, credit) -> NamedTuple
-    sensitivities(::DV01, kr::KeyRates, base, credit, cfs, times) -> NamedTuple
-    sensitivities(kr::KeyRates, curves::NamedTuple, cfs, times) -> NamedTuple
 
 Calculate value, key-rate durations or DV01s, and convexity together on the
 [`KeyRates`](@ref) grid. Callbacks use AD; fixed cashflows use analytic derivatives.
-
-For the `NamedTuple` cashflow form, every named curve is a discount layer, as in
-[`convexity`](@ref). Per-role durations and per-pair convexity matrices have equal
-values but independent storage, so modifying one does not affect another. Normalized
-durations and convexities do not change when the position's sign does; dollar DV01s
-change sign with the position.
+Normalized durations and convexities do not change when the position's sign does; dollar
+DV01s change sign with the position.
 
 Empty and all-zero cashflow streams return zero value and risk in the usual shapes; see
 [Zero cashflow streams](@ref) for their numeric types. Nonzero amounts that offset to
@@ -303,34 +256,31 @@ normalizing. Callback and contract forms do not use the zero-stream convention: 
 value from them gives undefined normalized risk.
 """
 function sensitivities(valuation_fn::F, kr::KeyRates, curve::AYM) where {F}
-    return _single_curve_sensitivities(_keyrate((; curve), kr.tenors, valuation_fn; order = 2))
+    return _single_curve_sensitivities(_keyrate(curve, kr.tenors, valuation_fn; order = 2))
 end
 function sensitivities(kr::KeyRates, curve::AYM, cfs::AbstractVector, times = eachindex(cfs))
-    return _single_curve_sensitivities(_keyrate((; curve), kr.tenors, cfs, times; order = 2))
+    return _single_curve_sensitivities(_keyrate_analytic(curve, kr.tenors, cfs, times; order = 2))
 end
 _single_curve_sensitivities(r) = (;
     value = r.value,
-    durations = _relative(r, r.gradient.curve; negate = true),
-    convexities = _relative(r, r.hessian.curve.curve),
+    durations = _relative(r, r.gradient; negate = true),
+    convexities = _relative(r, r.hessian),
 )
 
 function sensitivities(valuation_fn::F, ::DV01, kr::KeyRates, curve::AYM) where {F}
-    return _single_curve_dv01s(_keyrate((; curve), kr.tenors, valuation_fn; order = 2))
+    return _single_curve_dv01s(_keyrate(curve, kr.tenors, valuation_fn; order = 2))
 end
 function sensitivities(::DV01, kr::KeyRates, curve::AYM, cfs::AbstractVector, times = eachindex(cfs))
-    return _single_curve_dv01s(_keyrate((; curve), kr.tenors, cfs, times; order = 2))
+    return _single_curve_dv01s(_keyrate_analytic(curve, kr.tenors, cfs, times; order = 2))
 end
 _single_curve_dv01s(r) = (;
     value = r.value,
-    dv01s = _per_bp(r, r.gradient.curve),
-    convexities = _relative(r, r.hessian.curve.curve),
+    dv01s = _per_bp(r, r.gradient),
+    convexities = _relative(r, r.hessian),
 )
 
 function sensitivities(valuation_fn::F, kr::KeyRates, base::AYM, credit::AYM) where {F}
     return _two_curve_sensitivities(_keyrate((; base, credit), kr.tenors, valuation_fn; order = 2))
-end
-function sensitivities(kr::KeyRates, base::AYM, credit::AYM, cfs::AbstractVector, times = eachindex(cfs))
-    return _two_curve_sensitivities(_keyrate((; base, credit), kr.tenors, cfs, times; order = 2))
 end
 _two_curve_sensitivities(r) = (;
     value = r.value,
@@ -339,24 +289,8 @@ _two_curve_sensitivities(r) = (;
     convexities = _base_credit_cross(r),
 )
 
-# Multi-curve NamedTuple cashflow form. One AD-free pass returns per-role
-# durations + per-role-pair N×N convexity blocks. Values coincide under
-# multiplicative discount composition; public arrays are independent.
-function sensitivities(kr::KeyRates, curves::NamedTuple, cfs::AbstractVector, times = eachindex(cfs))
-    r = _keyrate(curves, kr.tenors, cfs, times; order = 2)
-    n = _scale(r)
-    return (;
-        value = r.value,
-        durations = map(g -> _relative(n, g; negate = true), r.gradient),
-        convexities = map(row -> map(h -> _relative(n, h), row), r.hessian),
-    )
-end
-
 function sensitivities(valuation_fn::F, ::DV01, kr::KeyRates, base::AYM, credit::AYM) where {F}
     return _two_curve_dv01s(_keyrate((; base, credit), kr.tenors, valuation_fn; order = 2))
-end
-function sensitivities(::DV01, kr::KeyRates, base::AYM, credit::AYM, cfs::AbstractVector, times = eachindex(cfs))
-    return _two_curve_dv01s(_keyrate((; base, credit), kr.tenors, cfs, times; order = 2))
 end
 _two_curve_dv01s(r) = (;
     value = r.value,

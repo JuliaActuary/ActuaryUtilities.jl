@@ -18,12 +18,12 @@ struct DV01 end
     IR01
 
 Interest Rate 01: signed dollar risk for a one-basis-point parallel shift in the
-risk-free (base) curve, holding the credit curve fixed.
+risk-free (base) curve, holding the credit curve fixed, of a valuation callback that
+receives `(base, credit)`: `duration(valuation, IR01(), base, credit)`.
 
-Takes a base curve and a credit curve. For fixed cashflows discounted at
-`base + credit`, IR01, CS01 and the combined rate's DV01 are equal. They can differ
-only in the callback forms, where the two curves can play different roles. For
-contracts, use `Effective()` and `Spread()`.
+For fixed cashflows discounted at `base + credit`, IR01, CS01 and the combined curve's
+DV01 are equal, so use `duration(DV01(), base + credit, cfs, times)`. For contracts, use
+`Effective()` and `Spread()`.
 
 See also: [`CS01`](@ref), [`DV01`](@ref)
 """
@@ -33,12 +33,12 @@ struct IR01 end
     CS01
 
 Credit Spread 01: signed dollar risk for a one-basis-point parallel shift in the
-credit curve, holding the risk-free (base) curve fixed.
+credit curve, holding the risk-free (base) curve fixed, of a valuation callback that
+receives `(base, credit)`: `duration(valuation, CS01(), base, credit)`.
 
-Takes a base curve and a credit curve. For fixed cashflows discounted at
-`base + credit`, CS01, IR01 and the combined rate's DV01 are equal. They can differ
-only in the callback forms, where the two curves can play different roles. For
-contracts, use `Effective()` and `Spread()`.
+For fixed cashflows discounted at `base + credit`, CS01, IR01 and the combined curve's
+DV01 are equal, so use `duration(DV01(), base + credit, cfs, times)`. For contracts, use
+`Effective()` and `Spread()`.
 
 See also: [`IR01`](@ref), [`DV01`](@ref)
 """

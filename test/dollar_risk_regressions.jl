@@ -20,8 +20,7 @@
         @test duration(DV01(), yield, FC.Cashflow.(cfs, times)) ≈ expected
         @test duration(callback, DV01(), yield) ≈ expected
         @test duration(value, DV01(), yield) ≈ expected
-        @test duration(IR01(), yield, yield, cfs, times) ≈ expected
-        @test duration(CS01(), yield, yield, cfs, times) ≈ expected
+        @test duration(DV01(), yield + yield, cfs, times) ≈ expected
         @test !isfinite(duration(callback, yield))
         @test !isfinite(convexity(callback, yield))
         if yield isa FM.Yield.AbstractYieldModel

@@ -1,5 +1,5 @@
 @testset "Analytic sensitivities preserve valuation types" begin
-    kernel = ActuaryUtilities.FinancialMath._ncurve_analytic
+    kernel = ActuaryUtilities.FinancialMath._keyrate_analytic
     tenors = [1.0, 3.0, 7.0]
     cfs = [5.0, 8.0, 105.0]
     times = [0.5, 2.0, 6.0]
@@ -16,12 +16,12 @@
         @test an.convexities ≈ ad.convexities
         @test eltype(an.durations) == typeof(an.value)
         @test eltype(an.convexities) == typeof(an.value)
-        layers = (; base = makecurve(0.03), credit = curve)
-        multi = sensitivities(kr, layers, cfs, times)
-        two = sensitivities(kr, layers.base, layers.credit, cfs, times)
-        @test multi.durations.credit ≈ two.credit_durations
-        @test multi.convexities.base.credit ≈ two.convexities.cross
-        @test eltype(multi.durations.base) == typeof(multi.value)
+        base = makecurve(0.03)
+        combined = sensitivities(kr, base + curve, cfs, times)
+        two = sensitivities((b, c) -> value(b + c), kr, base, curve)
+        @test combined.durations ≈ two.credit_durations
+        @test combined.convexities ≈ two.convexities.cross
+        @test eltype(combined.durations) == typeof(combined.value)
     end
 
     analytic(r) = sensitivities(kr, makecurve(r), cfs, times)
@@ -33,10 +33,10 @@
         @test ForwardDiff.derivative(r -> ForwardDiff.derivative(fa, r), 0.04) ≈
             ForwardDiff.derivative(r -> ForwardDiff.derivative(fd, r), 0.04)
     end
-    big_grid = kernel((; curve = makecurve(0.04)), big.(tenors), cfs, times; order = 2)
+    big_grid = kernel(makecurve(0.04), big.(tenors), cfs, times; order = 2)
     @test eltype(big_grid.gradient) == BigFloat
     @test eltype(big_grid.hessian) == BigFloat
-    @test_throws DimensionMismatch kernel((; curve = makecurve(0.04)), tenors, cfs, [1.0])
+    @test_throws DimensionMismatch kernel(makecurve(0.04), tenors, cfs, [1.0])
 
     @testset "ZeroRateCurve knot Jacobian with time-zero cashflows" begin
         rates = [0.02, 0.03, 0.04]
@@ -59,51 +59,33 @@
 end
 
 @testset "Empty key-rate cashflows have zero value and risk" begin
-    kernel = ActuaryUtilities.FinancialMath._ncurve_analytic
+    kernel = ActuaryUtilities.FinancialMath._keyrate_analytic
     tenors = [1.0, 3.0, 7.0]
     kr = KeyRates(tenors)
     curve = ZeroCashflowTestCurve()
-    layers = (; base = curve, credit = curve, liquidity = curve)
     z = zeros(length(tenors))
     zz = zeros(length(tenors), length(tenors))
 
     for (cfs, times) in ((Float64[], Float64[]), (BigFloat[], Float32[]), ([], []))
         for order in (1, 2)
-            raw = kernel(layers, tenors, cfs, times; order)
+            raw = kernel(curve, tenors, cfs, times; order)
             @test iszero(raw.value)
             @test raw.gradient == z
             order == 2 && @test raw.hessian == zz
         end
         @test duration(kr, curve, cfs, times) == z
         @test duration(DV01(), kr, curve, cfs, times) == z
-        @test duration(IR01(), kr, curve, curve, cfs, times) == z
-        @test duration(CS01(), kr, curve, curve, cfs, times) == z
         @test convexity(kr, curve, cfs, times) == zz
-        @test convexity(kr, curve, curve, cfs, times) == (; base = zz, credit = zz, cross = zz)
         @test iszero(duration(curve, cfs, times))
         @test iszero(duration(DV01(), curve, cfs, times))
         @test iszero(convexity(curve, cfs, times))
-        @test convexity(curve, curve, cfs, times) == (; base = 0.0, credit = 0.0, cross = 0.0)
 
         single = sensitivities(kr, curve, cfs, times)
         @test single == (; value = 0.0, durations = z, convexities = zz)
         dollar = sensitivities(DV01(), kr, curve, cfs, times)
         @test dollar == (; value = 0.0, dv01s = z, convexities = zz)
-        two = sensitivities(kr, curve, curve, cfs, times)
-        @test iszero(two.value)
-        @test two.base_durations == two.credit_durations == z
-        @test two.convexities == (; base = zz, credit = zz, cross = zz)
-        two_dollar = sensitivities(DV01(), kr, curve, curve, cfs, times)
-        @test iszero(two_dollar.value)
-        @test two_dollar.base_dv01s == two_dollar.credit_dv01s == z
-        @test two_dollar.convexities == two.convexities
-        multi = sensitivities(kr, layers, cfs, times)
-        @test iszero(multi.value)
-        @test all(==(z), values(multi.durations))
-        @test all(blocks -> all(==(zz), values(blocks)), values(multi.convexities))
-        @test convexity(kr, layers, cfs, times) == multi.convexities
     end
-    big_grid = kernel(layers, big.(tenors), Float64[], Float64[]; order = 2)
+    big_grid = kernel(curve, big.(tenors), Float64[], Float64[]; order = 2)
     @test big_grid.value isa Float64
     @test eltype(big_grid.gradient) == eltype(big_grid.hessian) == BigFloat
     big_cfs = sensitivities(kr, curve, BigFloat[], Float64[])

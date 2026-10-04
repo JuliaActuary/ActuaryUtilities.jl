@@ -176,12 +176,14 @@ end
         base = FM.ZeroRateCurve(base_rates, tenors, FM.Spline.Linear())
         credit = FM.ZeroRateCurve(credit_rates, tenors, FM.Spline.Linear())
         cfs = [5.0, 5.0, 5.0, 5.0, 105.0]
+        pv2(b, c) = FC.present_value(b + c, cfs, tenors)
 
-        ir01s = duration(IR01(), KeyRates(tenors), base, credit, cfs, tenors)
-        cs01s = duration(CS01(), KeyRates(tenors), base, credit, cfs, tenors)
+        ir01s = duration(pv2, IR01(), KeyRates(tenors), base, credit)
+        cs01s = duration(pv2, CS01(), KeyRates(tenors), base, credit)
 
-        # For additive combination, IR01 ≈ CS01
+        # For additive combination, IR01 ≈ CS01 ≈ the combined curve's DV01s
         @test ir01s ≈ cs01s atol = 1.0e-10
+        @test ir01s ≈ duration(DV01(), KeyRates(tenors), base + credit, cfs, tenors) atol = 1.0e-12
         @test all(ir01s .> 0)
     end
 
@@ -194,13 +196,14 @@ end
         credit = FM.ZeroRateCurve(credit_rates, tenors, FM.Spline.Linear())
         cfs = [5.0, 5.0, 105.0]
 
-        conv = convexity(KeyRates(tenors), base, credit, cfs, tenors)
+        conv = convexity((b, c) -> FC.present_value(b + c, cfs, tenors), KeyRates(tenors), base, credit)
 
         @test !all(isapprox.(conv.cross, 0.0, atol = 1.0e-10))
         @test !all(isapprox.(conv.base, 0.0, atol = 1.0e-10))
         @test !all(isapprox.(conv.credit, 0.0, atol = 1.0e-10))
-        # For symmetric additive combination, cross ≈ base
+        # For symmetric additive combination, cross ≈ base ≈ the combined curve's matrix
         @test conv.cross ≈ conv.base atol = 1.0e-10
+        @test conv.base ≈ convexity(KeyRates(tenors), base + credit, cfs, tenors) atol = 1.0e-10
     end
 
     @testset "scalar curve measures equal sums of KeyRates results" begin
@@ -242,30 +245,25 @@ end
         base = FM.ZeroRateCurve(base_rates, tenors, FM.Spline.Linear())
         credit = FM.ZeroRateCurve(credit_rates, tenors, FM.Spline.Linear())
         cfs = [5.0, 5.0, 5.0, 5.0, 105.0]
+        pv2(b, c) = FC.present_value(b + c, cfs, tenors)
 
-        # IR01 scalar = sum of KeyRates IR01 vector
-        scalar_ir01 = duration(IR01(), base, credit, cfs, tenors)
-        ir01_vec = duration(IR01(), KeyRates(tenors), base, credit, cfs, tenors)
+        # Callback forms bump one curve role with a parallel shift: scalar = sum of KeyRates vector.
+        scalar_ir01 = duration(pv2, IR01(), base, credit)
+        ir01_vec = duration(pv2, IR01(), KeyRates(tenors), base, credit)
         @test scalar_ir01 isa Real
         @test scalar_ir01 ≈ sum(ir01_vec) atol = 1.0e-12
-
-        # CS01 scalar = sum of KeyRates CS01 vector
-        scalar_cs01 = duration(CS01(), base, credit, cfs, tenors)
-        cs01_vec = duration(CS01(), KeyRates(tenors), base, credit, cfs, tenors)
+        @test scalar_ir01 ≈ duration(DV01(), base + credit, cfs, tenors) atol = 1.0e-12
+        scalar_cs01 = duration(pv2, CS01(), base, credit)
+        cs01_vec = duration(pv2, CS01(), KeyRates(tenors), base, credit)
         @test scalar_cs01 isa Real
         @test scalar_cs01 ≈ sum(cs01_vec) atol = 1.0e-12
-
-        # Callback forms bump one curve role with a parallel shift.
-        pv2(b, c) = FC.present_value(b + c, cfs, tenors)
-        @test duration(pv2, IR01(), base, credit) ≈ sum(duration(pv2, IR01(), KeyRates(tenors), base, credit)) atol = 1.0e-12
-        @test duration(pv2, CS01(), base, credit) ≈ sum(duration(pv2, CS01(), KeyRates(tenors), base, credit)) atol = 1.0e-12
         @test duration(IR01(), base, credit) do b, c
             pv2(b, c)
         end ≈ scalar_ir01 atol = 1.0e-12
 
         # Two-curve convexity: scalars = sums of matrices
-        scalar_conv = convexity(base, credit, cfs, tenors)
-        mat_conv = convexity(KeyRates(tenors), base, credit, cfs, tenors)
+        scalar_conv = convexity(pv2, base, credit)
+        mat_conv = convexity(pv2, KeyRates(tenors), base, credit)
         @test scalar_conv.base isa Real
         @test scalar_conv.base ≈ sum(mat_conv.base) atol = 1.0e-12
         @test scalar_conv.credit ≈ sum(mat_conv.credit) atol = 1.0e-12
@@ -467,40 +465,19 @@ end
     @test s_dv01_cf.dv01s ≈ s_dv01_raw.dv01s
     @test s_dv01_cf.convexities ≈ s_dv01_raw.convexities
 
-    # two-curve duration
+    # a layered curve
     base_rates = [0.03, 0.03, 0.03, 0.03, 0.03]
     credit_rates = [0.02, 0.02, 0.02, 0.02, 0.02]
-    base = FM.ZeroRateCurve(base_rates, tenors, FM.Spline.Linear())
-    credit = FM.ZeroRateCurve(credit_rates, tenors, FM.Spline.Linear())
+    layered = FM.ZeroRateCurve(base_rates, tenors, FM.Spline.Linear()) + FM.ZeroRateCurve(credit_rates, tenors, FM.Spline.Linear())
 
-    @test duration(IR01(), base, credit, cfs) ≈ duration(IR01(), base, credit, amounts, tenors)
-    @test duration(IR01(), KeyRates(tenors), base, credit, cfs) ≈ duration(IR01(), KeyRates(tenors), base, credit, amounts, tenors)
-    @test duration(CS01(), base, credit, cfs) ≈ duration(CS01(), base, credit, amounts, tenors)
-    @test duration(CS01(), KeyRates(tenors), base, credit, cfs) ≈ duration(CS01(), KeyRates(tenors), base, credit, amounts, tenors)
-
-    # two-curve convexity
-    conv_cf = convexity(base, credit, cfs)
-    conv_raw = convexity(base, credit, amounts, tenors)
-    @test conv_cf.base ≈ conv_raw.base
-    @test conv_cf.credit ≈ conv_raw.credit
-    @test conv_cf.cross ≈ conv_raw.cross
-
-    conv_kr_cf = convexity(KeyRates(tenors), base, credit, cfs)
-    conv_kr_raw = convexity(KeyRates(tenors), base, credit, amounts, tenors)
-    @test conv_kr_cf.base ≈ conv_kr_raw.base
-    @test conv_kr_cf.credit ≈ conv_kr_raw.credit
-    @test conv_kr_cf.cross ≈ conv_kr_raw.cross
-
-    # two-curve sensitivities
-    s2_cf = sensitivities(KeyRates(tenors), base, credit, cfs)
-    s2_raw = sensitivities(KeyRates(tenors), base, credit, amounts, tenors)
-    @test s2_cf.base_durations ≈ s2_raw.base_durations
-    @test s2_cf.credit_durations ≈ s2_raw.credit_durations
-
-    s2_dv01_cf = sensitivities(DV01(), KeyRates(tenors), base, credit, cfs)
-    s2_dv01_raw = sensitivities(DV01(), KeyRates(tenors), base, credit, amounts, tenors)
-    @test s2_dv01_cf.base_dv01s ≈ s2_dv01_raw.base_dv01s
-    @test s2_dv01_cf.credit_dv01s ≈ s2_dv01_raw.credit_dv01s
+    @test duration(DV01(), layered, cfs) ≈ duration(DV01(), layered, amounts, tenors)
+    @test duration(DV01(), KeyRates(tenors), layered, cfs) ≈ duration(DV01(), KeyRates(tenors), layered, amounts, tenors)
+    @test convexity(layered, cfs) ≈ convexity(layered, amounts, tenors)
+    @test convexity(KeyRates(tenors), layered, cfs) ≈ convexity(KeyRates(tenors), layered, amounts, tenors)
+    s2_cf = sensitivities(KeyRates(tenors), layered, cfs)
+    s2_raw = sensitivities(KeyRates(tenors), layered, amounts, tenors)
+    @test s2_cf.durations ≈ s2_raw.durations
+    @test s2_cf.convexities ≈ s2_raw.convexities
 
     @testset "Cashflow with non-tenor times" begin
         # ZRC has annual tenors, but cashflows are semi-annual

@@ -18,10 +18,6 @@
             @test duration(yield, make()) ≈ duration(yield, cfs)
             @test convexity(yield, make(), times) ≈ convexity(yield, cfs, times)
             @test convexity(yield, make()) ≈ convexity(yield, cfs)
-            for metric in (IR01(), CS01())
-                @test duration(metric, yield, yield, make(), times) ≈ duration(metric, yield, yield, cfs, times)
-                @test duration(metric, yield, yield, make()) ≈ duration(metric, yield, yield, cfs)
-            end
         end
     end
     wrapped = FC.Cashflow.([5.0, 5.0, 105.0], [0.5, 1.5, 2.5])
@@ -66,26 +62,6 @@ end
     expected = zspread(bond, reference, market_price)
     @test FC.rate(result.zspread) ≈ spread atol = 1.0e-10
     @test result.zspread_dv01 ≈ expected.zspread_dv01
-end
-
-@testset "Named cashflow outputs own their arrays" begin
-    kr = KeyRates([1.0, 2.0, 3.0])
-    curve = FM.Yield.Constant(FC.Continuous(0.04))
-    curves = (; base = curve, credit = curve, liquidity = curve)
-    for cfs in ([5.0, 5.0, 105.0], zeros(3), Float64[])
-        result = sensitivities(kr, curves, cfs, [1.0, 2.0, 3.0])
-        before = copy(result.durations.credit)
-        result.durations.base[1] = 123.0
-        @test result.durations.credit == before
-        @test result.durations.liquidity == before
-        for blocks in (result.convexities, convexity(kr, curves, cfs, [1.0, 2.0, 3.0]))
-            matrices = [block for row in values(blocks) for block in values(row)]
-            @test all(matrices[i] !== matrices[j] for i in eachindex(matrices) for j in eachindex(matrices) if i != j)
-            untouched = copy(last(matrices))
-            first(matrices)[1, 1] = 456.0
-            @test all(block == untouched for block in matrices[2:end])
-        end
-    end
 end
 
 @testset "Scalar convexity forms agree without a tenor grid" begin

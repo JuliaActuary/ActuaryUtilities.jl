@@ -16,8 +16,7 @@ value retain their dollar exposures and undefined normalized risk. See
 ## Shock coordinates
 
 A one-basis-point shift must move some rate, and the dollar result depends on which
-one. Each single-rate input moves in its own shock coordinate. The fixed-cashflow
-IR01/CS01 forms move the combined rate in its coordinate:
+one. Each single-rate input moves in its own shock coordinate:
 
 | Input | What moves by `s` | Modified duration | Convexity weight |
 |:------|:------------------|:------------------|:-----------------|
@@ -26,7 +25,6 @@ IR01/CS01 forms move the combined rate in its coordinate:
 | `Continuous(y)` | `y` | Macaulay | `t²` |
 | Any `AbstractYieldModel`, including `Yield.Constant` | every continuous zero rate, in parallel | Macaulay | `t²` |
 | `KeyRates(tenors)` | continuous zero rates, through a triangular bump at each tenor | per tenor | per tenor pair |
-| `IR01`/`CS01` with fixed cashflows | the combined rate `base + credit`, in its own coordinate | — | — |
 | Contracts with `Effective()`/`Spread()` | `Effective()`: continuous zero rates of the index and discount curves; `Spread()`: the discount curve only | — | — |
 
 DV01 is `-∂V/∂s / 10000` in the same coordinate: it is the first-order value lost
@@ -102,18 +100,14 @@ base curve fixed. Both use the same sign and one-basis-point scaling as DV01.
     second derivatives equal ``F''``. Shifting **both** curves by one basis point
     shifts the combined curve by **two** basis points.
 
-The fixed-cashflow calls shift the combined rate `base + credit` in its own
-coordinate (see [Shock coordinates](@ref)). For mixed compounding, this is not a
-one-basis-point move of each input's nominal rate. The two-curve `convexity` forms
-take yield models and use continuous-zero shifts.
+For fixed cashflows, use the combined curve's DV01,
+`duration(DV01(), base + credit, cfs, times)`.
 
 ```@example sensitivities
 base   = ZeroRateCurve([0.03, 0.03, 0.03, 0.03, 0.03], tenors)
 credit = ZeroRateCurve([0.02, 0.02, 0.02, 0.02, 0.02], tenors)
 
-(ir01 = duration(IR01(), base, credit, cfs, times),
- cs01 = duration(CS01(), base, credit, cfs, times),
- dv01 = duration(DV01(), base + credit, cfs, times))
+duration(DV01(), base + credit, cfs, times)
 ```
 
 The measures can differ when a valuation uses the two curves differently. Pass the
@@ -243,24 +237,15 @@ dv01_result = sensitivities(DV01(), KeyRates(tenors), zrc, cfs, times)
 dv01_result
 ```
 
-Two-curve key-rate forms return per-tenor IR01s and CS01s and per-pair convexity
-matrices:
-
-```@example sensitivities
-(ir01s = duration(IR01(), KeyRates(tenors), base, credit, cfs, times),
- cs01s = duration(CS01(), KeyRates(tenors), base, credit, cfs, times))
-```
-
-```@example sensitivities
-twocurve_result = sensitivities(KeyRates(tenors), base, credit, cfs, times)
-twocurve_result.base_durations
-```
-
-The fixed-cashflow valuation is `V = Σ cf × base(t) × credit(t)`. Discount factors
-multiply, so continuous zero rates add, and the base and credit results are equal.
-
 The two-curve callback forms also accept `KeyRates`; the callback receives the bumped
-`(base, credit)` curves. For the floater in [Two curves: IR01 and CS01](@ref), base-rate
+`(base, credit)` curves. For the fixed cashflows, discount factors multiply, so continuous
+zero rates add, and the per-tenor IR01s and CS01s are equal:
+
+```@example sensitivities
+(ir01s = duration(fixed_value, IR01(), KeyRates(tenors), base, credit),
+ cs01s = duration(fixed_value, CS01(), KeyRates(tenors), base, credit))
+```
+ For the floater in [Two curves: IR01 and CS01](@ref), base-rate
 changes also reset its coupons, so the base and credit key-rate durations differ in
 every bucket:
 
