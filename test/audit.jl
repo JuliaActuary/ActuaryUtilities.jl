@@ -40,17 +40,34 @@
     end
 
     @testset "fast-path dispatch is actually selected" begin
+        # Every yield input must reach the analytic methods: the prior fast paths were
+        # unreachable (`Constant{<:Continuous}` can never match `Constant{<:Rate}`) and silently
+        # fell through to AD. The results are the closed forms summed in payment order, to the bit.
+        analytic_duration = which(duration, (Modified, Float64, Vector{Float64}, Vector{Float64}))
+        analytic_convexity = which(convexity, (Float64, Vector{Float64}, Vector{Float64}))
+        @test analytic_duration.module === analytic_convexity.module === ActuaryUtilities.FinancialMath
         cfs = [5.0, 5.0, 105.0]
         times = [1.0, 2.0, 3.0]
-        generic_sig = Tuple{typeof(duration), Modified, Any, Any, Any}
+        divisor(y::Real) = 1 + y
+        divisor(y::FC.Rate{<:Real, FC.Periodic}) = 1 + FC.rate(y) / y.compounding.frequency
+        divisor(y) = 1
+        inv_m(y::Real) = 1
+        inv_m(y::FC.Rate{<:Real, FC.Periodic}) = 1 / y.compounding.frequency
+        inv_m(y) = 0
         for y in (0.03, FC.Periodic(0.04, 2), FC.Continuous(0.03), FM.Yield.Constant(0.03), FM.Yield.Constant(FC.Continuous(0.03)))
-            m = which(duration, (Modified, typeof(y), typeof(cfs), typeof(times)))
-            # an analytic method must be selected, not the generic AD fallback —
-            # the prior fast paths were unreachable (`Constant{<:Continuous}` can
-            # never match `Constant{<:Rate}`) and silently fell through
-            @test m.sig != generic_sig
-            cm = which(convexity, (typeof(y), typeof(cfs), typeof(times)))
-            @test cm.sig != Tuple{typeof(convexity), Any, Any, Any}
+            V = Vt = Vtt = 0.0
+            for (cf, t) in zip(cfs, times)
+                cfd = cf * FC.discount(y, t)
+                V += cfd
+                Vt += t * cfd
+                Vtt += t * (t + inv_m(y)) * cfd
+            end
+            @test which(duration, (Modified, typeof(y), typeof(cfs), typeof(times))) === analytic_duration
+            @test which(convexity, (typeof(y), typeof(cfs), typeof(times))) === analytic_convexity
+            @test duration(Modified(), y, cfs, times) === Vt / V / divisor(y)
+            @test duration(y, cfs, times) === Vt / V / divisor(y)
+            @test duration(DV01(), y, cfs, times) === Vt / (divisor(y) * 10_000)
+            @test convexity(y, cfs, times) === Vtt / V / divisor(y)^2
         end
     end
 
