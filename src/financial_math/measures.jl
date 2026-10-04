@@ -1,12 +1,10 @@
 ## Measure markers
 # The shared vocabulary every sensitivity method dispatches on, including the `KeyRates` grid.
 
-abstract type Duration end
-
-struct Macaulay <: Duration end
-struct Modified <: Duration end
+struct Macaulay end
+struct Modified end
 """
-    DV01 <: Duration
+    DV01
 
 Signed dollar risk for a one-basis-point (0.01%) parallel rate shift:
 `DV01 = -∂V/∂r / 10000`. A positive DV01 of 0.045 means a 1bp rate increase
@@ -14,10 +12,10 @@ reduces the position's value by approximately 0.045, in the cashflows' currency 
 
 See also: [`IR01`](@ref), [`CS01`](@ref)
 """
-struct DV01 <: Duration end
+struct DV01 end
 
 """
-    IR01 <: Duration
+    IR01
 
 Interest Rate 01: signed dollar risk for a one-basis-point parallel shift in the
 risk-free (base) curve, holding the credit curve fixed.
@@ -29,10 +27,10 @@ contracts, use `Effective()` and `Spread()`.
 
 See also: [`CS01`](@ref), [`DV01`](@ref)
 """
-struct IR01 <: Duration end
+struct IR01 end
 
 """
-    CS01 <: Duration
+    CS01
 
 Credit Spread 01: signed dollar risk for a one-basis-point parallel shift in the
 credit curve, holding the risk-free (base) curve fixed.
@@ -44,10 +42,10 @@ contracts, use `Effective()` and `Spread()`.
 
 See also: [`IR01`](@ref), [`DV01`](@ref)
 """
-struct CS01 <: Duration end
+struct CS01 end
 
 """
-    Effective <: Duration
+    Effective
 
 Measure contract risk while reprojecting cashflows under shifted curves, so
 floating coupons reset. Use `duration(Effective(), contract, curve)`; the same
@@ -56,10 +54,10 @@ fixed cashflows.
 
 See also: [`Spread`](@ref), [`sensitivities`](@ref), [`locked_floater`](@ref).
 """
-struct Effective <: Duration end
+struct Effective end
 
 """
-    Spread <: Duration
+    Spread
 
 Spread (credit) duration: bumps the discount curve only; cashflows projected on the
 index curve stay fixed. For a floating-rate bond it is close to the duration of a
@@ -67,10 +65,10 @@ fixed-rate bond with the same maturity.
 
 See also: [`Effective`](@ref), [`sensitivities`](@ref).
 """
-struct Spread <: Duration end
+struct Spread end
 
 """
-    KeyRates(tenors) <: Duration
+    KeyRates(tenors)
 
 Select the tenor grid for key-rate [`duration`](@ref), [`convexity`](@ref), and
 [`sensitivities`](@ref). Results contain per-tenor vectors and convexity matrices.
@@ -87,7 +85,7 @@ sensitivities(KeyRates(tenors), curve, cfs, times)       # value + durations + c
 
 See also: [`DV01`](@ref), [`IR01`](@ref), [`CS01`](@ref)
 """
-struct KeyRates{T <: AbstractVector{<:Real}} <: Duration
+struct KeyRates{T <: AbstractVector{<:Real}}
     tenors::T
     function KeyRates(tenors::T) where {T <: AbstractVector{<:Real}}
         _validate_tenors(tenors)

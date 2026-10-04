@@ -2,12 +2,12 @@
 @testset "analytic fast paths match the generic AD path" begin
     # The generic scalar path uses the input's own compounding convention for
     # rates and a continuous-zero shift for yield models.
-    generic_duration(yield, cfs, times) = duration(i -> ActuaryUtilities.FinancialMath.price(i, cfs, times), yield)
+    generic_duration(yield, cfs, times) = duration(i -> FC.pv(i, cfs, times), yield)
     parallel_bump(yield, x) = yield + x
     parallel_bump(yield::FM.Yield.AbstractYieldModel, x) =
         FM.Yield.TenorShift(yield, (z, t) -> FC.Continuous(x) + z)
     function generic_convexity(yield, cfs, times)
-        vf = i -> ActuaryUtilities.FinancialMath.price(i, cfs, times)
+        vf = i -> FC.pv(i, cfs, times)
         v(x) = abs(vf(parallel_bump(yield, x)))
         ForwardDiff.derivative(y -> ForwardDiff.derivative(v, y), 0.0) / v(0.0)
     end

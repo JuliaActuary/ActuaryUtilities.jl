@@ -60,11 +60,8 @@ end
 
 @testset "financial calcs" begin
 
-    @testset "price and present_value" begin
-        cf = [100, 100]
-
-        @test price(0.05, cf) ≈ pv(0.05, cf)
-
+    @testset "present_value" begin
+        @test !isdefined(ActuaryUtilities, :price)
 
         cfs = ones(3)
         @test present_values(FM.Yield.Constant(0.0), cfs) == [3, 2, 1]
@@ -85,11 +82,7 @@ end
 
         @test pv(0.05, cf, ts) ≈ 100 / 1.05^0.5 + 100 / 1.05^1
 
-        @test price(0.05, cf, ts) ≈ pv(0.05, cf, ts)
-        @test price(0.05, -1 .* cf, ts) ≈ abs(pv(0.05, cf, ts))
-
         @test pv(0.05, FC.Cashflow.(cf, ts)) ≈ pv(0.05, cf, ts)
-        @test price(0.05, FC.Cashflow.(cf, ts)) ≈ price(0.05, cf, ts)
 
 
     end

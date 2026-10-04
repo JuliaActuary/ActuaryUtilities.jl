@@ -230,13 +230,13 @@ end
 
     # duration with do-block (function-first argument order)
     d = duration(c) do i
-        price(i, cfs, times)
+        pv(i, cfs, times)
     end
     @test d ≈ duration(c, cfs, times)
 
     # convexity with do-block
     cv = convexity(c) do i
-        price(i, cfs, times)
+        pv(i, cfs, times)
     end
     @test cv ≈ convexity(c, cfs, times)
     @test cv ≈ convexity(FC.Continuous(log1p(0.04)), cfs, times)

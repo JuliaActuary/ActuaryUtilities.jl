@@ -45,14 +45,6 @@ end
 
 
 """
-    price(...)
-
-Return `abs(present_value(...))`. Use `present_value` when the position sign matters.
-"""
-price(x1, x2) = FinanceCore.present_value(x1, x2) |> abs
-price(x1, x2, x3) = FinanceCore.present_value(x1, x2, x3) |> abs
-
-"""
     breakeven(yield, cashflows::Vector)
     breakeven(yield, cashflows::Vector,times::Vector)
 

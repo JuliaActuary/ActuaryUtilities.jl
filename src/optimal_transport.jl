@@ -1,7 +1,6 @@
 module OptimalTransport
 
 import ..Distributions
-import ..StatsBase
 import ..RiskMeasures
 import ..RiskMeasures: RiskMeasure, CTE, VaR
 import ..QuadGK
