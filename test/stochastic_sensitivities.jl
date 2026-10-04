@@ -93,9 +93,13 @@ end
 
     # The horizon is required and must lie on the time grid, up to rounding.
     @test_throws UndefKeywordError Scenarios(hw)
-    @test Scenarios(hw; horizon = 0.07, timestep = 0.01).nsteps == 7   # 0.07 / 0.01 is 7.000000000000001
-    @test Scenarios(hw; horizon = 0.9, timestep = 0.3).nsteps == 3     # 0.9 / 0.3 is 3.0000000000000004
-    @test Scenarios(hw; horizon = 5, timestep = 1 / 12).nsteps == 60
+    # 0.07 / 0.01 is 7.000000000000001 and 0.9 / 0.3 is 3.0000000000000004: the paths take that many
+    # steps and end at the horizon, so a payment there is valued and one a step later throws.
+    for (horizon, timestep) in ((0.07, 0.01), (0.9, 0.3), (5, 1 / 12))
+        s = Scenarios(hw; horizon, timestep, n_scenarios = 2)
+        @test isfinite(sensitivities(s, [1.0], [horizon]).value)
+        @test_throws "Cannot extrapolate" sensitivities(s, [1.0], [horizon + timestep])
+    end
     # An unaligned horizon throws before the seed is drawn.
     rng = Xoshiro(3)
     untouched = copy(rng)
@@ -106,7 +110,7 @@ end
     # Construction draws one seed from `rng`; valuation, zero streams included, never uses it.
     rng, expected = Xoshiro(4), Xoshiro(4)
     s = Scenarios(hw; horizon = 5.0, timestep = 0.25, n_scenarios = 64, rng)
-    @test s.seed == rand(expected, UInt64) && s.nsteps == 20
+    @test s.seed == rand(expected, UInt64)
     short, long = ([5.0, 105.0], [1.0, 2.0]), ([4.0, 4.0, 104.0], [1.0, 3.0, 5.0])   # 5.0 is the horizon
     value(paths) = sum(FC.pv(p, short...) for p in paths) / length(paths)
     for order in (FirstOrder(), SecondOrder()), grid in ((), (kr,))

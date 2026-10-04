@@ -37,13 +37,12 @@ struct Scenarios{M <: HW, T, H}
     n_scenarios::Int
     timestep::T
     horizon::H
-    nsteps::Int
     seed::UInt64
     function Scenarios(model::HW; horizon, n_scenarios = 1000, timestep = 1 / 12, rng = Random.default_rng())
         # Validate the grid before drawing the seed, with the function `simulate` counts steps with.
-        (; nsteps, aligned) = FinanceModels.simulation_steps(horizon, timestep)
-        aligned || throw(ArgumentError("horizon $horizon is not a whole number of timesteps $timestep"))
-        return new{typeof(model), typeof(timestep), typeof(horizon)}(model, n_scenarios, timestep, horizon, nsteps, rand(rng, UInt64))
+        FinanceModels.simulation_steps(horizon, timestep).aligned ||
+            throw(ArgumentError("horizon $horizon is not a whole number of timesteps $timestep"))
+        return new{typeof(model), typeof(timestep), typeof(horizon)}(model, n_scenarios, timestep, horizon, rand(rng, UInt64))
     end
 end
 
