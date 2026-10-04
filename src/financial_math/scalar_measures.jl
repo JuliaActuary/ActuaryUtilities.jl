@@ -44,7 +44,8 @@ Dollar sensitivities differentiate the signed value directly, so they stay defin
 zero present value, where normalized duration is not. Callback forms do not use the
 zero-stream convention: a zero value from them gives undefined normalized risk.
 
-The default measure is `Modified()`.
+The default measure is `Modified()`. With a contract or a portfolio after the curve, it is
+`Effective()`; see [`Effective`](@ref).
 
 - Modified duration: `-∂V/∂r / V`, the relative value lost per unit increase in the shocked rate.
 - Macaulay: the present-value-weighted average payment time.

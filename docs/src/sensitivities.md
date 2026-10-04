@@ -218,23 +218,23 @@ The parallel measures are ≈ the sums of the decomposition:
  convexity(zrc, cfs, times) ≈ sum(conv_matrix))
 ```
 
-Use `sensitivities` to calculate value, duration or DV01, and convexity together:
+Use [`sensitivities`](@ref) to calculate the value, durations and DV01s together, and with
+[`SecondOrder()`](@ref) the convexities too, from one derivative calculation:
 
 ```@example sensitivities
-result = sensitivities(KeyRates(tenors), zrc, cfs, times)
-# result.value       — present value
-# result.durations   — key-rate durations (modified, vector)
-# result.convexities — key-rate convexity matrix
+result = sensitivities(SecondOrder(), KeyRates(tenors), zrc, cfs, times)
+# result.value     — present value, a number
+# result.duration  — key-rate durations (modified, vector)
+# result.dv01      — key-rate DV01s (vector)
+# result.convexity — key-rate convexity matrix
 result
 ```
 
+The default, [`FirstOrder()`](@ref), leaves out the convexity and takes no second
+derivatives. Without `KeyRates`, every field is a number for one parallel shift:
+
 ```@example sensitivities
-# For DV01s instead of durations:
-dv01_result = sensitivities(DV01(), KeyRates(tenors), zrc, cfs, times)
-# dv01_result.value       — present value
-# dv01_result.dv01s       — key-rate DV01s (vector)
-# dv01_result.convexities — key-rate convexity matrix
-dv01_result
+sensitivities(zrc, cfs, times)
 ```
 
 The two-curve callback forms also accept `KeyRates`; the callback receives the bumped
@@ -252,16 +252,16 @@ every bucket:
 ```@example sensitivities
 floater_krd = sensitivities(floater_value, KeyRates(tenors), base, credit)
 
-(base_durations   = floater_krd.base_durations,
- credit_durations = floater_krd.credit_durations)
+(base_durations   = floater_krd.duration.base,
+ credit_durations = floater_krd.duration.credit)
 ```
 
 Base-rate changes affect coupons and discounting; credit changes affect discounting only.
 Each vector sums to ≈ the floater's parallel modified duration for its curve:
 
 ```@example sensitivities
-(base   = sum(floater_krd.base_durations),
- credit = sum(floater_krd.credit_durations))
+(base   = sum(floater_krd.duration.base),
+ credit = sum(floater_krd.duration.credit))
 ```
 
 ## Market Inputs
@@ -279,9 +279,12 @@ inputs = sensitivities((; zeros = [0.02, 0.025, 0.03, 0.035, 0.04], spread = [0.
 end
 
 (value         = inputs.value,
- zero_dv01s    = inputs.key_rate_dv01.zeros,   # per input element
- spread_dv01   = inputs.dv01.spread)           # parallel shift of the whole input
+ zero_dv01s    = inputs.dv01.zeros,          # per input element
+ spread_dv01   = only(inputs.dv01.spread))   # the one spread element
 ```
+
+The result is keyed by input name, with one entry per element, as for curves on a
+`KeyRates` grid.
 
 With linear zero-rate interpolation and payments inside the knot range, the
 per-element results equal the `KeyRates` decomposition on the same knots.
@@ -315,8 +318,8 @@ ad = sensitivities((; par_yields)) do inputs
 end
 
 (tenors = par_tenors,
- par_durations = ad.key_rate.par_yields,
- par_dv01s = ad.key_rate_dv01.par_yields)
+ par_durations = ad.duration.par_yields,
+ par_dv01s = ad.dv01.par_yields)
 ```
 
 Each entry differentiates one par quote while holding the other quotes fixed and
@@ -349,15 +352,15 @@ bump_result = (
     duration = (vdown - vup) / (2 * h * v0),
 )
 (bump_result = bump_result,
- ad_dv01 = ad.key_rate_dv01.par_yields[i],
- ad_duration = ad.key_rate.par_yields[i])
+ ad_dv01 = ad.dv01.par_yields[i],
+ ad_duration = ad.duration.par_yields[i])
 ```
 
 The central-difference `dv01` and `duration` estimate the derivatives and approach
 the AD results as the bump shrinks, until numerical precision limits the comparison.
 At a finite bump, the up and down P&Ls need not be opposites. To shock every par quote together, use
 `up = par_yields .+ h` and `down = par_yields .- h`; its AD comparison is
-`ad.dv01.par_yields` or `ad.duration.par_yields`.
+`sum(ad.dv01.par_yields)` or `sum(ad.duration.par_yields)`.
 
 If starting from an existing `curve`, obtain synthetic quotes with
 `[rate(par(curve, t; frequency = 2)) for t in par_tenors]` and use those as
@@ -413,7 +416,7 @@ b = duration(zrc, [5.0, 5.0, 5.0, 5.0, 105.0], [1.0, 2.0, 3.0, 4.0, 5.0])  # usi
 (a, b, a ≈ b)
 ```
 
-This applies to duration, DV01, two-curve IR01/CS01, convexity, and sensitivity bundles.
+This applies to duration, DV01, convexity, and `sensitivities`.
 
 A `Cashflow` uses its own time even when you pass `times`; explicit times apply only
 to numeric amounts. A time vector needs one entry per cashflow; extra trailing
@@ -425,8 +428,8 @@ duration(KeyRates(tenors), zrc, cfs_obj, fallback_times) ≈
     duration(KeyRates(tenors), zrc, cfs_obj)
 ```
 
-Hull–White default simulation horizons also use the embedded payment times. To change payment dates, construct new `Cashflow`
-objects or pass numeric amounts with the desired times.
+To change payment dates, construct new `Cashflow` objects or pass numeric amounts with the
+desired times.
 
 ## Other yield models
 
@@ -437,7 +440,7 @@ ns        = Yield.NelsonSiegel(1.0, 0.04, -0.02, 0.01)
 ns_knots  = [1.0, 2.0, 5.0, 10.0, 20.0]
 ns_result = sensitivities(KeyRates(ns_knots), ns,
                           [5.0, 5.0, 5.0, 5.0, 105.0], [1.0, 2.0, 5.0, 10.0, 20.0])
-ns_result.durations
+ns_result.duration
 ```
 
 The Nelson–Siegel parameters stay fixed; only the layered zero-rate bumps move under AD.
@@ -486,45 +489,55 @@ is used as written, also inside a `Composite` or a portfolio. The marker selects
 using FinanceModels: Bond
 floater = Bond.Floating(0.015, Periodic(1), 5.0, "SOFR")   # SOFR + 150bp, 5y annual
 
-(effective = duration(Effective(), floater, zrc),   # rate duration, yrs — small
- spread    = duration(Spread(),    floater, zrc),   # spread duration, yrs — near a 5-year bond's
- dv01      = dv01(Effective(),     floater, zrc))   # effective DV01, $/bp
+(effective = duration(Effective(), zrc, floater),   # rate duration, yrs — small
+ spread    = duration(Spread(),    zrc, floater),   # spread duration, yrs — near a 5-year bond's
+ dv01      = dv01(Effective(),     zrc, floater))   # effective DV01, $/bp
 ```
 
-Calls without a marker default to `Effective()` for all three verbs, including
-portfolios. Request spread risk explicitly with `Spread()`. Two-curve forms take
-`(forward, credit)`: coupons project on the index curve `forward` and discount on `credit`. The
-parallel measures take no tenor grid; use `KeyRates(tenors)` or `sensitivities`
-for a key-rate decomposition.
+The curve comes before the contract. Calls without a marker default to `Effective()` for
+all three verbs, including portfolios. Request spread risk explicitly with `Spread()`.
+Coupons project on the keyword `index` curve, which defaults to the discount curve, and
+every payment is discounted on the curve passed: `duration(Effective(), credit_curve,
+floater; index = sofr_curve)`. The parallel measures take no tenor grid; use
+`KeyRates(tenors)` for a key-rate decomposition.
 
 ```@example sensitivities
-(duration(floater, zrc) ≈ duration(Effective(), floater, zrc),
- dv01(floater, zrc) ≈ dv01(Effective(), floater, zrc),
- convexity(floater, zrc) ≈ convexity(Effective(), floater, zrc))
+(duration(zrc, floater) ≈ duration(Effective(), zrc, floater),
+ dv01(zrc, floater) ≈ dv01(Effective(), zrc, floater),
+ convexity(zrc, floater) ≈ convexity(Effective(), zrc, floater))
 ```
 
-`sensitivities` returns effective, spread, and forward risk together:
+`sensitivities` reports the two curve roles of `Models(discount; index)` separately, even when
+`index` is the discount curve: `discount` shifts discounting only (spread risk), and `index`
+shifts the projected coupons only. Effective risk is their sum:
 
 ```@example sensitivities
-s = sensitivities(KeyRates(tenors), floater, zrc)
-(effective = s.effective_duration, spread = s.spread_duration, eff_dv01 = s.effective_dv01)
+s = sensitivities(zrc, floater)
+(spread = s.duration.discount, index = s.duration.index,
+ effective = s.duration.discount + s.duration.index, eff_dv01 = s.dv01.discount + s.dv01.index)
 ```
+
+With `SecondOrder()`, `s.convexity` holds the four blocks; effective convexity, which
+`convexity(Effective(), ...)` returns, is the sum of all four, cross terms included.
 
 For a fixed bond, effective and spread duration both equal its continuous-zero duration. For an **in-force** floater whose current coupon is already fixed, [`locked_floater`](@ref) gives the conventional rate duration ≈ time to next reset:
 
 ```@example sensitivities
-duration(Effective(), locked_floater(floater, 0.04, 1.0), zrc)   # ≈ 1y, not ≈ 5
+duration(Effective(), zrc, locked_floater(floater, 0.04, 1.0))   # ≈ 1y, not ≈ 5
 ```
 
 ### Portfolios
 
-For a portfolio, pass a vector of contracts. The calculation sums their values
-before normalizing risk:
+For a portfolio, pass a vector of contracts. The calculation sums their values and dollar
+derivatives before normalizing risk, so a portfolio's duration is the value-weighted average
+of its contracts' durations:
 
 ```@example sensitivities
 portfolio = [floater, Bond.Fixed(0.03, Periodic(1), 7.0)]
-duration(portfolio, zrc)
+duration(zrc, portfolio)
 ```
+
+A vector of `Cashflow`s is fixed cashflows rather than a portfolio; their measures agree.
 
 ### Multi-curve: risk-free + credit + ILP + index
 
@@ -534,7 +547,7 @@ Pass named discount layers and a coupon-projection `index` to obtain risk by rol
 rf     = zrc
 credit = Yield.Constant(Continuous(0.01))
 ilp    = Yield.Constant(Continuous(0.004))
-r = sensitivities(KeyRates(tenors), floater; discount = (; rf, credit, ilp), index = zrc)
+r = sensitivities(KeyRates(tenors), (; rf, credit, ilp), floater; index = zrc)
 r.dv01    # dollar risk per role: rf, credit and ilp move discounting only; index moves the coupons
 ```
 
@@ -552,7 +565,7 @@ Use [`zspread`](@ref) to fit the discount margin to a market price. The margin i
 number:
 
 ```@example sensitivities
-z = zspread(floater, zrc, 0.99)
+z = zspread(zrc, floater, 0.99)
 ```
 
 ```@example sensitivities
@@ -622,7 +635,7 @@ floater_portfolio = sensitivities(KeyRates(flt_tenors), flt_zrc) do curve
 end
 
 (value = floater_portfolio.value,
- total_duration = sum(floater_portfolio.durations))
+ total_duration = sum(floater_portfolio.duration))
 ```
 
 A par floater at reset has near-zero effective duration. A fixed coupon spread
@@ -645,7 +658,7 @@ For a stochastic valuation:
 
 ```julia
 hw = ShortRate.HullWhite(0.1, 0.01, zrc)
-sensitivities(KeyRates(tenors), Scenarios(hw; n_scenarios=500, rng=Xoshiro(42)), cfs, times)
+sensitivities(KeyRates(tenors), Scenarios(hw; horizon = 6.0, n_scenarios = 500, rng = Xoshiro(42)), cfs, times)
 ```
 
 the chain of differentiation is:
@@ -707,8 +720,8 @@ hw        = ShortRate.HullWhite(0.1, 0.01, hw_curve)
 scenarios = Scenarios(hw; n_scenarios = 500, timestep = 1/12, horizon = 6.0, rng = Xoshiro(42))
 hw_result = sensitivities(KeyRates(mc_tenors), scenarios, mc_cfs, mc_tenors)
 
-(durations = hw_result.durations,
- sum_durations = sum(hw_result.durations))
+(durations = hw_result.duration,
+ sum_durations = sum(hw_result.duration))
 ```
 
 This uses nested AD: curve-risk derivatives pass through the forward-rate
@@ -719,7 +732,7 @@ For a valuation that is not a fixed cashflow stream, pass a callback; it receive
 vector of simulated paths:
 
 ```@example sensitivities
-sensitivities(KeyRates(mc_tenors), Scenarios(hw; n_scenarios = 500, horizon = 6.0, rng = Xoshiro(42))) do paths
+sensitivities(KeyRates(mc_tenors), scenarios) do paths
     sum(pv(p, mc_cfs, mc_tenors) for p in paths) / length(paths)
 end
 ```
@@ -733,10 +746,10 @@ Compare simulated sensitivities with direct discounting for fixed cashflows:
 det_result = sensitivities(KeyRates(mc_tenors), hw_curve, mc_cfs, mc_tenors)
 
 # Model-based: average across simulated rate paths (computed above as hw_result)
-(det_durations  = det_result.durations,
- hw_durations   = hw_result.durations,
- sum_det        = sum(det_result.durations),
- sum_hw         = sum(hw_result.durations))
+(det_durations  = det_result.duration,
+ hw_durations   = hw_result.duration,
+ sum_det        = sum(det_result.duration),
+ sum_hw         = sum(hw_result.duration))
 ```
 
 For fixed cashflows, exact risk-neutral valuation gives
@@ -751,9 +764,11 @@ path generation, and valuation. See
 [Giles & Glasserman (2006)](https://people.maths.ox.ac.uk/~gilesm/files/mc_greeks.pdf).
 
 !!! note
-    `Scenarios` draws one seed per call and reuses it in every AD evaluation, so the
-    value and its derivatives share random draws. Do the same in your own simulation
-    code.
+    `Scenarios` fixes its horizon and time grid and draws one seed when it is constructed.
+    Every valuation and AD evaluation reuses that seed, so the value and its derivatives
+    share random draws, and results for several positions add. Do the same in your own
+    simulation code. The horizon must be a whole number of time steps, and a payment after it
+    throws.
 
 ## Choosing Interpolation
 
@@ -771,8 +786,8 @@ zrc_aki     = ZeroRateCurve(interp_rates, interp_tenors, Spline.Akima())       #
 
 # All can be passed into the same sensitivities API:
 interp_cfs = [3.0, 3.0, 3.0, 103.0]
-(default_durs = sensitivities(KeyRates(interp_tenors), zrc_default, interp_cfs, interp_tenors).durations,
- linear_durs  = sensitivities(KeyRates(interp_tenors), zrc_lin,     interp_cfs, interp_tenors).durations)
+(default_durs = sensitivities(KeyRates(interp_tenors), zrc_default, interp_cfs, interp_tenors).duration,
+ linear_durs  = sensitivities(KeyRates(interp_tenors), zrc_lin,     interp_cfs, interp_tenors).duration)
 ```
 
 Interpolation controls the base curve between its knots. The supported

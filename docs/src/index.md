@@ -43,15 +43,17 @@ tenors = [1.0, 2.0, 3.0, 4.0, 5.0]
 zrc = ZeroRateCurve(rates, tenors)
 cfs = [5.0, 5.0, 5.0, 5.0, 105.0]
 
-# Value, key-rate durations and convexities in one call
-result = sensitivities(KeyRates(tenors), zrc, cfs, tenors)
-result.value       # present value
-result.durations   # key-rate durations (vector)
-result.convexities # key-rate convexity matrix
+# Value, key-rate durations, DV01s and convexities in one call
+result = sensitivities(SecondOrder(), KeyRates(tenors), zrc, cfs, tenors)
+result.value     # present value
+result.duration  # key-rate durations (vector)
+result.dv01      # key-rate DV01s (vector)
+result.convexity # key-rate convexity matrix
 ```
 
-- **`sensitivities`**: bundled value, key-rate durations, and convexity matrix in one call
+- **`sensitivities`**: value, durations and DV01s in one call, and with `SecondOrder()` convexity; parallel without `KeyRates`, per tenor with it
 - **Two-curve decomposition**: separate `IR01` (risk-free) and `CS01` (credit spread) sensitivities
+- **Contracts and portfolios**: `duration(Effective(), curve, contract; index)`, `Spread()`, and `sensitivities(curve, contract; index)` with the discount and index exposures
 - **Do-block syntax**: custom valuation functions for rate-dependent instruments (callable bonds, floaters, caps/floors)
 - **Hull–White stochastic model**: key-rate sensitivities of Monte Carlo expected values, differentiating through the full simulation pipeline
 
@@ -60,8 +62,8 @@ using FinanceModels: ShortRate
 using Random: Xoshiro
 
 hw = ShortRate.HullWhite(0.1, 0.01, zrc)
-hw_result = sensitivities(KeyRates(tenors), Scenarios(hw; n_scenarios=1000, rng=Xoshiro(42)), cfs, tenors)
-hw_result.durations   # key-rate durations under stochastic dynamics
+hw_result = sensitivities(KeyRates(tenors), Scenarios(hw; horizon=6.0, n_scenarios=1000, rng=Xoshiro(42)), cfs, tenors)
+hw_result.duration   # key-rate durations under stochastic dynamics
 ```
 
 See the [Interest-Rate Sensitivities documentation](sensitivities.md) for details.
@@ -129,4 +131,4 @@ See [JuliaActuary.org for instructions](https://juliaactuary.org/tutorials/cashf
 
 ## Useful tips
 
-Arguments come in this order: a valuation callback (if any), a measure marker such as `DV01()` or `KeyRates(tenors)`, the rate or curve, the cashflows, then the times. Contract forms take the contract before the curve.
+Arguments come in this order: a valuation callback (if any), an order marker for `sensitivities` (`FirstOrder()` or `SecondOrder()`), a measure marker such as `DV01()` or `KeyRates(tenors)`, the rate or curve, then the cashflows and times or a contract. A contract's index curve is the keyword `index`, which defaults to the curve.

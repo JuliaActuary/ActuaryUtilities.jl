@@ -3,9 +3,39 @@
 ## v5.12.0 to v6.0.0
 
 v6 measures parallel risk without tenor grids. Each single-rate input uses its own
-shock coordinate; fixed-cashflow IR01/CS01 use the combined rate's coordinate.
+shock coordinate; fixed cashflows on two curves use the combined rate's.
 See [Shock coordinates](@ref) for the full rule.
 v6 requires FinanceModels 7 and FinanceCore 3.
+
+### Call shapes
+
+Arguments come in one order: the valuation callback (if any), the order marker of
+`sensitivities`, a measure marker such as `DV01()` or `KeyRates(tenors)`, the rate or curves,
+then the cashflows and times or the contract. A contract's index curve is the keyword `index`,
+which defaults to the discount curve.
+
+| Measure | Fixed cashflows | Valuation callback | Contract or portfolio |
+|:--|:--|:--|:--|
+| duration | `duration([Macaulay(),] curve, cfs, times)` | `duration(valuation, curve)` | `duration([Spread(),] discount, contract; index)` |
+| DV01 | `dv01(curve, cfs, times)` | `dv01(valuation, curve)` | `dv01([Spread(),] discount, contract; index)` |
+| convexity | `convexity(curve, cfs, times)` | `convexity(valuation, curve)` | `convexity([Spread(),] discount, contract; index)` |
+| key rates | `duration(KeyRates(t), curve, cfs, times)` | `duration(valuation, KeyRates(t), curve)` | `duration(KeyRates(t), discount, contract; index)` |
+| two curves | `dv01(base + credit, cfs, times)` | `duration(valuation, IR01(), base, credit)`, `dv01(valuation, base, credit)` | `dv01(discount, contract; index)` |
+| all at once | `sensitivities([SecondOrder(),] [KeyRates(t),] curve, cfs, times)` | `sensitivities(valuation, [SecondOrder(),] [KeyRates(t),] curve)` | `sensitivities([SecondOrder(),] [KeyRates(t),] discount, contract; index)` |
+| spreads | `spread(curve1, curve2, cfs, times)` | | `zspread(discount, contract, price; index)` |
+
+- `dv01(args...)` is `duration(DV01(), args...)`, and `dv01(valuation, args...)` is
+  `duration(valuation, DV01(), args...)`. Key-rate forms take `KeyRates(t)` after any `DV01()`
+  or `Effective()`/`Spread()` marker. Contract forms default to `Effective()`.
+- Callbacks also take two curves, `(valuation, base, credit)`, named curves,
+  `(valuation, curves::NamedTuple)`, and market inputs, `sensitivities(valuation, inputs::NamedTuple)`.
+  A [`Scenarios`](@ref) takes the place of a Hull–White curve: `Scenarios(hw; horizon, ...)`.
+- `sensitivities` returns `(; value, duration, dv01)`, and with `SecondOrder()` also `convexity`.
+  `value` is a number. The other fields are numbers without `KeyRates`, vectors (and a convexity
+  matrix) with it, and keyed by role for several curves: `s.dv01.base`, `s.dv01.discount`,
+  `s.convexity.discount.index`.
+
+### Changes
 
 - **Curve convexity uses continuous-zero shocks.** This changes scalar convexity
   for every yield model, including constant curves, ZeroRateCurve, Nelson–Siegel,
@@ -48,27 +78,27 @@ v6 requires FinanceModels 7 and FinanceCore 3.
   | `duration(IR01(), valuation, base, credit, tenors)` (and `CS01`) | `duration(valuation, IR01(), base, credit)` or `duration(IR01(), base, credit) do b, c ... end` |
   | `convexity(valuation, curve, tenors)` | `convexity(valuation, curve)` or `convexity(curve) do c ... end` |
   | `convexity(valuation, base, credit, tenors)` | `convexity(valuation, base, credit)` or `convexity(base, credit) do b, c ... end` |
-  | `duration(Effective(), target, curve, tenors)`, `duration(Spread(), ...)`, and the `dv01` and `convexity(Effective(), ...)` forms | `duration(Effective(), target, curve)`, `duration(Spread(), target, curve)`, and likewise for `dv01` and `convexity` |
-  | `duration(target, curve, tenors)` | `duration(target, curve)` |
-  | two-curve contract forms `(target, forward, credit, tenors)` | `(target, forward, credit)` |
+  | `duration(Effective(), target, curve, tenors)`, `duration(Spread(), ...)`, and the `dv01` and `convexity(Effective(), ...)` forms | `duration(Effective(), curve, target)`, `duration(Spread(), curve, target)`, and likewise for `dv01` and `convexity` |
+  | `duration(target, curve, tenors)` | `duration(curve, target)` |
+  | two-curve contract forms `(target, forward, credit, tenors)` | `(credit, target; index = forward)` |
 
-  `KeyRates(tenors)` forms and `sensitivities(...)` bundles keep their grids. The
-  parallel measures are ≈ the sums of the key-rate bundle, so
-  `duration(Effective(), target, curve) ≈ sensitivities(KeyRates(tenors), target, curve).effective_duration`.
-- **Key-rate grids are always a `KeyRates(tenors)` marker, in the first position.**
-  The contract bundles and named-curve callbacks took a raw tenor vector, positionally
-  or as a keyword; those calls now throw `MethodError`:
+  `KeyRates(tenors)` forms keep their grids, and `sensitivities` takes one when it should
+  decompose by tenor. The parallel measures are ≈ the sums of the key-rate results, so
+  `duration(Effective(), curve, target) ≈ sum(duration(Effective(), KeyRates(tenors), curve, target))`.
+- **Key-rate grids are always a `KeyRates(tenors)` marker**, after the callback and order
+  markers and before the curves. The contract bundles and named-curve callbacks took a raw
+  tenor vector, positionally or as a keyword; those calls now throw `MethodError`:
 
   | v5 call | v6 replacement |
   |:--|:--|
-  | `sensitivities(target, curve, tenors)` | `sensitivities(KeyRates(tenors), target, curve)` |
-  | `sensitivities(target, forward, credit, tenors)` | `sensitivities(KeyRates(tenors), target, forward, credit)` |
-  | `sensitivities(target, tenors; discount, index)` | `sensitivities(KeyRates(tenors), target; discount, index)` |
+  | `sensitivities(target, curve, tenors)` | `sensitivities(KeyRates(tenors), curve, target)` |
+  | `sensitivities(target, forward, credit, tenors)` | `sensitivities(KeyRates(tenors), credit, target; index = forward)` |
+  | `sensitivities(target, tenors; discount, index)` | `sensitivities(KeyRates(tenors), discount, target; index)` |
   | `sensitivities(valuation, curves::NamedTuple; tenors)` | `sensitivities(valuation, KeyRates(tenors), curves)` |
   | `sensitivities(curves::NamedTuple; tenors) do c ... end` | `sensitivities(KeyRates(tenors), curves) do c ... end` |
 
-  Results are unchanged. The market-input form `sensitivities(valuation, inputs)` has
-  no grid and is unaffected.
+  The results take v6's shape, described below. The market-input form
+  `sensitivities(valuation, inputs)` has no grid.
 - **The valuation callback comes first in every callback form**, then any marker, then
   the rate, curves, or inputs, as in `sensitivities(valuation, inputs)`. Do-block calls
   such as `duration(curve) do c ... end` and `sensitivities(KeyRates(tenors), curve) do c
@@ -84,9 +114,9 @@ v6 requires FinanceModels 7 and FinanceCore 3.
   | `duration(DV01(), KeyRates(tenors), valuation, curve)` | `duration(valuation, DV01(), KeyRates(tenors), curve)` |
   | `duration(IR01(), KeyRates(tenors), valuation, base, credit)` (and `CS01`) | `duration(valuation, IR01(), KeyRates(tenors), base, credit)` |
   | `convexity(KeyRates(tenors), valuation, curve)` (and `base, credit`) | `convexity(valuation, KeyRates(tenors), curve)` |
-  | `sensitivities(KeyRates(tenors), valuation, curve)` (and `DV01()`, `base, credit`) | `sensitivities(valuation, KeyRates(tenors), curve)` |
+  | `sensitivities(KeyRates(tenors), valuation, curve)` (and `base, credit`) | `sensitivities(valuation, KeyRates(tenors), curve)` |
 
-  Contract forms keep the order `(marker, target, curve)`.
+  Contract forms put the curve before the contract; see below.
 - **The finite-difference `KeyRateDuration` API is removed.** `KeyRate`,
   `KeyRateZero`, `KeyRatePar`, and `krd_points` are gone.
   Replace `duration(KeyRateZero(t), curve, cfs, times, grid)` with the entry at `t` of
@@ -104,8 +134,8 @@ v6 requires FinanceModels 7 and FinanceCore 3.
   key-rate, and bundled sensitivities use embedded payment times.
   Numeric amounts use the corresponding explicit times. Explicit time vectors must
   cover the collection; trailing entries are ignored. Omitted times default to
-  `eachindex(cfs)` in every key-rate, two-curve, named-curve, and `Scenarios` cashflow
-  form, so numeric amounts are paid at periods `1:n` as in the scalar measures.
+  `eachindex(cfs)` in every key-rate and `Scenarios` cashflow form, so numeric amounts are
+  paid at periods `1:n` as in the scalar measures.
   **Migration:** to change payment dates, construct updated `Cashflow` objects or
   pass numeric amounts with the desired times.
 - **Hull–White simulation is requested with `Scenarios`.** A bare `HullWhite` model is
@@ -135,18 +165,18 @@ v6 requires FinanceModels 7 and FinanceCore 3.
   `horizon` = the last payment time + 1.
 - Unmarked contract and portfolio DV01 and convexity, which v5 did not define, now
   default to `Effective()`, as unmarked duration already did. So do
-  `duration(DV01(), KeyRates(tenors), target, curve)` (or `dv01`) and
-  `convexity(KeyRates(tenors), target, curve)`. Use `Spread()` for spread risk.
+  `duration(DV01(), KeyRates(tenors), curve, target)` (or `dv01`) and
+  `convexity(KeyRates(tenors), curve, target)`. Use `Spread()` for spread risk.
 - **Scalar and `Rate` DV01 use the analytic formula.** v5 used automatic
   differentiation, so values can move in the last bits (at most 4 ulp in `Float64`).
   DV01 now keeps the rate's precision: a `Float32` rate with `Float32` amounts returns a
   `Float32` DV01, where v5 returned `Float64`. Macaulay and modified duration are
   unchanged, and so is convexity for scalars and `Rate`s.
-- Callback APIs accept callable structs. Scalar cashflow APIs accept arrays,
+- Callback APIs accept callable structs. Cashflow APIs accept arrays,
   tuples, and finite generators. Arrays are flattened in column-major order;
   generators are collected once before valuation.
-- Named cashflow results own independent arrays for each duration role and
-  convexity block. Mutating one no longer changes another.
+- Results own independent arrays for each role and convexity block. Mutating one no
+  longer changes another.
 - **Zero cashflow streams take the type of a nonempty result.** Empty and all-zero
   streams still return exact zeros without valuing any payment, but their numeric
   type now includes the rate or curve: it is the type the same measure returns for a
@@ -174,14 +204,14 @@ v6 requires FinanceModels 7 and FinanceCore 3.
   back as about 1.96%. A zero `market_price` now works. Pass `tol` as a rate if you set
   it explicitly.
 - **`zspread` returns its spread as a `Continuous` rate**, as `spread` returns a `Periodic`
-  one. A number added to a curve is read as an annual rate, so `credit + result.zspread`
+  one. A number added to a curve is read as an annual rate, so `discount + result.zspread`
   mispriced: for a 5-year 5% semiannual bond at a 1% spread over a 4% continuous curve, by
   2.2e-4 per unit of face. The typed spread reprices. `zspread_dv01` stays a number, and `s0`
   may be a number (continuous) or a `Rate`.
 
   | v5 call | v6 replacement |
   |:--|:--|
-  | `zspread(...).zspread` (a number) | `FinanceCore.rate(zspread(...).zspread)`; `credit + zspread(...).zspread` takes the typed rate directly |
+  | `zspread(...).zspread` (a number) | `FinanceCore.rate(zspread(...).zspread)`; `discount + zspread(...).zspread` takes the typed rate directly |
 - **Contract measures value in FinanceModels valuation contexts.** They differentiate
   `present_value(Models(discount; index), contract)`. The bumped discount curve discounts
   cashflows and values closed forms. Every key the contract reads returns the bumped
@@ -203,9 +233,10 @@ v6 requires FinanceModels 7 and FinanceCore 3.
   per-tenor vectors and a convexity matrix; with several curves they are keyed by role:
   `s.dv01.base`, `s.convexity.base.credit`. Key-rate cashflow and callback forms used to
   return convexities by default: pass `SecondOrder()` for them. The `DV01()` forms of
-  `sensitivities` are removed, since every result has `dv01`.
+  `sensitivities` are removed, since every result has `dv01`. Without `KeyRates`, each curve
+  takes one parallel shift, so `FirstOrder()` costs one derivative per curve.
 
-  | v6 pre-release field | v6 field |
+  | v5 field | v6 field |
   |:--|:--|
   | `durations`, `dv01s`, `convexities` | `duration`, `dv01`, `convexity` (`SecondOrder()`) |
   | `base_durations`, `credit_durations`, `base_dv01s`, `credit_dv01s` | `duration.base`, `duration.credit`, `dv01.base`, `dv01.credit` |

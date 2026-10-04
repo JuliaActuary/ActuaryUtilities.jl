@@ -22,9 +22,10 @@ See [Convexity Conventions](@ref) for rate-shock definitions and worked examples
 
 !!! tip "Floating-rate, multi-curve & portfolios"
     Use `Macaulay` and `Modified` for fixed cashflows. Pass contracts or portfolios
-    directly to reproject coupons under curve shocks. `Effective()` selects rate
-    risk; `Spread()` selects spread risk. `sensitivities` returns both in one
-    calculation. See [Interest-Rate Sensitivities](@ref) for examples and multiple curves.
+    directly, after the curve, to reproject coupons under curve shocks. `Effective()`
+    selects rate risk; `Spread()` selects spread risk. `sensitivities` returns the discount
+    and index exposures in one calculation. See [Interest-Rate Sensitivities](@ref) for
+    examples and multiple curves.
 
 
 ## Zero cashflow streams
@@ -35,8 +36,7 @@ and Hull–White cashflow sensitivities. `present_values` returns an empty
 vector or a vector of zeros.
 
 Every cashflow needs a corresponding time, but the time grid may be longer.
-Unused trailing times are ignored, including when deriving a Hull–White simulation
-horizon. Too few times throws `DimensionMismatch`. Amounts and times pair by position
+Unused trailing times are ignored. Too few times throws `DimensionMismatch`. Amounts and times pair by position
 from their first entries, so offset vectors pair too.
 Empty cashflows are valid with either an empty or populated time grid.
 
@@ -82,9 +82,8 @@ zero, for that type, so a curve that cannot be evaluated at time zero cannot val
 zero stream either. An untyped empty collection (`Any[]`, `Cashflow[]`, `()`) takes
 its type from the rate or curve.
 
-Skipping Hull–White simulation leaves the RNG unchanged, so a shared-RNG batch
-uses different subsequent draws than versions that simulated zero streams.
-Independently assigned RNG streams avoid dependence on preceding contracts.
+Valuation never uses an RNG: a [`Scenarios`](@ref) draws its seed when it is constructed,
+and every valuation with it, zero streams included, reuses that seed.
 
 To aggregate portfolio risk, sum values and dollar derivatives before normalizing
 once. This also preserves exposures from positions whose net value is zero.
