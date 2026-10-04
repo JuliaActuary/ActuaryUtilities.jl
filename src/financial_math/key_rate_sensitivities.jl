@@ -92,6 +92,8 @@ _base_credit_cross(r) = (;
 
 ## Public yield-model sensitivities
 
+const _NamedCurves = NamedTuple{<:Any, <:Tuple{AYM, Vararg{AYM}}}
+
 """
     duration(valuation_fn, kr::KeyRates, curve::AbstractYieldModel) -> Vector
     duration(kr::KeyRates, curve::AbstractYieldModel, cfs, times = eachindex(cfs)) -> Vector
@@ -161,6 +163,24 @@ function _keyrate_dv01(curve, kr, cfs, times...)
     r = _fixed_keyrate(curve, kr, FirstOrder(), cfs, times...)
     return _per_bp(r, r.gradient)
 end
+
+"""
+    duration(valuation, ::DV01, [kr::KeyRates,] base::AbstractYieldModel, credit::AbstractYieldModel) -> NamedTuple
+    duration(valuation, ::DV01, [kr::KeyRates,] curves::NamedTuple) -> NamedTuple
+
+Signed DV01 of a valuation callback for each curve role, `(; base, credit)` or keyed by the names
+of `curves`: numbers for a parallel shift of each curve, or per-tenor vectors with `KeyRates`.
+These are the `dv01` fields of [`sensitivities`](@ref). The valuation receives `(base, credit)` or
+a `NamedTuple` of curves. For two curves, the roles are the [`IR01`](@ref) and [`CS01`](@ref).
+"""
+duration(valuation::F, ::DV01, base::AYM, credit::AYM) where {F} =
+    duration(c -> valuation(c.base, c.credit), DV01(), (; base, credit))
+duration(valuation::F, ::DV01, kr::KeyRates, base::AYM, credit::AYM) where {F} =
+    duration(c -> valuation(c.base, c.credit), DV01(), kr, (; base, credit))
+duration(valuation::F, ::DV01, curves::_NamedCurves) where {F} = _role_dv01(_curve_ad(valuation, curves, nothing, FirstOrder()))
+duration(valuation::F, ::DV01, kr::KeyRates, curves::_NamedCurves) where {F} =
+    _role_dv01(_curve_ad(valuation, curves, kr.tenors, FirstOrder()))
+_role_dv01(r) = map(g -> _per_bp(r, g), r.gradient)
 
 """
     duration(valuation_fn, ::IR01, base::AbstractYieldModel, credit::AbstractYieldModel) -> scalar
@@ -235,8 +255,6 @@ convexity(valuation_fn::F, kr::KeyRates, base::AYM, credit::AYM) where {F} =
     _base_credit_cross(_curve_ad(c -> valuation_fn(c.base, c.credit), (; base, credit), kr.tenors, SecondOrder()))
 
 ## Value, duration, DV01 and convexity together
-
-const _NamedCurves = NamedTuple{<:Any, <:Tuple{AYM, Vararg{AYM}}}
 
 """
     sensitivities([order,] [KeyRates(tenors),] curve, cfs, times = eachindex(cfs)) -> NamedTuple

@@ -207,6 +207,11 @@ v6 requires FinanceModels 7 and FinanceCore 3.
   | contracts: `spread_*`, `forward_*` | `duration.discount`, `dv01.discount`; `duration.index`, `dv01.index` |
   | contracts: `effective_duration`, `effective_dv01` | `duration.discount + duration.index` (and `dv01`), or `duration(Effective(), ...)` |
   | contracts: `*_key_rate` | the same fields with `KeyRates(tenors)` |
+- **`dv01` takes the valuation first**, as `duration` does: `dv01(valuation, curve)`,
+  `dv01(valuation, KeyRates(tenors), curve)` and do-blocks such as `dv01(curve) do c ... end` are
+  `duration(valuation, DV01(), ...)`. With two curves or a `NamedTuple` of curves,
+  `dv01(valuation, base, credit)` and `dv01(valuation, curves)` return one DV01 per role, the
+  `dv01` field of `sensitivities`; `duration(valuation, DV01(), ...)` has the same forms.
 - **Contract measures take the curve first and the index curve as a keyword**, as FinanceCore
   and FinanceModels do: `duration(Effective(), discount, contract; index = discount)`, and the same
   for `Spread()`, `dv01`, `convexity`, `sensitivities` and `zspread(discount, contract, price; index = discount)`.
