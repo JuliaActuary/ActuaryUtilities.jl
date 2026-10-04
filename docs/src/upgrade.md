@@ -188,6 +188,8 @@ v6 requires FinanceModels 7 and FinanceCore 3.
   the context. v5 valued an unknown contract as if it needed no index curve, so a custom
   floating contract never saw it; a contract with neither a projection nor a closed form now
   throws a `MethodError`.
+- **`duration(issue_date, date)` is renamed `policy_duration(issue_date, date)`**, so `duration`
+  means only interest-rate duration. The old call throws `MethodError`.
 - **`reproject` is removed**, because it duplicated FinanceModels' valuation contexts.
   Replace `present_value(discount, reproject(contract, index_curve))` with
   `present_value(Models(discount; index = index_curve), contract)`, or pass a model store,

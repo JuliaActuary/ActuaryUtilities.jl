@@ -77,8 +77,7 @@ See the [Interest-Rate Sensitivities documentation](sensitivities.md) for detail
 
 ### Insurance mechanics
 
-- `duration`:
-  - Calculate the duration given an issue date and date (a.k.a. policy duration)
+- `policy_duration`: the policy duration given an issue date and a date
   
 
 ### Typed Rates

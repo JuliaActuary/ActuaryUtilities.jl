@@ -1,9 +1,8 @@
 module Utilities
 
 import ..Dates
-import ..ActuaryUtilities: duration
 
-export years_between, duration,
+export years_between, policy_duration,
     accum_offset
 
 """
@@ -54,9 +53,9 @@ function years_between(d1::Dates.Date, d2::Dates.Date, overlap = true)
 end
 
 """
-    duration(d1::Date, d2::Date)
+    policy_duration(d1::Date, d2::Date)
 
-Compute the duration given two dates, which is the number of years
+Compute the policy duration given two dates, which is the number of years
 since the first date. The interval `[0,1)` is defined as having 
 duration `1`. Can return negative durations if second argument is before the first.
 
@@ -64,22 +63,22 @@ duration `1`. Can return negative durations if second argument is before the fir
 ```julia
 julia> issue_date  = Date(2018,9,30);
 
-julia> duration(issue_date , Date(2019,9,30) ) 
+julia> policy_duration(issue_date , Date(2019,9,30) )
 2
-julia> duration(issue_date , issue_date) 
+julia> policy_duration(issue_date , issue_date)
 1
-julia> duration(issue_date , Date(2018,10,1) ) 
+julia> policy_duration(issue_date , Date(2018,10,1) )
 1
-julia> duration(issue_date , Date(2019,10,1) ) 
+julia> policy_duration(issue_date , Date(2019,10,1) )
 2
-julia> duration(issue_date , Date(2018,6,30) ) 
+julia> policy_duration(issue_date , Date(2018,6,30) )
 0
-julia> duration(Date(2018,9,30),Date(2017,6,30)) 
+julia> policy_duration(Date(2018,9,30),Date(2017,6,30))
 -1
 ```
 
 """
-function duration(issue_date::Dates.Date, proj_date::Dates.Date)
+function policy_duration(issue_date::Dates.Date, proj_date::Dates.Date)
     return years_between(issue_date, proj_date, true) + 1
 end
 

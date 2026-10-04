@@ -33,7 +33,7 @@
 
 
         years_between(Dates.Date(2018, 9, 30), Dates.Date(2018, 9, 30))
-        duration(Dates.Date(2018, 9, 30), Dates.Date(2019, 9, 30))
+        policy_duration(Dates.Date(2018, 9, 30), Dates.Date(2019, 9, 30))
 
     end
 end
