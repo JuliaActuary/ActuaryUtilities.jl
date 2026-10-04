@@ -454,16 +454,12 @@ end
     @test convexity(KeyRates(tenors), zrc, cfs) ≈ convexity(KeyRates(tenors), zrc, amounts, tenors)
 
     # single-curve sensitivities
-    s_cf = sensitivities(KeyRates(tenors), zrc, cfs)
-    s_raw = sensitivities(KeyRates(tenors), zrc, amounts, tenors)
+    s_cf = sensitivities(SecondOrder(), KeyRates(tenors), zrc, cfs)
+    s_raw = sensitivities(SecondOrder(), KeyRates(tenors), zrc, amounts, tenors)
     @test s_cf.value ≈ s_raw.value
-    @test s_cf.durations ≈ s_raw.durations
-    @test s_cf.convexities ≈ s_raw.convexities
-
-    s_dv01_cf = sensitivities(DV01(), KeyRates(tenors), zrc, cfs)
-    s_dv01_raw = sensitivities(DV01(), KeyRates(tenors), zrc, amounts, tenors)
-    @test s_dv01_cf.dv01s ≈ s_dv01_raw.dv01s
-    @test s_dv01_cf.convexities ≈ s_dv01_raw.convexities
+    @test s_cf.duration ≈ s_raw.duration
+    @test s_cf.dv01 ≈ s_raw.dv01
+    @test s_cf.convexity ≈ s_raw.convexity
 
     # a layered curve
     base_rates = [0.03, 0.03, 0.03, 0.03, 0.03]
@@ -474,10 +470,10 @@ end
     @test duration(DV01(), KeyRates(tenors), layered, cfs) ≈ duration(DV01(), KeyRates(tenors), layered, amounts, tenors)
     @test convexity(layered, cfs) ≈ convexity(layered, amounts, tenors)
     @test convexity(KeyRates(tenors), layered, cfs) ≈ convexity(KeyRates(tenors), layered, amounts, tenors)
-    s2_cf = sensitivities(KeyRates(tenors), layered, cfs)
-    s2_raw = sensitivities(KeyRates(tenors), layered, amounts, tenors)
-    @test s2_cf.durations ≈ s2_raw.durations
-    @test s2_cf.convexities ≈ s2_raw.convexities
+    s2_cf = sensitivities(SecondOrder(), KeyRates(tenors), layered, cfs)
+    s2_raw = sensitivities(SecondOrder(), KeyRates(tenors), layered, amounts, tenors)
+    @test s2_cf.duration ≈ s2_raw.duration
+    @test s2_cf.convexity ≈ s2_raw.convexity
 
     @testset "Cashflow with non-tenor times" begin
         # ZRC has annual tenors, but cashflows are semi-annual

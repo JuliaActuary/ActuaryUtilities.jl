@@ -78,29 +78,39 @@ end
     A = 100.0
     B = A * FC.discount(curve, 1.0) / FC.discount(curve, 5.0)
     for sign in (-1, 1)
-        port = [FC.Cashflow(sign * A, 1.0), FC.Cashflow(-sign * B, 5.0)]
+        # A vector of contracts, so a portfolio; a vector of `Cashflow`s is fixed cashflows.
+        port = FC.AbstractContract[FC.Cashflow(sign * A, 1.0), FC.Cashflow(-sign * B, 5.0)]
+        fixed = FC.Cashflow.([sign * A, -sign * B], [1.0, 5.0])
         @test abs(FC.present_value(curve, port)) < 1.0e-10
         expected = duration(DV01(), curve, sign .* [A, -B], [1.0, 5.0])
         @test abs(expected) > 1.0e-3
-        r = sensitivities(KeyRates(tenors), port, curve)
-        @test r.effective_dv01 ≈ expected
-        @test r.effective_dv01 ≈ dv01(Effective(), port, curve)
-        @test dv01(port, curve) ≈ expected
-        @test duration(DV01(), port, curve) ≈ expected
-        @test r.spread_dv01 ≈ dv01(Spread(), port, curve)
-        @test r.forward_dv01 ≈ 0 atol = 1.0e-12
-        @test !isfinite(r.effective_duration)
-        @test !isfinite(r.spread_duration)
+        # A zero-value position with dollar risk: dollar measures are defined, normalized ones not.
+        for order in (FirstOrder(), SecondOrder())
+            r = sensitivities(order, curve, port)
+            k = sensitivities(order, KeyRates(tenors), curve, port)
+            @test abs(r.value) < 1.0e-10
+            @test r.dv01.discount + r.dv01.index ≈ expected
+            @test sum(k.dv01.discount .+ k.dv01.index) ≈ expected
+            @test r.dv01.index ≈ 0 atol = 1.0e-12
+            @test !isfinite(r.duration.discount) && !isfinite(r.duration.discount + r.duration.index)
+            order isa SecondOrder && @test !isfinite(r.convexity.discount.discount)
+        end
+        @test dv01(Effective(), curve, port) ≈ expected
+        @test dv01(curve, port) ≈ expected
+        @test duration(DV01(), curve, port) ≈ expected
+        @test dv01(Spread(), curve, port) ≈ sensitivities(curve, port).dv01.discount
+        @test sensitivities(curve, fixed).dv01 ≈ expected
+        @test sum(sensitivities(KeyRates(tenors), curve, fixed).dv01) ≈ expected
         # Two-curve form: the discount role carries the whole exposure for fixed cashflows.
-        r2 = sensitivities(KeyRates(tenors), port, curve, credit)
-        @test r2.spread_dv01 ≈ dv01(Spread(), port, curve, credit)
-        @test r2.effective_dv01 ≈ dv01(Effective(), port, curve, credit)
-        @test r2.forward_dv01 ≈ 0 atol = 1.0e-12
+        r2 = sensitivities(credit, port; index = curve)
+        @test r2.dv01.discount ≈ dv01(Spread(), credit, port; index = curve)
+        @test r2.dv01.discount + r2.dv01.index ≈ dv01(Effective(), credit, port; index = curve)
+        @test r2.dv01.index ≈ 0 atol = 1.0e-12
     end
     # Nonzero-value positions are unchanged.
     fb = FM.Bond.Fixed(0.05, FC.Periodic(1), 3.0)
-    r = sensitivities(KeyRates(tenors), fb, curve)
-    @test r.effective_dv01 ≈ dv01(Effective(), fb, curve)
-    @test r.spread_dv01 ≈ dv01(Spread(), fb, curve)
-    @test r.effective_dv01 ≈ r.effective_duration * r.value / 10_000
+    r = sensitivities(curve, fb)
+    @test r.dv01.discount + r.dv01.index ≈ dv01(Effective(), curve, fb)
+    @test r.dv01.discount ≈ dv01(Spread(), curve, fb)
+    @test r.dv01.discount ≈ r.duration.discount * r.value / 10_000
 end

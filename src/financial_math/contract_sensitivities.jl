@@ -3,131 +3,130 @@
 # ActuaryUtilities keeps no list of contract types.
 
 const _Contractish = Union{FinanceCore.AbstractContract, AbstractVector{<:FinanceCore.AbstractContract}}
+const _ContractMetric = Union{Effective, Spread}
 
 # `discount` discounts and prices; `index` serves every model a contract reads by key, so floating
 # coupons reset on the bumped index curve. A closed-form contract uses its own
 # `present_value(ctx, c)`; composites and portfolios are valued as the sums of their parts.
 _value(target, index, discount) = FinanceCore.present_value(FinanceModels.Models(discount; index), target)
 
-"""
-    sensitivities(kr::KeyRates, target, curve) -> NamedTuple
-    sensitivities(kr::KeyRates, target, forward, credit) -> NamedTuple
-
-Calculate sensitivities for a contract or portfolio, reprojecting cashflows under
-bumped curves. Project coupons on `forward` and discount on `credit`, or pass one
-`curve` for both. Return these results on the `kr.tenors` grid:
-
-  - `value`
-  - `effective_duration` / `effective_dv01` / `effective_key_rate` — bump both curves
-    (coupons re-fix): the interest-rate duration. It is small for a new floater; see
-    [`locked_floater`](@ref) for one whose current coupon is fixed.
-  - `spread_duration` / `spread_dv01` / `spread_key_rate` — bump the discount curve only:
-    the discount-margin / credit duration, close to that of a fixed-rate bond with the
-    same maturity.
-  - `forward_duration` / `forward_dv01` / `forward_key_rate` — bump the index curve only;
-    `effective = forward + spread`.
-
-Durations are in years; DV01s are in dollars per basis point. Dollar risk uses
-signed value derivatives and remains defined at zero value, where normalized
-duration is undefined. For a fixed bond, effective and spread duration equal its
-continuous-zero duration; forward duration is zero. See [`duration`](@ref) with [`Effective`](@ref)/
-[`Spread`](@ref), [`dv01`](@ref), [`zspread`](@ref), [`locked_floater`](@ref).
-"""
-function sensitivities(kr::KeyRates, target::_Contractish, forward::AYM, credit::AYM)
-    return _contract_bundle(_ncurve_ad(c -> _value(target, c.forward, c.credit), (; forward, credit), kr.tenors; order = 1))
+# The value under one shock, `shock(curve)`, to the curves the metric moves: the index and discount
+# curves for Effective, the discount curve for Spread.
+_contract_value(::Effective, target, discount, index, shock::S) where {S} = _value(target, shock(index), shock(discount))
+_contract_value(::Spread, target, discount, index, shock::S) where {S} = _value(target, index, shock(discount))
+_parallel_value(metric, target, discount, index, s) =
+    _contract_value(metric, target, discount, index, c -> _parallel_bumped(c, s))
+# Derivatives on the key-rate grid of one shock vector applied to the curves the metric moves.
+function _contract_keyrate(metric, grid, discount, target, index, order)
+    _validate_tenors(grid)
+    v(b) = _contract_value(metric, target, discount, index, c -> _bumped(c, grid, b.shift))
+    return _only_role(_named_ad(v, (; shift = zeros(length(grid))), order))
 end
-# A function barrier: some projected contracts (floaters) have uninferred values.
-function _contract_bundle(r)
-    # Use signed derivatives to retain dollar exposure at zero present value.
-    forward_dv01 = _per_bp(r, sum(r.gradient.forward))
-    spread_dv01 = _per_bp(r, sum(r.gradient.credit))
-    effective_dv01 = forward_dv01 + spread_dv01
-    fwd = _relative(r, r.gradient.forward; negate = true)
-    spr = _relative(r, r.gradient.credit; negate = true)
-    eff = fwd .+ spr
-    return (;
-        value = r.value,
-        effective_duration = sum(eff), effective_dv01, effective_key_rate = eff,
-        spread_duration = sum(spr), spread_dv01, spread_key_rate = spr,
-        forward_duration = sum(fwd), forward_dv01, forward_key_rate = fwd,
-    )
-end
-sensitivities(kr::KeyRates, target::_Contractish, curve::AYM) = sensitivities(kr, target, curve, curve)
-
-# The value under a continuous-zero parallel shift `s` of the curves the metric moves.
-_contract_parallel_value(::Effective, target, forward, credit, s) =
-    _value(target, _parallel_bumped(forward, s), _parallel_bumped(credit, s))
-_contract_parallel_value(::Spread, target, forward, credit, s) =
-    _value(target, forward, _parallel_bumped(credit, s))
 
 """
-    duration(Effective(), target, curve)                   # rate duration, yrs
-    duration(Spread(),    target, curve)                   # spread duration, yrs
-    duration(Effective(), target, forward, credit)         # two-curve forms
-    duration(Effective(), KeyRates(tenors), target, curve) # key-rate vector
-    dv01(Effective()/Spread(), target, curve)              # the dollar versions
-    duration(target, curve)                                # defaults to Effective()
-    dv01(target, curve)                                    # defaults to Effective()
-    convexity(target, curve)                               # defaults to Effective()
-    duration(DV01(), KeyRates(tenors), target, curve)      # effective key-rate DV01s
-    convexity(KeyRates(tenors), target, curve)             # effective key-rate convexity matrix
+    duration(Effective(), discount, contract; index = discount)     # rate duration, yrs
+    duration(Spread(),    discount, contract; index = discount)     # spread duration, yrs
+    duration(Effective(), KeyRates(tenors), discount, contract; index = discount)   # vector
+    dv01(Effective(), discount, contract; index = discount)         # the dollar versions
+    convexity(Effective(), discount, contract; index = discount)    # and the convexities
+    duration(discount, contract; index = discount)                  # Effective() by default
+    dv01(discount, contract; index = discount)
+    convexity(discount, contract; index = discount)
+    duration(DV01(), [KeyRates(tenors),] discount, contract; index = discount)
 
-Effective (rate) and spread (credit) duration / DV01 for a contract or portfolio,
-reprojecting cashflows under continuous-zero parallel shifts. Two-curve forms
-project coupons on `forward` and discount on `credit`. Unmarked contract and
-portfolio calls use `Effective()` for duration, DV01, and convexity; spread risk
-requires an explicit `Spread()` marker. Parallel measures take no tenor grid; use
-`KeyRates(tenors)` or [`sensitivities`](@ref) for key-rate decompositions.
+Effective (rate) and spread (credit) duration, DV01 and convexity for a contract or a portfolio
+(a vector of contracts), reprojecting cashflows under continuous-zero shifts. Coupons project on
+the `index` curve, which defaults to `discount`, and every payment is discounted on `discount`:
+
+- `Effective()` shifts both curves, so floating coupons reset.
+- `Spread()` shifts the discount curve only, so projected coupons stay fixed.
+
+Without a marker, contract and portfolio measures use `Effective()`. The parallel forms take no
+tenor grid; `KeyRates(tenors)` gives per-tenor vectors and convexity matrices. Effective
+convexity includes the cross terms between the curves: for the parallel second derivatives `Cᵢᵢ`,
+`Cᵢd`, `Cdᵢ` and `Cdd` of the index and discount roles, it is their sum, and spread convexity is
+`Cdd`. A portfolio's value and dollar derivatives are summed before normalizing. See
+[`sensitivities`](@ref) for the roles separately, [`zspread`](@ref) and [`locked_floater`](@ref).
 """
-function duration(metric::Union{Effective, Spread}, target::_Contractish, forward::AYM, credit::AYM)
-    value, derivative = _value_and_derivative(s -> _contract_parallel_value(metric, target, forward, credit, s), 0.0)
+function duration(metric::_ContractMetric, discount::AYM, target::_Contractish; index::AYM = discount)
+    value, derivative = _value_and_derivative(s -> _parallel_value(metric, target, discount, index, s), 0.0)
     return -derivative / value
 end
-duration(metric::Union{Effective, Spread}, target::_Contractish, curve::AYM) = duration(metric, target, curve, curve)
-# One curve role each: Effective bumps the curve that projects and discounts, Spread only discounting.
-duration(::Effective, kr::KeyRates, target::_Contractish, curve::AYM) = duration(c -> _value(target, c, c), kr, curve)
-duration(::Spread, kr::KeyRates, target::_Contractish, curve::AYM) = duration(c -> _value(target, curve, c), kr, curve)
-# Unmarked contract and portfolio calls use Effective().
-duration(target::_Contractish, curve::AYM) = duration(Effective(), target, curve)
-duration(kr::KeyRates, target::_Contractish, curve::AYM) = duration(Effective(), kr, target, curve)
-duration(::DV01, target::_Contractish, curve::AYM) = dv01(Effective(), target, curve)
-convexity(target::_Contractish, curve::AYM) = convexity(Effective(), target, curve)
-
-# Parallel convexity equals the full key-rate matrix sum. The scalar callback
-# computes it directly while reprojecting coupons under each curve shock.
-convexity(::Effective, target::_Contractish, curve::AYM) = convexity(c -> _value(target, c, c), curve)
-# Effective key-rate DV01s and convexities bump the one curve that projects and discounts.
-duration(::DV01, kr::KeyRates, target::_Contractish, curve::AYM) = duration(c -> _value(target, c, c), DV01(), kr, curve)
-convexity(kr::KeyRates, target::_Contractish, curve::AYM) = convexity(c -> _value(target, c, c), kr, curve)
+function duration(metric::_ContractMetric, kr::KeyRates, discount::AYM, target::_Contractish; index::AYM = discount)
+    r = _contract_keyrate(metric, kr.tenors, discount, target, index, FirstOrder())
+    return _relative(r, r.gradient; negate = true)
+end
 
 """
     dv01(args...)
 
-Return signed dollar risk `-∂V/∂r / 10000`. Cashflow and callback forms alias
-`duration(DV01(), args...)`. Contract forms accept `Effective()` or `Spread()`;
-unmarked contract and portfolio calls default to `Effective()`.
+Return signed dollar risk `-∂V/∂r / 10000`. Cashflow forms are `duration(DV01(), args...)`.
+Contract forms accept `Effective()` or `Spread()`; unmarked contract and portfolio calls use
+`Effective()`.
 """
-function dv01(metric::Union{Effective, Spread}, target::_Contractish, forward::AYM, credit::AYM)
-    return -ForwardDiff.derivative(s -> _contract_parallel_value(metric, target, forward, credit, s), 0.0) / 10_000
+function dv01(metric::_ContractMetric, discount::AYM, target::_Contractish; index::AYM = discount)
+    return -ForwardDiff.derivative(s -> _parallel_value(metric, target, discount, index, s), 0.0) / 10_000
 end
-dv01(metric::Union{Effective, Spread}, target::_Contractish, curve::AYM) = dv01(metric, target, curve, curve)
-dv01(args...) = duration(DV01(), args...)
+function dv01(metric::_ContractMetric, kr::KeyRates, discount::AYM, target::_Contractish; index::AYM = discount)
+    r = _contract_keyrate(metric, kr.tenors, discount, target, index, FirstOrder())
+    return _per_bp(r, r.gradient)
+end
+dv01(args...; kwargs...) = duration(DV01(), args...; kwargs...)
 
-function sensitivities(kr::KeyRates, target::_Contractish; discount::NamedTuple, index)
+convexity(metric::_ContractMetric, discount::AYM, target::_Contractish; index::AYM = discount) =
+    _second_over_value(s -> _parallel_value(metric, target, discount, index, s))
+function convexity(metric::_ContractMetric, kr::KeyRates, discount::AYM, target::_Contractish; index::AYM = discount)
+    r = _contract_keyrate(metric, kr.tenors, discount, target, index, SecondOrder())
+    return _relative(r, r.hessian)
+end
+
+"""
+    sensitivities([order,] [KeyRates(tenors),] discount, contract; index = discount) -> NamedTuple
+    sensitivities([order,] [KeyRates(tenors),] discount::NamedTuple, contract; index) -> NamedTuple
+
+Calculate value and risk for a contract or a portfolio (a vector of contracts), reprojecting
+cashflows under shifted curves. Coupons project on `index`, which defaults to `discount`, and every
+payment is discounted on `discount`. The result has the shape of [`sensitivities`](@ref) for
+curves, with the derivative fields keyed by role:
+
+- `discount`: shift the discount curve only, so coupons stay fixed. This is spread (credit) risk,
+  close to that of a fixed-rate bond with the same maturity.
+- `index`: shift the index curve only, so coupons reset but are discounted as before.
+
+Effective (rate) risk shifts both: its DV01 is `dv01.discount + dv01.index`, and its convexity is
+the sum of all four blocks of `convexity` (see [`duration`](@ref) with [`Effective`](@ref)). Each
+role is shifted separately even when `index` is `discount`, so the index exposure is explicit.
+For a fixed bond, `index` risk is zero.
+
+With a `NamedTuple` of discount layers, such as `(; rf, credit, ilp)`, every payment is discounted
+on their sum, and each layer is its own role next to `index`, which is then required. A layer
+named `index` throws an `ArgumentError`.
+
+Durations are in years; DV01s are in dollars per basis point. Dollar risk uses signed value
+derivatives and remains defined at zero value, where normalized duration is undefined.
+
+```julia
+s = sensitivities(KeyRates(tenors), curve, floater)   # s.dv01.discount, s.dv01.index
+s = sensitivities(SecondOrder(), (; rf, credit), floater; index = sofr)
+```
+"""
+sensitivities(::Union{AYM, NamedTuple}, ::_Contractish)
+
+_contract_sensitivities(order, grid, discount::AYM, target::_Contractish; index::AYM = discount) =
+    _contract_sensitivities(order, grid, (; discount), target; index)
+function _contract_sensitivities(order, grid, discount::NamedTuple{layers}, target::_Contractish; index::AYM) where {layers}
     # `merge` would replace a layer named `index` with the projection curve.
     haskey(discount, :index) && throw(ArgumentError("a discount layer cannot be named :index"))
-    layers = keys(discount)
-    return sensitivities(kr, merge(discount, (; index = index))) do c
-        _value(target, c.index, reduce(+, getfield(c, r) for r in layers))
-    end
+    value(c) = _value(target, c.index, reduce(+, values(NamedTuple{layers}(c))))
+    return _sensitivities(_curve_ad(value, merge(discount, (; index)), grid, order), order)
 end
 
 """
-    zspread(contract, credit, market_price; forward = credit, s0 = 0.0, tol = 1e-12, maxiter = 100) -> (; zspread, zspread_dv01)
+    zspread(discount, contract, market_price; index = discount, s0 = 0.0, tol = 1e-12, maxiter = 100) -> (; zspread, zspread_dv01)
 
-Constant continuously-compounded spread `s` on the `credit` (discount) curve such that
-the model price equals `market_price`, with coupons estimated on `forward` (held fixed).
-`zspread` is `s` as a `Continuous` rate, so `credit + result.zspread` is the spread curve;
+Constant continuously-compounded spread `s` on the `discount` curve such that the model price
+equals `market_price`, with coupons estimated on `index` (held fixed). `zspread` is `s` as a
+`Continuous` rate, so `discount + result.zspread` is the spread curve;
 `FinanceCore.rate(result.zspread)` is the number. `zspread_dv01` is a number,
 `-∂V/∂s / 10000` at the solved spread: the value lost per basis point of `s`. The solve takes
 Newton steps from `s0`, a number read as continuously compounded or a `Rate`, with ForwardDiff
@@ -137,8 +136,8 @@ The solve stops once a Newton step is smaller than `tol` in rate units (not curr
 result does not depend on the contract's notional and is defined for a zero `market_price`.
 An `ErrorException` is thrown if that does not happen within `maxiter` steps.
 """
-function zspread(contract::FinanceCore.AbstractContract, credit::AYM, market_price; forward::AYM = credit, s0 = 0.0, tol = 1.0e-12, maxiter = 100)
-    pvs(s) = _contract_parallel_value(Spread(), contract, forward, credit, s)
+function zspread(discount::AYM, contract::FinanceCore.AbstractContract, market_price; index::AYM = discount, s0 = 0.0, tol = 1.0e-12, maxiter = 100)
+    pvs(s) = _parallel_value(Spread(), contract, discount, index, s)
     f(s) = pvs(s) - market_price
     failed(step, s) = ErrorException("zspread did not converge (last Newton step = $step, residual = $(f(s)))")
     converged, s, step = _newton(f, float(FinanceCore.rate(FinanceCore.Continuous(s0))), maxiter) do s, step, _

@@ -5,6 +5,16 @@
 const _YieldInput = Union{Real, FinanceCore.Rate, AYM}
 const _CashflowCollection = Union{AbstractArray, Tuple, Base.Generator}
 
+# The unmarked, `DV01()`, key-rate and `sensitivities` forms take fixed cashflows or a contract
+# after the curve, and `_fixed` routes them. A vector of contracts is a portfolio, but a vector of
+# `Cashflow`s is fixed cashflows: its contract measures would equal these, which are analytic and
+# keep the zero-stream convention.
+const _Instrument = Union{_CashflowCollection, FinanceCore.AbstractContract}
+_fixed(x) = true
+_fixed(::FinanceCore.AbstractContract) = false
+_fixed(::AbstractVector{<:FinanceCore.AbstractContract}) = false
+_fixed(::AbstractVector{<:FinanceCore.Cashflow}) = true
+
 """
     duration(Macaulay(),interest_rate,cfs,times)
     duration(Modified(),interest_rate,cfs,times)
@@ -109,7 +119,8 @@ julia> duration(0.03) do i
 
 ```
 """
-duration(yield::_YieldInput, cfs::_CashflowCollection, times...) = duration(Modified(), yield, cfs, times...)
+duration(yield::_YieldInput, x::_Instrument, times...; kwargs...) =
+    _fixed(x) ? duration(Modified(), yield, x, times...; kwargs...) : duration(Effective(), yield, x, times...; kwargs...)
 
 ## Analytic measures for fixed cashflows
 # Each single-rate input moves in its own shock coordinate (docs: "Shock coordinates").
@@ -130,9 +141,12 @@ duration(::Macaulay, yield::_YieldInput, cfs::_CashflowCollection, times...) =
 duration(::Modified, yield::_YieldInput, cfs::_CashflowCollection, times...) =
     _weighted_ratio(yield, identity, _cashflow_inputs(cfs, times...)...; divisor = _coordinate(yield).divisor)
 
+duration(::DV01, yield::_YieldInput, x::_Instrument, times...; kwargs...) =
+    _fixed(x) ? _fixed_dv01(yield, x, times...; kwargs...) : dv01(Effective(), yield, x, times...; kwargs...)
+
 # -∂V/∂s is Σ t·cf·d divided by the coordinate's divisor; do not divide by V so dollar
 # exposure remains defined at zero present value.
-function duration(::DV01, yield::_YieldInput, cfs::_CashflowCollection, times...)
+function _fixed_dv01(yield, cfs, times...)
     amounts, ts = _cashflow_inputs(cfs, times...)
     divisor = _coordinate(yield).divisor * 10_000
     sums = _weighted_sums(yield, identity, amounts, ts)
@@ -192,27 +206,54 @@ julia> convexity(i -> 100 / (1 + i)^5, 0.03)
 #   callback form for rate-dependent cashflows.
 #
 # Signed normalization makes convexity invariant to position sign.
-function convexity(yield::_YieldInput, cfs::_CashflowCollection, times...)
-    c = _coordinate(yield)
-    return _weighted_ratio(yield, t -> t * (t + c.inv_m), _cashflow_inputs(cfs, times...)...; divisor = c.divisor^2)
-end
+convexity(yield::_YieldInput, x::_Instrument, times...; kwargs...) =
+    _fixed(x) ? _fixed_convexity(yield, x, times...; kwargs...) : convexity(Effective(), yield, x, times...; kwargs...)
 
-# Shared accumulation kernel: V = Σ cf·d and Vw = Σ weight(t)·cf·d, over the 1-based, equal-length
-# inputs of `_cashflow_inputs`. A zero stream returns `nothing` without valuing any payment;
-# callers return its typed zero.
-function _weighted_sums(yield, weight::W, cfs, times) where {W}
+function _fixed_convexity(yield, cfs, times...)
+    w = _convexity_weight(_coordinate(yield))
+    return _weighted_ratio(yield, w, _cashflow_inputs(cfs, times...)...; divisor = _coordinate(yield).divisor^2)
+end
+_convexity_weight(c) = t -> t * (t + c.inv_m)
+
+# Shared accumulation kernel: V = Σ cf·d and Vw = Σ weight(t)·cf·d for each weight, over the
+# 1-based, equal-length inputs of `_cashflow_inputs`. A zero stream returns `nothing` without
+# valuing any payment; callers return its typed zero.
+function _weighted_sums(yield, weights::Tuple, cfs, times)
     _iszero_cashflow_stream(cfs) && return nothing
     t1 = FinanceCore.timepoint(first(cfs), first(times))
     z = _cf_value(first(cfs)) * FinanceCore.discount(yield, t1)
     V = zero(z)
-    Vw = zero(weight(t1) * z)
+    Vw = map(w -> zero(w(t1) * z), weights)
     @inbounds for k in eachindex(cfs)
         t = FinanceCore.timepoint(cfs[k], times[k])
         cfd = _cf_value(cfs[k]) * FinanceCore.discount(yield, t)
         V += cfd
-        Vw += weight(t) * cfd
+        Vw = map((acc, w) -> acc + w(t) * cfd, Vw, weights)
     end
     return V, Vw
+end
+function _weighted_sums(yield, weight::W, cfs, times) where {W}
+    sums = _weighted_sums(yield, (weight,), cfs, times)
+    return isnothing(sums) ? nothing : (first(sums), only(last(sums)))
+end
+
+# Fixed cashflows' value and derivatives under one parallel shock in the input's own coordinate,
+# in the shape `_sensitivities` normalizes: ∂V/∂s = -Σ t·cf·d / divisor, and at second order
+# ∂²V/∂s² = Σ t(t + 1/m)·cf·d / divisor², from one pass.
+function _parallel_analytic(yield, cfs, times, order)
+    c = _coordinate(yield)
+    w = _convexity_weight(c)
+    sums = _weighted_sums(yield, order isa SecondOrder ? (identity, w) : (identity,), cfs, times)
+    if isnothing(sums)
+        value = _zero_stream_value(yield, cfs, times)
+        gradient = _zero_weighted(yield, identity, cfs, times, c.divisor)
+        order isa FirstOrder && return (; value, gradient, zero_stream = true)
+        return (; value, gradient, hessian = _zero_weighted(yield, w, cfs, times, c.divisor^2), zero_stream = true)
+    end
+    V, Vw = sums
+    gradient = -first(Vw) / c.divisor
+    order isa FirstOrder && return (; value = V, gradient, zero_stream = false)
+    return (; value = V, gradient, hessian = last(Vw) / c.divisor^2, zero_stream = false)
 end
 
 # Vw / V / divisor. `weight` is only forwarded here, so type it to keep this method specialized.
@@ -223,8 +264,5 @@ function _weighted_ratio(yield, weight::W, cfs, times; divisor = 1) where {W}
     return _risk_ratio(Vw, V; divisor)
 end
 
-function convexity(valuation_function::F, yield::_YieldInput) where {F}
-    v(x) = abs(valuation_function(_parallel_bumped(yield, x)))
-    ∂²P = ForwardDiff.derivative(y -> ForwardDiff.derivative(v, y), 0.0)
-    return ∂²P / v(0.0)
-end
+convexity(valuation_function::F, yield::_YieldInput) where {F} =
+    _second_over_value(x -> valuation_function(_parallel_bumped(yield, x)))

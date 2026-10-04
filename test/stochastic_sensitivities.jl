@@ -20,10 +20,10 @@
     end
 
     # Total duration preserved (risk-neutral pricing theorem)
-    @test sum(hw_result.durations) ≈ sum(det.durations) atol = 0.05
+    @test sum(hw_result.duration) ≈ sum(det.duration) atol = 0.05
 
     # Individual KRDs should differ (HW redistributes across tenors)
-    @test !(hw_result.durations ≈ det.durations)
+    @test !(hw_result.duration ≈ det.duration)
 
     # Present values should also agree
     @test hw_result.value ≈ det.value atol = 0.5
@@ -41,36 +41,28 @@ end
     zrc = FM.ZeroRateCurve(rates, tenors)
     hw = FM.ShortRate.HullWhite(0.1, 0.01, zrc)
 
-    r1 = sensitivities(KeyRates(tenors), Scenarios(hw; n_scenarios = 500, rng = Xoshiro(42)), cfs, tenors)
-    r2 = sensitivities(KeyRates(tenors), Scenarios(hw; n_scenarios = 500, rng = Xoshiro(42)), cfs, tenors)
-    @test r1.value ≈ r2.value
-    @test r1.durations ≈ r2.durations
-    @test r1.convexities ≈ r2.convexities
-
-    # DV01 form
-    d1 = sensitivities(DV01(), KeyRates(tenors), Scenarios(hw; n_scenarios = 500, rng = Xoshiro(42)), cfs, tenors)
-    d2 = sensitivities(DV01(), KeyRates(tenors), Scenarios(hw; n_scenarios = 500, rng = Xoshiro(42)), cfs, tenors)
-    @test d1.value ≈ d2.value
-    @test d1.dv01s ≈ d2.dv01s
-    @test d1.convexities ≈ d2.convexities
-
-    # Different seeds give different MC samples (sanity check the seed is actually used)
-    r3 = sensitivities(KeyRates(tenors), Scenarios(hw; n_scenarios = 500, rng = Xoshiro(43)), cfs, tenors)
-    @test !(r1.value ≈ r3.value && r1.durations ≈ r3.durations)
+    for order in (FirstOrder(), SecondOrder())
+        r1 = sensitivities(order, KeyRates(tenors), Scenarios(hw; n_scenarios = 500, rng = Xoshiro(42)), cfs, tenors)
+        r2 = sensitivities(order, KeyRates(tenors), Scenarios(hw; n_scenarios = 500, rng = Xoshiro(42)), cfs, tenors)
+        @test isequal(r1, r2)
+        # Different seeds give different MC samples (sanity check the seed is actually used)
+        r3 = sensitivities(order, KeyRates(tenors), Scenarios(hw; n_scenarios = 500, rng = Xoshiro(43)), cfs, tenors)
+        @test !(r1.value ≈ r3.value && r1.duration ≈ r3.duration)
+    end
 
     # Omitted times default to periods 1:n, and wrapped cashflows simulate too.
     wrapped = FC.Cashflow.(cfs, tenors)
     scenarios() = Scenarios(hw; n_scenarios = 500, rng = Xoshiro(42))
-    for m in ((), (DV01(),))
+    for m in ((), (SecondOrder(),))
         seeded = sensitivities(m..., KeyRates(tenors), scenarios(), cfs, tenors)
         @test isequal(sensitivities(m..., KeyRates(tenors), scenarios(), cfs), seeded)
         @test _same_sensitivity(sensitivities(m..., KeyRates(tenors), scenarios(), wrapped), seeded)
     end
-    @test !(sensitivities(KeyRates(tenors), scenarios(), wrapped).durations ≈ sensitivities(KeyRates(tenors), hw.curve, wrapped).durations)
+    @test !(sensitivities(KeyRates(tenors), scenarios(), wrapped).duration ≈ sensitivities(KeyRates(tenors), hw.curve, wrapped).duration)
 
     # A callback receives the simulated paths, from one seed per call.
     value(paths) = sum(FC.pv(p, cfs, tenors) for p in paths) / length(paths)
-    for m in ((), (DV01(),))
+    for m in ((), (SecondOrder(),))
         s = Scenarios(hw; n_scenarios = 50, timestep = 0.25, horizon = 6.0, rng = Xoshiro(1))
         first_call, second_call = sensitivities(value, m..., KeyRates(tenors), s), sensitivities(value, m..., KeyRates(tenors), s)
         @test isequal(sensitivities(value, m..., KeyRates(tenors), Scenarios(hw; n_scenarios = 50, timestep = 0.25, horizon = 6.0, rng = Xoshiro(1))), first_call)
@@ -87,9 +79,9 @@ end
     value(c) = FC.pv(c, cfs, tenors)
     # Without `Scenarios`, every measure values `hw` on its discount function.
     @test !(Scenarios(hw) isa FM.Yield.AbstractYieldModel)
-    @test sensitivities(kr, hw, cfs, tenors) == sensitivities(kr, zrc, cfs, tenors)
-    @test sensitivities(DV01(), kr, hw, cfs, tenors) == sensitivities(DV01(), kr, zrc, cfs, tenors)
-    @test sensitivities(kr, hw, cfs, tenors).durations == duration(kr, hw, cfs, tenors)
-    @test _same_sensitivity(sensitivities(value, kr, hw), sensitivities(value, kr, zrc))
-    @test _same_sensitivity(sensitivities(value, DV01(), kr, hw), sensitivities(value, DV01(), kr, zrc))
+    for o in ((), (SecondOrder(),)), g in ((), (kr,))
+        @test sensitivities(o..., g..., hw, cfs, tenors) == sensitivities(o..., g..., zrc, cfs, tenors)
+        @test _same_sensitivity(sensitivities(value, o..., g..., hw), sensitivities(value, o..., g..., zrc))
+    end
+    @test sensitivities(kr, hw, cfs, tenors).duration == duration(kr, hw, cfs, tenors)
 end

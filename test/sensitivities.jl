@@ -6,12 +6,12 @@
         zrc = FM.ZeroRateCurve(rates, tenors, FM.Spline.Linear())
         face = 100.0
 
-        result = sensitivities(KeyRates(tenors), zrc, [0.0, 0.0, face], tenors)
+        result = sensitivities(SecondOrder(), KeyRates(tenors), zrc, [0.0, 0.0, face], tenors)
 
         @test result.value ≈ face * exp(-0.03 * 5.0) atol = 1.0e-6
-        @test result.durations[3] ≈ 5.0 atol = 1.0e-6
-        @test result.durations[1] ≈ 0.0 atol = 1.0e-6
-        @test result.convexities[3, 3] ≈ 25.0 atol = 1.0e-6
+        @test result.duration[3] ≈ 5.0 atol = 1.0e-6
+        @test result.duration[1] ≈ 0.0 atol = 1.0e-6
+        @test result.convexity[3, 3] ≈ 25.0 atol = 1.0e-6
     end
 
     @testset "coupon bond" begin
@@ -24,16 +24,12 @@
         result = sensitivities(KeyRates(tenors), zrc, cfs, tenors)
 
         @test result.value > 0
-        @test all(result.durations .> 0)
+        @test all(result.duration .> 0)
 
-        # sensitivities returns same durations as calling duration(KeyRates(tenors), ...) separately
-        @test result.durations ≈ duration(KeyRates(tenors), zrc, cfs, tenors) atol = 1.0e-12
-
-        # DV01 dispatch
-        dv01_result = sensitivities(DV01(), KeyRates(tenors), zrc, cfs, tenors)
-        @test all(dv01_result.dv01s .> 0)
-        @test dv01_result.dv01s ≈ duration(DV01(), KeyRates(tenors), zrc, cfs, tenors) atol = 1.0e-12
-        @test dv01_result.value ≈ result.value atol = 1.0e-12
+        # sensitivities returns the same durations and DV01s as the standalone measures
+        @test result.duration ≈ duration(KeyRates(tenors), zrc, cfs, tenors) atol = 1.0e-12
+        @test all(result.dv01 .> 0)
+        @test result.dv01 ≈ duration(DV01(), KeyRates(tenors), zrc, cfs, tenors) atol = 1.0e-12
     end
 
     @testset "do-block" begin
@@ -48,7 +44,7 @@
         end
 
         @test result.value > 0
-        @test all(result.durations .> 0)
+        @test all(result.duration .> 0)
     end
 
     @testset "two-curve additive: IR01 ≈ CS01" begin
@@ -62,18 +58,14 @@
 
         result = sensitivities(pv2, KeyRates(tenors), base, credit)
 
-        @test result.base_durations ≈ result.credit_durations atol = 1.0e-10
-
-        # DV01 dispatch
-        dv01_result = sensitivities(pv2, DV01(), KeyRates(tenors), base, credit)
-        @test dv01_result.base_dv01s ≈ dv01_result.credit_dv01s atol = 1.0e-12
-        @test dv01_result.value ≈ result.value atol = 1.0e-12
+        @test result.duration.base ≈ result.duration.credit atol = 1.0e-10
+        @test result.dv01.base ≈ result.dv01.credit atol = 1.0e-12
 
         # Macaulay duration for flat continuous rate 0.05
         total_rate = 0.05
         dfs = [exp(-total_rate * t) for t in tenors]
         mac_dur = sum(t * cf * df for (t, cf, df) in zip(tenors, cfs, dfs)) / sum(cf * df for (cf, df) in zip(cfs, dfs))
-        @test sum(result.base_durations) ≈ mac_dur atol = 1.0e-6
+        @test sum(result.duration.base) ≈ mac_dur atol = 1.0e-6
     end
 
     @testset "two-curve non-additive: base ≠ credit" begin
@@ -88,7 +80,7 @@
             face * (2.0 * base_curve(5.0) + 0.5 * credit_curve(5.0))
         end
 
-        @test !isapprox(result.base_durations, result.credit_durations, atol = 1.0e-6)
+        @test !isapprox(result.duration.base, result.duration.credit, atol = 1.0e-6)
     end
 
     @testset "two-curve with mismatched ZRC storage tenors" begin
@@ -100,8 +92,8 @@
         knots = [1.0, 2.0, 5.0]
         result = sensitivities((b, c) -> FC.pv(b + c, [5.0, 5.0, 105.0], [1.0, 2.0, 5.0]), KeyRates(knots), base, credit)
         @test result.value > 0
-        @test length(result.base_durations) == length(knots)
-        @test length(result.credit_durations) == length(knots)
+        @test length(result.duration.base) == length(knots)
+        @test length(result.duration.credit) == length(knots)
     end
 
     @testset "chapter VGH test case" begin
@@ -114,15 +106,15 @@
         cfs_times = collect(0.5:0.5:10.0)
         cfs = [coupon / 2 + (t == 10.0 ? 1.0 : 0.0) for t in cfs_times]
 
-        result = sensitivities(KeyRates(times), zrc, cfs, cfs_times)
+        result = sensitivities(SecondOrder(), KeyRates(times), zrc, cfs, cfs_times)
 
         @test result.value > 0
         # durations at tenors within the bond's maturity are positive
-        @test all(result.durations[1:5] .> 0)
-        @test sum(result.durations) > 0  # total duration is positive
+        @test all(result.duration[1:5] .> 0)
+        @test sum(result.duration) > 0  # total duration is positive
 
         # convexity matrix is symmetric
-        @test result.convexities ≈ result.convexities' atol = 1.0e-10
+        @test result.convexity ≈ result.convexity' atol = 1.0e-10
     end
 
     @testset "portfolio linearity" begin
@@ -219,21 +211,19 @@ FC.discount(c::CompositeTwoFlatYield, t) = FC.discount(c.base, t) * FC.discount(
     end
 
     @testset "sensitivities bundle" begin
-        r = sensitivities(KeyRates(tenors), curve, cfs, times)
+        r = sensitivities(SecondOrder(), KeyRates(tenors), curve, cfs, times)
         @test r.value ≈ pv(curve) atol = 1.0e-10        # exact baseline; no resampling
-        @test r.durations ≈ duration(pv, KeyRates(tenors), curve) atol = 1.0e-10
-        @test sum(r.durations) ≈ duration(pv, curve) atol = 1.0e-10
-        @test r.convexities ≈ r.convexities' atol = 1.0e-10
-
-        r_dv01 = sensitivities(DV01(), KeyRates(tenors), curve, cfs, times)
-        @test r_dv01.dv01s ≈ duration(pv, DV01(), KeyRates(tenors), curve) atol = 1.0e-10
+        @test r.duration ≈ duration(pv, KeyRates(tenors), curve) atol = 1.0e-10
+        @test sum(r.duration) ≈ duration(pv, curve) atol = 1.0e-10
+        @test r.convexity ≈ r.convexity' atol = 1.0e-10
+        @test r.dv01 ≈ duration(pv, DV01(), KeyRates(tenors), curve) atol = 1.0e-10
     end
 
     @testset "two-curve sensitivities" begin
         pv2c(b, c) = sum(cf * FC.discount(b, t) * FC.discount(c, t) for (cf, t) in zip(cfs, times))
         r = sensitivities(pv2c, KeyRates(tenors), base, spread)
         @test r.value ≈ pv2c(base, spread) atol = 1.0e-10
-        @test r.base_durations ≈ r.credit_durations atol = 1.0e-10   # additive ⇒ symmetric
+        @test r.duration.base ≈ r.duration.credit atol = 1.0e-10   # additive ⇒ symmetric
     end
 
     @testset "ZRC promotion equivalence (Linear spline)" begin
@@ -260,12 +250,12 @@ end
 
 @testset "AD vs analytic KRD: byte-equivalence across curve types and arities" begin
     # The analytic results (`_keyrate_analytic`) must
-    # have the same value, gradient, and Hessian as the AD results (`_keyrate` with a callback,
-    # `_ncurve_ad`) for the vanilla cashflow case. Regression guard against future drift between
+    # have the same value, gradient, and Hessian as the AD results (`_curve_ad` with a callback)
+    # for the vanilla cashflow case. Regression guard against future drift between
     # the two implementations of the same math.
-    KR = ActuaryUtilities.FinancialMath._keyrate
+    KR = ActuaryUtilities.FinancialMath._one_curve_ad
     KRA = ActuaryUtilities.FinancialMath._keyrate_analytic
-    NCAD = ActuaryUtilities.FinancialMath._ncurve_ad
+    NCAD = ActuaryUtilities.FinancialMath._curve_ad
 
     tenors = collect(1.0:30.0)
     rates = fill(0.03, 30)
@@ -281,12 +271,8 @@ end
     times = FC.timepoint.(cfs_full)
 
     @testset "single-curve [$(typeof(c).name.name)]" for c in curves
-        ad = KR(
-            c, tenors,
-            i -> sum(amts[k] * FC.discount(i, times[k]) for k in eachindex(amts));
-            order = 2
-        )
-        an = KRA(c, tenors, amts, times; order = 2)
+        ad = KR(i -> sum(amts[k] * FC.discount(i, times[k]) for k in eachindex(amts)), c, tenors, SecondOrder())
+        an = KRA(c, tenors, amts, times, SecondOrder())
         @test ad.value ≈ an.value rtol = 1.0e-12
         @test maximum(abs.(ad.gradient .- an.gradient)) < 1.0e-12
         @test maximum(abs.(ad.hessian .- an.hessian)) < 1.0e-12
@@ -296,16 +282,12 @@ end
     @testset "two-curve" begin
         base = curves[1]
         credit = FM.ZeroRateCurve(rates2, tenors, FM.Spline.Linear())
-        ad = KR(
-            (; base, credit), tenors,
-            (b, c) -> sum(
-                amts[k] * FC.discount(b, times[k]) * FC.discount(c, times[k])
-                    for k in eachindex(amts)
-            );
-            order = 2
+        ad = NCAD(
+            c -> sum(amts[k] * FC.discount(c.base, times[k]) * FC.discount(c.credit, times[k]) for k in eachindex(amts)),
+            (; base, credit), tenors, SecondOrder()
         )
         # Every role of fixed cashflows on base + credit has the combined curve's derivatives.
-        an = KRA(base + credit, tenors, amts, times; order = 2)
+        an = KRA(base + credit, tenors, amts, times, SecondOrder())
         @test ad.value ≈ an.value rtol = 1.0e-12
         for a in (:base, :credit)
             @test maximum(abs.(ad.gradient[a] .- an.gradient)) < 1.0e-12
@@ -327,9 +309,9 @@ end
                     FC.discount(c.ilp, times[k])
                     for k in eachindex(amts)
             ),
-            nt, tenors
+            nt, tenors, FirstOrder()
         )
-        an = KRA(c1 + c2 + c3, tenors, amts, times; order = 2)
+        an = KRA(c1 + c2 + c3, tenors, amts, times, FirstOrder())
         @test ad.value ≈ an.value rtol = 1.0e-12
         # Per-role gradients from the AD path all agree with the combined curve's gradient.
         for r in (:rf, :credit, :ilp)
@@ -338,7 +320,7 @@ end
     end
 end
 
-@testset "key-rate results are inferred" begin
+@testset "sensitivities results are inferred for both orders" begin
     # Every method reads its result by curve role; the roles must stay visible to inference.
     tenors = collect(1.0:30.0)
     curve = FM.ZeroRateCurve(0.02 .+ 0.0005 .* tenors, tenors, FM.Spline.Linear())
@@ -349,24 +331,46 @@ end
     one_curve = c -> FC.pv(c, amts, times)
     two_curves = (b, c) -> FC.pv(b + c, amts, times)
     named = cs -> FC.pv(cs.a + cs.b, amts, times)
+    inputs = m -> FC.pv(FM.Yield.Constant(FC.Continuous(m.r[1] + m.s[2])), amts, times)
+    bond = FM.Bond.Fixed(0.04, FC.Periodic(2), 10.0)
     @test @inferred(duration(kr, curve, amts, times)) isa Vector{Float64}
     @test @inferred(duration(two_curves, IR01(), kr, curve, credit)) isa Vector{Float64}
     @test @inferred(convexity(two_curves, curve, credit)).cross isa Float64
-    @test @inferred(sensitivities(two_curves, kr, curve, credit)).convexities.cross isa Matrix{Float64}
-    @test @inferred(sensitivities(DV01(), kr, curve, amts, times)).dv01s isa Vector{Float64}
     @test @inferred(duration(one_curve, kr, curve)) isa Vector{Float64}
     @test @inferred(duration(two_curves, CS01(), curve, credit)) isa Float64
-    @test @inferred(sensitivities(two_curves, kr, curve, credit)).credit_durations isa Vector{Float64}
-    @test @inferred(sensitivities(named, kr, (; a = curve, b = credit))).key_rate.b isa Vector{Float64}
-    @test @inferred(sensitivities(c -> one_curve(c.a), kr, (; a = curve))).key_rate.a isa Vector{Float64}
-    # Market inputs share the named-role engine and result.
-    inputs = m -> FC.pv(FM.Yield.Constant(FC.Continuous(m.r[1] + m.s[2])), amts, times)
-    @test @inferred(sensitivities(inputs, (; r = [0.03], s = [0.01, 0.02]))).key_rate.s isa Vector{Float64}
-    @test @inferred(sensitivities(m -> inputs((; r = m.r, s = [0.0, 0.01])), (; r = [0.03]))).dv01.r isa Float64
-    bond = FM.Bond.Fixed(0.04, FC.Periodic(2), 10.0)
-    @test @inferred(sensitivities(kr, bond, curve, credit)).spread_key_rate isa Vector{Float64}
-    @test @inferred(sensitivities(kr, bond, curve)).effective_key_rate isa Vector{Float64}
-    # Omitted times.
-    @test @inferred(duration(kr, curve, amts)) isa Vector{Float64}
-    @test @inferred(sensitivities(kr, curve + credit, amts)).durations isa Vector{Float64}
+    # The fields of each order: `value` is a number; the derivative fields follow the grid and roles.
+    V, Vec, Mat = Float64, Vector{Float64}, Matrix{Float64}
+    first_order(d) = NamedTuple{(:value, :duration, :dv01), Tuple{V, d, d}}
+    second_order(d, c) = NamedTuple{(:value, :duration, :dv01, :convexity), Tuple{V, d, d, c}}
+    roles(names, T) = NamedTuple{names, NTuple{length(names), T}}
+    for (f, F, S) in (
+            ((o...) -> sensitivities(o..., curve, amts, times), first_order(V), second_order(V, V)),
+            ((o...) -> sensitivities(o..., 0.04, amts, times), first_order(V), second_order(V, V)),
+            ((o...) -> sensitivities(o..., kr, curve, amts, times), first_order(Vec), second_order(Vec, Mat)),
+            ((o...) -> sensitivities(o..., kr, curve, amts), first_order(Vec), second_order(Vec, Mat)),
+            ((o...) -> sensitivities(one_curve, o..., curve), first_order(V), second_order(V, V)),
+            ((o...) -> sensitivities(one_curve, o..., kr, curve), first_order(Vec), second_order(Vec, Mat)),
+            (
+                (o...) -> sensitivities(two_curves, o..., curve, credit),
+                first_order(roles((:base, :credit), V)), second_order(roles((:base, :credit), V), roles((:base, :credit), roles((:base, :credit), V))),
+            ),
+            (
+                (o...) -> sensitivities(named, o..., kr, (; a = curve, b = credit)),
+                first_order(roles((:a, :b), Vec)), second_order(roles((:a, :b), Vec), roles((:a, :b), roles((:a, :b), Mat))),
+            ),
+            ((o...) -> sensitivities(c -> one_curve(c.a), o..., (; a = curve)), first_order(roles((:a,), V)), second_order(roles((:a,), V), roles((:a,), roles((:a,), V)))),
+            (
+                (o...) -> sensitivities(inputs, o..., (; r = [0.03], s = [0.01, 0.02])),
+                first_order(roles((:r, :s), Vec)), second_order(roles((:r, :s), Vec), roles((:r, :s), roles((:r, :s), Mat))),
+            ),
+            (
+                (o...) -> sensitivities(o..., kr, curve, bond; index = credit),
+                first_order(roles((:discount, :index), Vec)), second_order(roles((:discount, :index), Vec), roles((:discount, :index), roles((:discount, :index), Mat))),
+            ),
+            ((o...) -> sensitivities(o..., curve, bond), first_order(roles((:discount, :index), V)), second_order(roles((:discount, :index), V), roles((:discount, :index), roles((:discount, :index), V)))),
+        )
+        @test @inferred(f()) isa F
+        @test @inferred(f(FirstOrder())) isa F
+        @test @inferred(f(SecondOrder())) isa S
+    end
 end

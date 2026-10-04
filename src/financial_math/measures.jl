@@ -47,10 +47,10 @@ struct CS01 end
 """
     Effective
 
-Measure contract risk while reprojecting cashflows under shifted curves, so
-floating coupons reset. Use `duration(Effective(), contract, curve)`; the same
-marker applies to `dv01` and `convexity`. `Modified` and `Macaulay` operate on
-fixed cashflows.
+Measure contract risk while reprojecting cashflows under shifted curves, so floating
+coupons reset: `duration(Effective(), discount, contract; index = discount)` shifts both
+the index and the discount curve. The same marker applies to `dv01` and `convexity`.
+`Modified` and `Macaulay` operate on fixed cashflows.
 
 See also: [`Spread`](@ref), [`sensitivities`](@ref), [`locked_floater`](@ref).
 """
@@ -59,13 +59,37 @@ struct Effective end
 """
     Spread
 
-Spread (credit) duration: bumps the discount curve only; cashflows projected on the
-index curve stay fixed. For a floating-rate bond it is close to the duration of a
-fixed-rate bond with the same maturity.
+Spread (credit) duration: `duration(Spread(), discount, contract; index = discount)` shifts
+the discount curve only, so cashflows projected on the index curve stay fixed. For a
+floating-rate bond it is close to the duration of a fixed-rate bond with the same maturity.
 
 See also: [`Effective`](@ref), [`sensitivities`](@ref).
 """
 struct Spread end
+
+"""
+    FirstOrder()
+
+Select first-order [`sensitivities`](@ref): `(; value, duration, dv01)`. It is the default.
+
+See also: [`SecondOrder`](@ref).
+"""
+struct FirstOrder end
+
+"""
+    SecondOrder()
+
+Select second-order [`sensitivities`](@ref): `(; value, duration, dv01, convexity)`, from one
+evaluation of the value and its first and second derivatives. A valuation that has no second
+derivative throws its own error; there is no fallback to first order.
+
+This marker belongs to ActuaryUtilities and is unrelated to `DifferentiationInterface.SecondOrder`.
+
+See also: [`FirstOrder`](@ref).
+"""
+struct SecondOrder end
+
+const _Order = Union{FirstOrder, SecondOrder}
 
 """
     KeyRates(tenors)
@@ -80,7 +104,8 @@ tenors = [1.0, 2.0, 5.0, 10.0, 30.0]
 duration(KeyRates(tenors), curve, cfs, times)            # vector of key-rate durations
 duration(DV01(), KeyRates(tenors), curve, cfs, times)    # vector of key-rate DV01s
 convexity(KeyRates(tenors), curve, cfs, times)           # matrix of key-rate convexities
-sensitivities(KeyRates(tenors), curve, cfs, times)       # value + durations + convexities
+sensitivities(KeyRates(tenors), curve, cfs, times)       # value, durations and DV01s
+sensitivities(SecondOrder(), KeyRates(tenors), curve, cfs, times)   # and the convexity matrix
 ```
 
 See also: [`DV01`](@ref), [`IR01`](@ref), [`CS01`](@ref)

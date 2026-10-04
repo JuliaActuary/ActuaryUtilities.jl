@@ -31,15 +31,15 @@
             @test duration(value, metric, kr, curve, credit) ≈ duration(pair, metric, kr, curve, credit)
         end
         @test _same_sensitivity(convexity(value, curve, credit), convexity(pair, curve, credit))
-        for f in (duration, convexity, sensitivities)
+        for f in (duration, convexity)
             @test _same_sensitivity(f(value, kr, curve), f(closure, kr, curve))
         end
-        for f in (convexity, sensitivities)
-            @test _same_sensitivity(f(value, kr, curve, credit), f(pair, kr, curve, credit))
-        end
+        @test _same_sensitivity(convexity(value, kr, curve, credit), convexity(pair, kr, curve, credit))
         @test duration(value, DV01(), kr, curve) ≈ duration(closure, DV01(), kr, curve)
-        @test _same_sensitivity(sensitivities(value, DV01(), kr, curve), sensitivities(closure, DV01(), kr, curve))
-        @test _same_sensitivity(sensitivities(value, DV01(), kr, curve, credit), sensitivities(pair, DV01(), kr, curve, credit))
+        for order in ((), (FirstOrder(),), (SecondOrder(),)), grid in ((), (kr,))
+            @test _same_sensitivity(sensitivities(value, order..., grid..., curve), sensitivities(closure, order..., grid..., curve))
+            @test _same_sensitivity(sensitivities(value, order..., grid..., curve, credit), sensitivities(pair, order..., grid..., curve, credit))
+        end
     end
 
     # Arrays, ranges, views, and wrapped cashflows still select collection routes.
@@ -65,9 +65,9 @@
     hw = FM.ShortRate.HullWhite(0.1, 0.01, curve)
     value = ScenarioValue(CashflowValue([5.0, 105.0], [1.0, 3.0]))
     scenarios() = Scenarios(hw; n_scenarios = 8, timestep = 0.5, horizon = 3.0, rng = Random.Xoshiro(1234))
-    for prefix in ((), (DV01(),))
-        result = sensitivities(value, prefix..., kr, scenarios())
-        reference = sensitivities(s -> value(s), prefix..., kr, scenarios())
+    for prefix in ((), (SecondOrder(),), (kr,), (SecondOrder(), kr))
+        result = sensitivities(value, prefix..., scenarios())
+        reference = sensitivities(s -> value(s), prefix..., scenarios())
         @test _same_sensitivity(result, reference)
     end
 end

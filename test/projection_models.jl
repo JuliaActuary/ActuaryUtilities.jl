@@ -9,25 +9,24 @@
     forward = FM.Forward(1.0, floater)
     portfolio = [fixed, swap, forward]
     for c in (floater, swap, forward, portfolio)
-        explicit(cs) = FC.pv(FM.Models(cs.credit, Dict(:index => cs.index)), c)
-        reference = sensitivities(explicit, KeyRates(tenors), (; index, credit))
-        actual = sensitivities(KeyRates(tenors), c, index, credit)
-        @test actual.value ≈ reference.value
-        @test actual.forward_key_rate ≈ reference.key_rate.index
-        @test actual.spread_key_rate ≈ reference.key_rate.credit
-        @test actual.effective_dv01 ≈ reference.dv01.index + reference.dv01.credit atol = 1.0e-12
+        explicit(cs) = FC.pv(FM.Models(cs.discount, Dict(:index => cs.index)), c)
+        for order in (FirstOrder(), SecondOrder()), grid in ((), (KeyRates(tenors),))
+            reference = sensitivities(explicit, order, grid..., (; discount = credit, index))
+            @test _same_sensitivity(sensitivities(order, grid..., credit, c; index), reference)
+        end
+        @test dv01(Effective(), credit, c; index) ≈ sum(values(sensitivities(credit, c; index).dv01)) atol = 1.0e-12
     end
     for c in (floater, swap, forward)
         spread = 0.007
         target = FC.pv(FM.Models(credit + FC.Continuous(spread); index), c)
-        solved = zspread(c, credit, target; forward = index)
+        solved = zspread(credit, c, target; index)
         @test FC.rate(solved.zspread) ≈ spread atol = 1.0e-10
         @test solved.zspread_dv01 ≈
             -ForwardDiff.derivative(s -> FC.pv(FM.Models(credit + FC.Continuous(s); index), c), spread) / 10_000
     end
     # One curve cannot supply an FX model.
     converted = FM.FX.Converted(floater, FM.FX.Pair(:EUR, :USD), :fx)
-    @test_throws (VERSION >= v"1.12" ? FieldError : ErrorException) duration(Effective(), converted, index)
+    @test_throws (VERSION >= v"1.12" ? FieldError : ErrorException) duration(Effective(), index, converted)
 end
 
 # Pays 1 at t = 1 and t = 4, valued in closed form without cashflows.
@@ -39,12 +38,14 @@ struct UnvaluedContract <: FC.AbstractContract end
     curve = FM.Yield.Constant(FC.Continuous(0.03))
     d1, d4 = exp(-0.03), exp(-0.12)
     c = ClosedFormPair()
-    @test duration(Effective(), c, curve) ≈ (d1 + 4d4) / (d1 + d4)
-    @test duration(Spread(), c, curve) ≈ (d1 + 4d4) / (d1 + d4)
-    @test convexity(Effective(), c, curve) ≈ (d1 + 16d4) / (d1 + d4)
-    @test sensitivities(KeyRates([1.0, 4.0]), c, curve).value ≈ d1 + d4
+    @test duration(Effective(), curve, c) ≈ (d1 + 4d4) / (d1 + d4)
+    @test duration(Spread(), curve, c) ≈ (d1 + 4d4) / (d1 + d4)
+    @test convexity(Effective(), curve, c) ≈ (d1 + 16d4) / (d1 + d4)
+    @test convexity(Spread(), curve, c) ≈ (d1 + 16d4) / (d1 + d4)
+    @test sensitivities(KeyRates([1.0, 4.0]), curve, c).value ≈ d1 + d4
+    @test sensitivities(SecondOrder(), curve, c).convexity.discount.discount ≈ (d1 + 16d4) / (d1 + d4)
     # A contract with neither a cashflow projection nor a closed form has no value.
-    @test_throws MethodError duration(Effective(), UnvaluedContract(), curve)
+    @test_throws MethodError duration(Effective(), curve, UnvaluedContract())
 end
 
 @testset "composites of closed forms have risk" begin
@@ -55,14 +56,14 @@ end
     for (composite, parts) in ((FC.Composite(pair, pair), (pair, pair)), (FC.Composite(pair, bond), (pair, bond)))
         # A composite is worth the sum of its parts, under every bumped curve.
         value(c) = sum(FC.pv(c, p) for p in parts)
-        @test duration(Effective(), composite, curve) ≈ duration(value, curve)
-        @test duration(Spread(), composite, curve) ≈ duration(value, curve)
-        @test convexity(Effective(), composite, curve) ≈ convexity(value, curve)
-        @test dv01(composite, curve) ≈ sum(dv01(p, curve) for p in parts)
-        s = sensitivities(kr, composite, curve)
+        @test duration(Effective(), curve, composite) ≈ duration(value, curve)
+        @test duration(Spread(), curve, composite) ≈ duration(value, curve)
+        @test convexity(Effective(), curve, composite) ≈ convexity(value, curve)
+        @test dv01(curve, composite) ≈ sum(dv01(curve, p) for p in parts)
+        s = sensitivities(kr, curve, composite)
         @test s.value ≈ value(curve)
-        @test s.effective_key_rate ≈ duration(value, kr, curve)
-        @test duration(Effective(), [composite, bond], curve) ≈ duration(c -> value(c) + FC.pv(c, bond), curve)
+        @test s.duration.discount .+ s.duration.index ≈ duration(value, kr, curve)
+        @test duration(Effective(), curve, [composite, bond]) ≈ duration(c -> value(c) + FC.pv(c, bond), curve)
     end
 end
 
@@ -75,14 +76,19 @@ end
     cap, swaption = FM.Option.Cap(0.03, 4, 3.0), FM.Option.Swaption(1.0, 6.0, 0.035, 1)
     for target in (cap, swaption)
         value(c) = FC.pv(on(c), target)
-        @test duration(Effective(), target, hw) ≈ duration(value, curve)
-        @test dv01(target, hw) ≈ duration(value, DV01(), curve)
-        @test duration(Effective(), FC.Composite(target, target), hw) ≈ duration(value, curve)
-        @test sensitivities(kr, target, hw).effective_key_rate ≈ duration(value, kr, curve)
+        @test duration(Effective(), hw, target) ≈ duration(value, curve)
+        @test dv01(hw, target) ≈ duration(value, DV01(), curve)
+        @test duration(Effective(), hw, FC.Composite(target, target)) ≈ duration(value, curve)
+        s = sensitivities(kr, hw, target)
+        @test s.duration.discount .+ s.duration.index ≈ duration(value, kr, curve)
     end
-    @test convexity(Effective(), cap, hw) ≈ convexity(c -> FC.pv(on(c), cap), curve)
-    # FinanceModels differentiates the swaption's critical rate to first order only.
-    @test_throws "first-order ForwardDiff derivatives only" convexity(Effective(), swaption, hw)
+    @test convexity(Effective(), hw, cap) ≈ convexity(c -> FC.pv(on(c), cap), curve)
+    # FinanceModels differentiates the swaption's critical rate to first order only, so second-order
+    # risk throws rather than falling back to first order.
+    @test_throws "first-order ForwardDiff derivatives only" convexity(Effective(), hw, swaption)
+    @test_throws "first-order ForwardDiff derivatives only" sensitivities(SecondOrder(), hw, swaption)
+    @test_throws "first-order ForwardDiff derivatives only" sensitivities(SecondOrder(), kr, hw, swaption)
+    @test sensitivities(hw, swaption).dv01.discount ≈ dv01(Spread(), hw, swaption)
 end
 
 # At t = 2, pays principal plus the index forward rate from t = 1 to 2, valued in closed form
@@ -97,10 +103,13 @@ FC.present_value(ctx, c::ClosedFormFloater) = FC.discount(ctx, 2.0) / FC.discoun
     floater = ClosedFormFloater(:index)
     reset(c) = FC.pv(FM.Models(c, Dict(:index => c)), floater)
     held(c) = FC.pv(FM.Models(c, Dict(:index => curve)), floater)
-    @test duration(Effective(), floater, curve) ≈ duration(reset, curve)
-    @test duration(Spread(), floater, curve) ≈ duration(held, curve)
+    @test duration(Effective(), curve, floater) ≈ duration(reset, curve)
+    @test duration(Spread(), curve, floater) ≈ duration(held, curve)
     # Rate risk ends at the reset; spread risk runs to payment.
-    @test duration(Effective(), floater, curve) ≈ 1.0
-    @test duration(Spread(), floater, curve) ≈ 2.0
-    @test sensitivities(KeyRates([1.0, 2.0]), floater, curve).effective_duration ≈ 1.0
+    @test duration(Effective(), curve, floater) ≈ 1.0
+    @test duration(Spread(), curve, floater) ≈ 2.0
+    s = sensitivities(curve, floater)
+    @test s.duration.discount + s.duration.index ≈ 1.0
+    @test s.duration.discount ≈ 2.0
+    @test s.duration.index ≈ -1.0
 end

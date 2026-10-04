@@ -186,6 +186,22 @@ end
         () -> sensitivities(KeyRates(tenors), value, curve),
         () -> sensitivities(DV01(), KeyRates(tenors), value2, curve, credit),
         () -> sensitivities(KeyRates(tenors), c -> value(c.curve), (; curve)),
+        # The curve comes before the contract, and the index curve is a keyword.
+        () -> duration(Effective(), bond, curve),
+        () -> duration(Spread(), bond, curve, credit),
+        () -> duration(Effective(), KeyRates(tenors), bond, curve),
+        () -> dv01(Effective(), bond, curve),
+        () -> convexity(Effective(), bond, curve),
+        () -> duration(KeyRates(tenors), bond, curve),
+        () -> sensitivities(KeyRates(tenors), bond, curve),
+        () -> sensitivities(KeyRates(tenors), bond, curve, credit),
+        () -> sensitivities(KeyRates(tenors), bond; discount = (; curve), index = curve),
+        () -> zspread(bond, curve, 100.0),
+        () -> zspread(curve, bond, 100.0; forward = curve),
+        # DV01 is a field of every `sensitivities` result, not a marker.
+        () -> sensitivities(DV01(), KeyRates(tenors), curve, cfs, times),
+        () -> sensitivities(value, DV01(), KeyRates(tenors), curve),
+        () -> sensitivities(value2, DV01(), KeyRates(tenors), curve, credit),
     )
     for f in removed
         @test_throws MethodError f()

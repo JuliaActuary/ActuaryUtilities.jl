@@ -32,9 +32,10 @@
         (c, t...) -> duration(DV01(), kr, curve, c, t...),
         (c, t...) -> convexity(kr, curve, c, t...),
         (c, t...) -> sensitivities(kr, curve, c, t...),
-        (c, t...) -> sensitivities(DV01(), kr, curve, c, t...),
+        (c, t...) -> sensitivities(SecondOrder(), kr, curve, c, t...),
+        (c, t...) -> sensitivities(SecondOrder(), curve, c, t...),
         (c, t...) -> sensitivities(kr, scenarios(), c, t...),
-        (c, t...) -> sensitivities(DV01(), kr, scenarios(), c, t...),
+        (c, t...) -> sensitivities(SecondOrder(), scenarios(), c, t...),
     )
     same(a, b) = a === b || _same_sensitivity(a, b)   # breakeven can return `nothing`
     for cfs in ([5.0, 5.0, 105.0], [-5.0, -5.0, -105.0], [-100.0, 30.0, 80.0], zeros(3))
@@ -88,9 +89,9 @@ end
         @test kr.tenors == tenors && kr.tenors isa Vector{Float64}
         @test duration(kr, curve, cfs, times) == duration(plain, curve, cfs, times)
         @test convexity(kr, curve, cfs, times) == convexity(plain, curve, cfs, times)
-        @test sensitivities(kr, curve, cfs, times) == sensitivities(plain, curve, cfs, times)
+        @test sensitivities(SecondOrder(), kr, curve, cfs, times) == sensitivities(SecondOrder(), plain, curve, cfs, times)
         @test duration(value, kr, curve) == duration(value, plain, curve)
-        @test sensitivities(value, kr, curve) == sensitivities(value, plain, curve)
+        @test sensitivities(value, SecondOrder(), kr, curve) == sensitivities(value, SecondOrder(), plain, curve)
     end
     # The grid is a copy: changing the caller's vector does not change it.
     owned = KeyRates(tenors)
@@ -123,12 +124,12 @@ end
     end
     bond = FM.Bond.Fixed(0.05, FC.Periodic(1), 3.0)
     reference = FM.Yield.Constant(FC.Periodic(0.04, 1))
-    @test duration(Effective(), bond, curve) ≈ duration(Effective(), bond, reference)
-    @test duration(Spread(), bond, curve) ≈ duration(Spread(), bond, reference)
+    @test duration(Effective(), curve, bond) ≈ duration(Effective(), reference, bond)
+    @test duration(Spread(), curve, bond) ≈ duration(Spread(), reference, bond)
     spread = 0.012
     market_price = FC.pv(FM.Yield.Constant(FC.Continuous(log1p(0.04) + spread)), bond)
-    result = zspread(bond, curve, market_price)
-    expected = zspread(bond, reference, market_price)
+    result = zspread(curve, bond, market_price)
+    expected = zspread(reference, bond, market_price)
     @test FC.rate(result.zspread) ≈ spread atol = 1.0e-10
     @test result.zspread_dv01 ≈ expected.zspread_dv01
 end
@@ -143,8 +144,8 @@ end
         reference = convexity(valuation, curve)
         @test convexity(curve, cfs, times) ≈ reference
         @test convexity(curve, wrapped) ≈ reference
-        @test convexity(Effective(), bond, curve) ≈ convexity(c -> FC.pv(c, bond), curve)
-        @test convexity(Effective(), [bond], curve) ≈ convexity(c -> FC.pv(c, bond), curve)
+        @test convexity(Effective(), curve, bond) ≈ convexity(c -> FC.pv(c, bond), curve)
+        @test convexity(Effective(), curve, [bond]) ≈ convexity(c -> FC.pv(c, bond), curve)
         @test iszero(convexity(curve, Float64[], Float64[]))
         @test iszero(convexity(curve, zeros(3), times))
         @test iszero(convexity(curve, empty(wrapped)))

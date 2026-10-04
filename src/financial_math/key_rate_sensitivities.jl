@@ -1,29 +1,45 @@
-## Key-rate sensitivities
-# Apply triangular continuous-zero bumps at the supplied tenors. Callbacks use
+## Curve sensitivities
+# Parallel shifts and triangular continuous-zero bumps at the supplied tenors. Callbacks use
 # ForwardDiff through Yield.TenorShift; fixed cashflows use analytic derivatives.
 
-# Named curve roles, each bumped by triangular hats on one tenor grid.
-function _ncurve_ad(valuation::F, curves::NamedTuple{roles}, tenors; order = 1) where {F, roles}
-    grid = _validate_tenors(tenors)
-    bumped(b) = NamedTuple{roles}(ntuple(i -> _bumped(curves[i], grid, b[i]), length(curves)))
-    return _named_ad(b -> valuation(bumped(b)), map(_ -> zeros(length(grid)), curves); order)
+# Derivatives of `valuation(curves)` at zero shocks, with one shock per curve role: a parallel shift
+# without a grid (`grid === nothing`), or a triangular hat bump at each tenor of `grid`. Without a
+# grid the derivatives are numbers, so no tenor gradient or Hessian is built and summed.
+function _curve_ad(valuation::F, curves::NamedTuple{roles}, grid, order) where {F, roles}
+    _validate_grid(grid)
+    shocked(s) = NamedTuple{roles}(ntuple(i -> _shocked(curves[i], grid, s[i]), length(curves)))
+    return _shock_numbers(_named_ad(s -> valuation(shocked(s)), map(_ -> _zero_shocks(grid), curves), order), grid)
 end
+# One curve's derivatives, unkeyed.
+_one_curve_ad(valuation::F, curve, grid, order) where {F} = _only_role(_curve_ad(c -> valuation(c.curve), (; curve), grid, order))
+
+_validate_grid(::Nothing) = nothing
+_validate_grid(grid) = _validate_tenors(grid)
+_zero_shocks(::Nothing) = zeros(1)
+_zero_shocks(grid) = zeros(length(grid))
+_shocked(curve, ::Nothing, s) = _parallel_bumped(curve, only(s))
+_shocked(curve, grid, s) = _bumped(curve, grid, s)
+_shock_numbers(r, grid) = r
+_shock_numbers(r, ::Nothing) = haskey(r, :hessian) ?
+    (; r.value, gradient = map(only, r.gradient), hessian = map(row -> map(only, row), r.hessian), r.zero_stream) :
+    (; r.value, gradient = map(only, r.gradient), r.zero_stream)
 
 ## Analytic derivatives for fixed cashflows
 # After locating its hat interval, each payment updates at most two gradient
 # entries and a 2×2 Hessian block. The value is Σ cf(t) * discount(curve, t), over the 1-based,
 # equal-length inputs of `_cashflow_inputs`.
 # Inline to eliminate result tuples across derivative-order and zero-stream branches.
-@inline function _keyrate_analytic(curve, tenors::AbstractVector, cfs::AbstractVector, times; order = 1)
+@inline function _keyrate_analytic(curve, tenors::AbstractVector, cfs::AbstractVector, times, order)
     _validate_tenors(tenors)
     n = length(tenors)
     disc(t) = FinanceCore.discount(curve, t)
+    second = order isa SecondOrder
     zero_stream = _iszero_cashflow_stream(cfs)
     if zero_stream
         value = _zero_cashflow_value(disc, cfs, times)
         T = promote_type(typeof(value), eltype(tenors))
         gradient = zeros(T, n)
-        return order >= 2 ? (; value, gradient, hessian = zeros(T, n, n), zero_stream) : (; value, gradient, zero_stream)
+        return second ? (; value, gradient, hessian = zeros(T, n, n), zero_stream) : (; value, gradient, zero_stream)
     end
     # Seed from a discounted payment to preserve curve numeric types and AD.
     # Its type must accommodate later terms, including payments at t=0.
@@ -31,11 +47,11 @@ end
     cfd0 = _cf_value(cfs[1]) * disc(t0)
     _, w0, _, _ = _active_hats(tenors, t0)
     T = promote_type(typeof(cfd0), typeof(t0 * cfd0 * w0), eltype(tenors))
-    if order >= 2
+    if second
         T = promote_type(T, typeof(t0 * t0 * cfd0 * w0 * w0))
     end
     grad_shared = zeros(T, n)
-    hess_shared = order >= 2 ? zeros(T, n, n) : nothing
+    hess_shared = second ? zeros(T, n, n) : nothing
     V = zero(cfd0)
     @inbounds for k in eachindex(cfs)
         t = FinanceCore.timepoint(cfs[k], times[k])
@@ -47,7 +63,7 @@ end
         if i != j
             grad_shared[j] -= t * cfd * wj
         end
-        if order >= 2
+        if second
             tt = t * t * cfd
             hess_shared[i, i] += tt * wi * wi
             if i != j
@@ -58,39 +74,20 @@ end
             end
         end
     end
-    if order >= 2
+    if second
         return (; value = V, gradient = grad_shared, hessian = hess_shared, zero_stream)
     else
         return (; value = V, gradient = grad_shared, zero_stream)
     end
 end
+_fixed_keyrate(curve, kr::KeyRates, order, cfs, times...) =
+    _keyrate_analytic(curve, kr.tenors, _cashflow_inputs(cfs, times...)..., order)
 
-## Key-rate results
-# Derivatives on the key-rate grid from a valuation callback, which receives the curves in order
-# (AD), keyed by curve role. One curve's result, and the analytic result for fixed cashflows, is
-# unkeyed: `(; value, gradient, hessian, zero_stream)` with a vector and a matrix.
-@inline _keyrate(curves::NamedTuple, tenors, valuation::F; order = 1) where {F} =
-    _ncurve_ad(c -> valuation(values(c)...), curves, tenors; order)
-@inline _keyrate(curve, tenors, valuation::F; order = 1) where {F} =
-    _only_role(_keyrate((; curve), tenors, valuation; order))
-_only_role(r) = haskey(r, :hessian) ?
-    (; r.value, gradient = only(r.gradient), hessian = only(only(r.hessian)), r.zero_stream) :
-    (; r.value, gradient = only(r.gradient), r.zero_stream)
-
-# Normalized risk from part of a key-rate result `r`: a role's gradient, a block of its Hessian, or
-# `only` of one on the parallel grid. Durations and convexities are relative to the value; DV01s are
-# dollars per basis point. Each call makes new arrays, so public results never share storage.
-_relative(r, x; negate = false) = _risk_ratio(x, r.value, r.zero_stream; negate)
-_per_bp(r, x) = _risk_ratio(x, 10_000, r.zero_stream; negate = true)
-# What the normalizers read from a result: closures over roles capture this, not the derivatives.
-_scale(r) = (; r.value, r.zero_stream)
-
-# The public two-curve convexity blocks (`f = only` on the parallel grid). Only the three returned
-# blocks are normalized.
-_base_credit_cross(r, f = identity) = (;
-    base = _relative(r, f(r.hessian.base.base)),
-    credit = _relative(r, f(r.hessian.credit.credit)),
-    cross = _relative(r, f(r.hessian.base.credit)),
+# The public two-curve convexity blocks. Only the three returned blocks are normalized.
+_base_credit_cross(r) = (;
+    base = _relative(r, r.hessian.base.base),
+    credit = _relative(r, r.hessian.credit.credit),
+    cross = _relative(r, r.hessian.base.credit),
 )
 
 ## Public yield-model sensitivities
@@ -136,11 +133,13 @@ end
 ```
 """
 function duration(valuation_fn::F, kr::KeyRates, curve::AYM) where {F}
-    r = _keyrate(curve, kr.tenors, valuation_fn)
+    r = _one_curve_ad(valuation_fn, curve, kr.tenors, FirstOrder())
     return _relative(r, r.gradient; negate = true)
 end
-function duration(kr::KeyRates, curve::AYM, cfs::_CashflowCollection, times...)
-    r = _keyrate_analytic(curve, kr.tenors, _cashflow_inputs(cfs, times...)...)
+duration(kr::KeyRates, curve::AYM, x::_Instrument, times...; kwargs...) =
+    _fixed(x) ? _keyrate_duration(curve, kr, x, times...; kwargs...) : duration(Effective(), kr, curve, x, times...; kwargs...)
+function _keyrate_duration(curve, kr, cfs, times...)
+    r = _fixed_keyrate(curve, kr, FirstOrder(), cfs, times...)
     return _relative(r, r.gradient; negate = true)
 end
 
@@ -153,11 +152,13 @@ Per-knot signed DV01s for any `AbstractYieldModel`: the `KeyRates` variants of
 `duration(DV01(), curve, cfs, times)`.
 """
 function duration(valuation_fn::F, ::DV01, kr::KeyRates, curve::AYM) where {F}
-    r = _keyrate(curve, kr.tenors, valuation_fn)
+    r = _one_curve_ad(valuation_fn, curve, kr.tenors, FirstOrder())
     return _per_bp(r, r.gradient)
 end
-function duration(::DV01, kr::KeyRates, curve::AYM, cfs::_CashflowCollection, times...)
-    r = _keyrate_analytic(curve, kr.tenors, _cashflow_inputs(cfs, times...)...)
+duration(::DV01, kr::KeyRates, curve::AYM, x::_Instrument, times...; kwargs...) =
+    _fixed(x) ? _keyrate_dv01(curve, kr, x, times...; kwargs...) : dv01(Effective(), kr, curve, x, times...; kwargs...)
+function _keyrate_dv01(curve, kr, cfs, times...)
+    r = _fixed_keyrate(curve, kr, FirstOrder(), cfs, times...)
     return _per_bp(r, r.gradient)
 end
 
@@ -214,123 +215,118 @@ For fixed cashflows discounted at `base + credit`, all three blocks equal
 `convexity(base + credit, cfs, times)` when the value is nonzero. Shifting both curves by one
 basis point shifts their combined continuous zero rates by two basis points. See
 [Two-curve convexity blocks](@ref).
-Use [`sensitivities`](@ref) to also obtain value and duration or DV01 from the same
-derivatives.
+Use [`sensitivities`](@ref) with [`SecondOrder`](@ref) to also obtain the value, durations and
+DV01s from the same derivatives.
 """
 function convexity(valuation_fn::F, kr::KeyRates, curve::AYM) where {F}
-    r = _keyrate(curve, kr.tenors, valuation_fn; order = 2)
+    r = _one_curve_ad(valuation_fn, curve, kr.tenors, SecondOrder())
     return _relative(r, r.hessian)
 end
-function convexity(kr::KeyRates, curve::AYM, cfs::_CashflowCollection, times...)
-    r = _keyrate_analytic(curve, kr.tenors, _cashflow_inputs(cfs, times...)...; order = 2)
+convexity(kr::KeyRates, curve::AYM, x::_Instrument, times...; kwargs...) =
+    _fixed(x) ? _keyrate_convexity(curve, kr, x, times...; kwargs...) : convexity(Effective(), kr, curve, x, times...; kwargs...)
+function _keyrate_convexity(curve, kr, cfs, times...)
+    r = _fixed_keyrate(curve, kr, SecondOrder(), cfs, times...)
     return _relative(r, r.hessian)
 end
 
-function convexity(valuation_fn::F, base::AYM, credit::AYM) where {F}
-    r = _keyrate((; base, credit), _PARALLEL_GRID, valuation_fn; order = 2)
-    return _base_credit_cross(r, only)
-end
-function convexity(valuation_fn::F, kr::KeyRates, base::AYM, credit::AYM) where {F}
-    r = _keyrate((; base, credit), kr.tenors, valuation_fn; order = 2)
-    return _base_credit_cross(r)
-end
+convexity(valuation_fn::F, base::AYM, credit::AYM) where {F} =
+    _base_credit_cross(_curve_ad(c -> valuation_fn(c.base, c.credit), (; base, credit), nothing, SecondOrder()))
+convexity(valuation_fn::F, kr::KeyRates, base::AYM, credit::AYM) where {F} =
+    _base_credit_cross(_curve_ad(c -> valuation_fn(c.base, c.credit), (; base, credit), kr.tenors, SecondOrder()))
+
+## Value, duration, DV01 and convexity together
+
+const _NamedCurves = NamedTuple{<:Any, <:Tuple{AYM, Vararg{AYM}}}
 
 """
-    sensitivities(valuation_fn, kr::KeyRates, curve::AbstractYieldModel) -> NamedTuple
-    sensitivities(kr::KeyRates, curve::AbstractYieldModel, cfs, times) -> NamedTuple
-    sensitivities(valuation_fn, ::DV01, kr::KeyRates, curve::AbstractYieldModel) -> NamedTuple
-    sensitivities(valuation_fn, kr::KeyRates, base::AbstractYieldModel, credit::AbstractYieldModel) -> NamedTuple
-    sensitivities(valuation_fn, ::DV01, kr::KeyRates, base, credit) -> NamedTuple
+    sensitivities([order,] [KeyRates(tenors),] curve, cfs, times = eachindex(cfs)) -> NamedTuple
+    sensitivities(valuation, [order,] [KeyRates(tenors),] curve) -> NamedTuple
+    sensitivities(valuation, [order,] [KeyRates(tenors),] base, credit) -> NamedTuple
+    sensitivities(valuation, [order,] [KeyRates(tenors),] curves::NamedTuple) -> NamedTuple
 
-Calculate value, key-rate durations or DV01s, and convexity together on the
-[`KeyRates`](@ref) grid. Callbacks use AD; fixed cashflows use analytic derivatives.
-Normalized durations and convexities do not change when the position's sign does; dollar
-DV01s change sign with the position.
+Return value and risk from one derivative calculation. `order` is [`FirstOrder()`](@ref), the
+default, or [`SecondOrder()`](@ref):
 
-Empty and all-zero cashflow streams return zero value and risk in the usual shapes; see
-[Zero cashflow streams](@ref) for their numeric types. Nonzero amounts that offset to
-zero present value keep their dollar risk but have undefined normalized risk
-(`NaN`/`Inf`); for portfolio risk, sum values and dollar derivatives before
-normalizing. Callback and contract forms do not use the zero-stream convention: a zero
-value from them gives undefined normalized risk.
-"""
-function sensitivities(valuation_fn::F, kr::KeyRates, curve::AYM) where {F}
-    return _single_curve_sensitivities(_keyrate(curve, kr.tenors, valuation_fn; order = 2))
-end
-function sensitivities(kr::KeyRates, curve::AYM, cfs::_CashflowCollection, times...)
-    return _single_curve_sensitivities(_keyrate_analytic(curve, kr.tenors, _cashflow_inputs(cfs, times...)...; order = 2))
-end
-_single_curve_sensitivities(r) = (;
-    value = r.value,
-    durations = _relative(r, r.gradient; negate = true),
-    convexities = _relative(r, r.hessian),
-)
+- `FirstOrder()` returns `(; value, duration, dv01)`.
+- `SecondOrder()` returns `(; value, duration, dv01, convexity)`.
 
-function sensitivities(valuation_fn::F, ::DV01, kr::KeyRates, curve::AYM) where {F}
-    return _single_curve_dv01s(_keyrate(curve, kr.tenors, valuation_fn; order = 2))
-end
-function sensitivities(::DV01, kr::KeyRates, curve::AYM, cfs::_CashflowCollection, times...)
-    return _single_curve_dv01s(_keyrate_analytic(curve, kr.tenors, _cashflow_inputs(cfs, times...)...; order = 2))
-end
-_single_curve_dv01s(r) = (;
-    value = r.value,
-    dv01s = _per_bp(r, r.gradient),
-    convexities = _relative(r, r.hessian),
-)
+`value` is always a number. The derivative fields are numbers for one parallel shift of the
+curve, which moves in its own coordinate as in [`duration`](@ref) (see
+[Shock coordinates](@ref)). With [`KeyRates`](@ref) they are per-tenor vectors, and `convexity`
+is a matrix. With several curves, the derivative fields are keyed by curve role: `dv01.base` and
+`convexity.base.credit` for `(base, credit)`, and the given names for `curves`. Each role takes
+its own shock, so the cross blocks of `convexity` are the mixed derivatives.
 
-function sensitivities(valuation_fn::F, kr::KeyRates, base::AYM, credit::AYM) where {F}
-    return _two_curve_sensitivities(_keyrate((; base, credit), kr.tenors, valuation_fn; order = 2))
-end
-_two_curve_sensitivities(r) = (;
-    value = r.value,
-    base_durations = _relative(r, r.gradient.base; negate = true),
-    credit_durations = _relative(r, r.gradient.credit; negate = true),
-    convexities = _base_credit_cross(r),
-)
+- `duration`: `-∂V/∂s / V`
+- `dv01`: `-∂V/∂s / 10000`, the first-order value lost for a one-basis-point increase
+- `convexity`: `∂²V/∂sᵢ∂sⱼ / V`
 
-function sensitivities(valuation_fn::F, ::DV01, kr::KeyRates, base::AYM, credit::AYM) where {F}
-    return _two_curve_dv01s(_keyrate((; base, credit), kr.tenors, valuation_fn; order = 2))
-end
-_two_curve_dv01s(r) = (;
-    value = r.value,
-    base_dv01s = _per_bp(r, r.gradient.base),
-    credit_dv01s = _per_bp(r, r.gradient.credit),
-    convexities = _base_credit_cross(r),
-)
+Without `KeyRates`, each role's shift is differentiated directly. With them, the hats sum to one,
+so the parallel measures are ≈ the sums of the key-rate ones. `FirstOrder()` takes no second
+derivatives, and `SecondOrder()` takes the value and both derivatives from one pass. A valuation
+that has no second derivative throws its own error.
 
-"""
-    sensitivities(valuation, kr::KeyRates, curves::NamedTuple) -> (; value, duration, dv01, key_rate, key_rate_dv01)
-    sensitivities(kr::KeyRates, target; discount::NamedTuple, index) -> same
+Fixed cashflows use analytic derivatives on one curve; valuation callbacks use AD. The valuation
+receives the shifted curve, the shifted `(base, credit)`, or a `NamedTuple` of shifted curves with
+the given names. Normalized duration and convexity do not change when the position's sign does;
+DV01 does.
 
-Differentiate `valuation(curves)` with respect to each named curve. Return value,
-per-role parallel duration and DV01, and per-role key-rate duration and DV01
-vectors on the `kr.tenors` grid. The contract form sums the `discount` layers and
-projects coupons using `index`. For example, `discount = (; rf, credit, ilp)`
-produces separate risk-free, credit, liquidity, and index sensitivities. The result
-names the projection curve `index`, so a discount layer with that name throws an
-`ArgumentError`.
-
-Every named value must be an `AbstractYieldModel`. To differentiate with respect
-to market inputs that the valuation turns into curves, pass named input vectors
-instead: `sensitivities(valuation, inputs::NamedTuple)`.
+Empty and all-zero cashflow streams return zero value and risk; see [Zero cashflow streams](@ref).
+Nonzero amounts that offset to zero present value keep their dollar risk but have undefined
+normalized risk (`NaN`/`Inf`); for portfolio risk, sum values and dollar derivatives before
+normalizing. Callback forms do not use the zero-stream convention: a zero value from them gives
+undefined normalized risk.
 
 ```julia
-sensitivities(KeyRates(tenors), (; rf, credit)) do c
+s = sensitivities(KeyRates(tenors), curve, cfs, times)       # s.duration, s.dv01: vectors
+s = sensitivities(SecondOrder(), curve, cfs, times)          # s.convexity: a number
+sensitivities(KeyRates(tenors), (; rf, credit)) do c         # s.dv01.rf, s.dv01.credit
     present_value(c.rf + c.credit, cfs, times)
 end
 ```
+
+See also the contract forms, `sensitivities(discount, contract; index)`, the market-input form,
+`sensitivities(valuation, inputs::NamedTuple)`, and [`Scenarios`](@ref).
 """
-function sensitivities(valuation::F, kr::KeyRates, curves::NamedTuple{roles, <:Tuple{AYM, Vararg{AYM}}}) where {F, roles}
-    return _parallel_and_key_rate(_ncurve_ad(valuation, curves, kr.tenors; order = 1))
+sensitivities(valuation::F, curve::_YieldInput) where {F} = sensitivities(valuation, FirstOrder(), curve)
+sensitivities(valuation::F, kr::KeyRates, curve::AYM) where {F} = sensitivities(valuation, FirstOrder(), kr, curve)
+sensitivities(valuation::F, order::_Order, curve::_YieldInput) where {F} =
+    _sensitivities(_one_curve_ad(valuation, curve, nothing, order), order)
+sensitivities(valuation::F, order::_Order, kr::KeyRates, curve::AYM) where {F} =
+    _sensitivities(_one_curve_ad(valuation, curve, kr.tenors, order), order)
+
+sensitivities(valuation::F, base::AYM, credit::AYM) where {F} = sensitivities(valuation, FirstOrder(), base, credit)
+sensitivities(valuation::F, kr::KeyRates, base::AYM, credit::AYM) where {F} = sensitivities(valuation, FirstOrder(), kr, base, credit)
+sensitivities(valuation::F, order::_Order, base::AYM, credit::AYM) where {F} =
+    _sensitivities(_curve_ad(c -> valuation(c.base, c.credit), (; base, credit), nothing, order), order)
+sensitivities(valuation::F, order::_Order, kr::KeyRates, base::AYM, credit::AYM) where {F} =
+    _sensitivities(_curve_ad(c -> valuation(c.base, c.credit), (; base, credit), kr.tenors, order), order)
+
+sensitivities(valuation::F, curves::_NamedCurves) where {F} = sensitivities(valuation, FirstOrder(), curves)
+sensitivities(valuation::F, kr::KeyRates, curves::_NamedCurves) where {F} = sensitivities(valuation, FirstOrder(), kr, curves)
+sensitivities(valuation::F, order::_Order, curves::_NamedCurves) where {F} =
+    _sensitivities(_curve_ad(valuation, curves, nothing, order), order)
+sensitivities(valuation::F, order::_Order, kr::KeyRates, curves::_NamedCurves) where {F} =
+    _sensitivities(_curve_ad(valuation, curves, kr.tenors, order), order)
+
+# Fixed cashflows, a contract or a portfolio after a curve (`Scenarios`, or for contracts named
+# discount layers): optional order and grid markers first.
+const _CurveInput = Union{_YieldInput, NamedTuple, Scenarios}
+sensitivities(curve::_CurveInput, x::_Instrument, times...; kwargs...) =
+    _sensitivities_of(FirstOrder(), nothing, curve, x, times...; kwargs...)
+sensitivities(kr::KeyRates, curve::_CurveInput, x::_Instrument, times...; kwargs...) =
+    _sensitivities_of(FirstOrder(), kr.tenors, curve, x, times...; kwargs...)
+sensitivities(order::_Order, curve::_CurveInput, x::_Instrument, times...; kwargs...) =
+    _sensitivities_of(order, nothing, curve, x, times...; kwargs...)
+sensitivities(order::_Order, kr::KeyRates, curve::_CurveInput, x::_Instrument, times...; kwargs...) =
+    _sensitivities_of(order, kr.tenors, curve, x, times...; kwargs...)
+
+_sensitivities_of(order, grid, curve, x, times...; kwargs...) = _fixed(x) ?
+    _fixed_sensitivities(order, grid, curve, x, times...; kwargs...) :
+    _contract_sensitivities(order, grid, curve, x, times...; kwargs...)
+function _fixed_sensitivities(order, grid, yield, cfs, times...)
+    amounts, ts = _cashflow_inputs(cfs, times...)
+    return _sensitivities(_fixed_derivatives(yield, grid, amounts, ts, order), order)
 end
-# Per role: parallel duration and DV01 from the summed gradient, and the per-element vectors.
-function _parallel_and_key_rate(r)
-    n = _scale(r)
-    return (;
-        value = r.value,
-        duration = map(g -> _relative(n, sum(g); negate = true), r.gradient),
-        dv01 = map(g -> _per_bp(n, sum(g)), r.gradient),
-        key_rate = map(g -> _relative(n, g; negate = true), r.gradient),
-        key_rate_dv01 = map(g -> _per_bp(n, g), r.gradient),
-    )
-end
+_fixed_derivatives(yield, ::Nothing, cfs, times, order) = _parallel_analytic(yield, cfs, times, order)
+_fixed_derivatives(curve::AYM, grid::AbstractVector, cfs, times, order) = _keyrate_analytic(curve, grid, cfs, times, order)

@@ -37,12 +37,14 @@
             @test isequal(convexity(kr, curve, cfs, times), zz)
             @test positive_zero(duration(curve, cfs, times))
             @test positive_zero(convexity(curve, cfs, times))
-            @test isequal(sensitivities(kr, curve, cfs, times), (; value = 0.0, durations = z, convexities = zz))
-            @test isequal(sensitivities(DV01(), kr, curve, cfs, times), (; value = 0.0, dv01s = z, convexities = zz))
+            @test isequal(sensitivities(kr, curve, cfs, times), (; value = 0.0, duration = z, dv01 = z))
+            @test isequal(sensitivities(SecondOrder(), kr, curve, cfs, times), (; value = 0.0, duration = z, dv01 = z, convexity = zz))
+            @test isequal(sensitivities(curve, cfs, times), (; value = 0.0, duration = 0.0, dv01 = 0.0))
+            @test isequal(sensitivities(SecondOrder(), curve, cfs, times), (; value = 0.0, duration = 0.0, dv01 = 0.0, convexity = 0.0))
         end
         cfs = FC.Cashflow.([0.0, -0.0], [0.0, 2.0])
         @test isequal(duration(kr, curve, cfs), z)
-        @test isequal(sensitivities(kr, curve, cfs), (; value = 0.0, durations = z, convexities = zz))
+        @test isequal(sensitivities(SecondOrder(), kr, curve, cfs), (; value = 0.0, duration = z, dv01 = z, convexity = zz))
     end
 
     @testset "Input types and validation" begin
@@ -52,9 +54,11 @@
                 @test duration(curve, cfs, times) isa T
                 @test convexity(curve, cfs, times) isa T
                 @test eltype(present_values(curve, cfs, times)) == T
-                typed = sensitivities(KeyRates(T.(tenors)), curve, cfs, times)
+                typed = sensitivities(SecondOrder(), KeyRates(T.(tenors)), curve, cfs, times)
                 @test typed.value isa T
-                @test eltype(typed.durations) == eltype(typed.convexities) == T
+                @test eltype(typed.duration) == eltype(typed.dv01) == eltype(typed.convexity) == T
+                parallel = sensitivities(SecondOrder(), curve, cfs, times)
+                @test parallel.value isa T && parallel.duration isa T && parallel.dv01 isa T && parallel.convexity isa T
             end
         end
         @test duration(curve, FC.Cashflow{BigFloat, Float64}[]) isa BigFloat
@@ -69,6 +73,7 @@
         @test_throws DimensionMismatch convexity(curve, [0.0], Float64[])
         @test_throws DimensionMismatch present_values(curve, [0.0], Float64[])
         @test_throws DimensionMismatch sensitivities(kr, curve, [0.0], Float64[])
+        @test_throws DimensionMismatch sensitivities(curve, [0.0], Float64[])
         @test_throws ArgumentError KeyRates(Float64[])
         @test_throws ArgumentError KeyRates([3.0, 1.0])
     end
@@ -76,17 +81,22 @@
     @testset "Zero amounts differ from zero net value" begin
         flat = FM.Yield.Constant(FC.Continuous(0.0))
         cfs, times = [100.0, -100.0], [1.0, 2.0]
-        raw = kernel(flat, tenors, cfs, times; order = 2)
-        result = sensitivities(kr, flat, cfs, times)
+        raw = kernel(flat, tenors, cfs, times, SecondOrder())
+        result = sensitivities(SecondOrder(), kr, flat, cfs, times)
         @test iszero(raw.value)
         @test any(!iszero, raw.gradient) && any(!iszero, raw.hessian)
-        @test any(!isfinite, result.durations) && any(!isfinite, result.convexities)
-        @test duration(DV01(), kr, flat, cfs, times) == -raw.gradient ./ 10_000
+        @test any(!isfinite, result.duration) && any(!isfinite, result.convexity)
+        @test duration(DV01(), kr, flat, cfs, times) == -raw.gradient ./ 10_000 == result.dv01
         @test !isfinite(duration(Macaulay(), flat, cfs, times))
         @test !isfinite(convexity(flat, cfs, times))
+        # A zero-value position with dollar risk: the dollar measures are defined, the normalized not.
+        parallel = sensitivities(SecondOrder(), flat, cfs, times)
+        @test iszero(parallel.value)
+        @test parallel.dv01 ≈ duration(DV01(), flat, cfs, times) ≈ -100 * exp(0.0) / 10_000
+        @test !isfinite(parallel.duration) && !isfinite(parallel.convexity)
         tiny = sensitivities(kr, flat, [1.0e-200], [2.0])
         @test tiny.value == 1.0e-200
-        @test sum(tiny.durations) ≈ 2.0
+        @test sum(tiny.duration) ≈ 2.0
         # Valuation functions cannot be classified as zero streams from PV alone.
         @test all(isnan, duration(_ -> 0.0, kr, flat))
     end
@@ -96,7 +106,7 @@
         # A zero primal amount with a nonzero partial still carries exposure.
         dollar(x) = sum(duration(DV01(), kr, flat, [x, zero(x)], [2.0, 3.0]))
         @test ForwardDiff.derivative(dollar, 0.0) ≈ 2 * FC.discount(flat, 2.0) / 10_000
-        value(x) = kernel(flat, tenors, [x], [2.0]).value
+        value(x) = kernel(flat, tenors, [x], [2.0], FirstOrder()).value
         @test ForwardDiff.derivative(value, 0.0) ≈ FC.discount(flat, 2.0)
         squared_value(x) = value(x * x)
         @test ForwardDiff.derivative(x -> ForwardDiff.derivative(squared_value, x), 0.0) ≈ 2 * FC.discount(flat, 2.0)
@@ -109,8 +119,9 @@
         for (cfs, times) in ((Float64[], Float64[]), (Float64[], [1.0, 2.0]), (zeros(2), [1.0, 2.0]), (zeros(2), [1.0, 2.0, NaN]))
             rng = MersenneTwister(123)
             untouched = copy(rng)
-            @test isequal(sensitivities(kr, Scenarios(hw; rng), cfs, times), (; value = 0.0, durations = z, convexities = zz))
-            @test isequal(sensitivities(DV01(), kr, Scenarios(hw; rng), cfs, times), (; value = 0.0, dv01s = z, convexities = zz))
+            @test isequal(sensitivities(kr, Scenarios(hw; rng), cfs, times), (; value = 0.0, duration = z, dv01 = z))
+            @test isequal(sensitivities(SecondOrder(), kr, Scenarios(hw; rng), cfs, times), (; value = 0.0, duration = z, dv01 = z, convexity = zz))
+            @test isequal(sensitivities(Scenarios(hw; rng), cfs, times), (; value = 0.0, duration = 0.0, dv01 = 0.0))
             @test rand(rng) == rand(untouched)
         end
     end
@@ -132,7 +143,7 @@ end
         @test_throws DimensionMismatch convexity(yield, cfs, [1.0])
         @test present_values(yield, cfs, extra) ≈ present_values(yield, cfs, times)
     end
-    for args in ((kr, curve), (DV01(), kr, curve))
+    for args in ((kr, curve), (SecondOrder(), kr, curve), (curve,), (SecondOrder(), flat))
         @test isequal(sensitivities(args..., cfs, extra), sensitivities(args..., cfs, times))
         @test_throws DimensionMismatch sensitivities(args..., cfs, [1.0])
     end
@@ -141,7 +152,7 @@ end
 
     # A trailing time must not extend the inferred horizon or change RNG use.
     hw = FM.ShortRate.HullWhite(0.1, 0.01, flat)
-    for m in ((), (DV01(),))
+    for m in ((), (SecondOrder(),))
         rng_short, rng_long = MersenneTwister(42), MersenneTwister(42)
         short = sensitivities(m..., kr, Scenarios(hw; n_scenarios = 8, timestep = 0.25, rng = rng_short), cfs, times)
         long = sensitivities(m..., kr, Scenarios(hw; n_scenarios = 8, timestep = 0.25, rng = rng_long), cfs, extra)
@@ -165,8 +176,9 @@ end
             (a, t) -> duration(Macaulay(), y, a, t), (a, t) -> duration(y, a, t),
             (a, t) -> duration(DV01(), y, a, t), (a, t) -> convexity(y, a, t), (a, t) -> present_values(y, a, t),
         ]
+        push!(measures, (a, t) -> sensitivities(SecondOrder(), y, a, t))
         if y isa FM.Yield.AbstractYieldModel
-            push!(measures, (a, t) -> duration(kr, y, a, t), (a, t) -> duration(DV01(), kr, y, a, t))
+            push!(measures, (a, t) -> duration(kr, y, a, t), (a, t) -> duration(DV01(), kr, y, a, t), (a, t) -> sensitivities(SecondOrder(), kr, y, a, t))
         end
         for m in measures
             T = typeof(m(amounts, times))

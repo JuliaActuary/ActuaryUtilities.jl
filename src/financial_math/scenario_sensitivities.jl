@@ -20,11 +20,14 @@ sensitivities(KeyRates(tenors), s) do paths      # a valuation of the vector of 
 end
 ```
 
+The forms and results are those of a curve: an optional [`FirstOrder`](@ref) or
+[`SecondOrder`](@ref) marker, then an optional [`KeyRates`](@ref) grid.
+
 `horizon = nothing` simulates to 30 years for a valuation callback, and to one year past the
 last payment for fixed cashflows. Each call draws one seed from `rng` and reuses it in every
 automatic-differentiation evaluation, so value and derivatives share the same random draws.
 Empty and all-zero cashflow streams are valued on `hw.curve` without simulating and leave `rng`
-untouched. The `DV01()` forms return dollar risk, as for a curve.
+untouched.
 """
 struct Scenarios{M <: HW, N, T, H, R}
     model::M
@@ -43,19 +46,18 @@ function _simulated(valuation_fn::F, s::Scenarios, horizon = something(s.horizon
     return model -> valuation_fn(FinanceModels.simulate(model; s.n_scenarios, s.timestep, horizon, rng = Random.Xoshiro(seed)))
 end
 
-sensitivities(valuation_fn::F, kr::KeyRates, s::Scenarios) where {F} = sensitivities(_simulated(valuation_fn, s), kr, s.model)
-sensitivities(valuation_fn::F, ::DV01, kr::KeyRates, s::Scenarios) where {F} = sensitivities(_simulated(valuation_fn, s), DV01(), kr, s.model)
+sensitivities(valuation::F, s::Scenarios) where {F} = sensitivities(valuation, FirstOrder(), s)
+sensitivities(valuation::F, kr::KeyRates, s::Scenarios) where {F} = sensitivities(valuation, FirstOrder(), kr, s)
+sensitivities(valuation::F, order::_Order, s::Scenarios) where {F} = sensitivities(_simulated(valuation, s), order, s.model)
+sensitivities(valuation::F, order::_Order, kr::KeyRates, s::Scenarios) where {F} =
+    sensitivities(_simulated(valuation, s), order, kr, s.model)
 
-# Zero streams are valued on `s.model` without simulating: its discount factors are its curve's.
-function sensitivities(kr::KeyRates, s::Scenarios, cfs::_CashflowCollection, times...)
+# Fixed cashflows. Zero streams are valued on `s.model` without simulating: its discount factors are
+# its curve's.
+function _sensitivities_of(order, grid, s::Scenarios, cfs::_CashflowCollection, times...)
     amounts, ts = _cashflow_inputs(cfs, times...)
-    _iszero_cashflow_stream(amounts) && return sensitivities(kr, s.model, amounts, ts)
-    return sensitivities(_simulated_pv(s, amounts, ts), kr, s.model)
-end
-function sensitivities(::DV01, kr::KeyRates, s::Scenarios, cfs::_CashflowCollection, times...)
-    amounts, ts = _cashflow_inputs(cfs, times...)
-    _iszero_cashflow_stream(amounts) && return sensitivities(DV01(), kr, s.model, amounts, ts)
-    return sensitivities(_simulated_pv(s, amounts, ts), DV01(), kr, s.model)
+    _iszero_cashflow_stream(amounts) && return _fixed_sensitivities(order, grid, s.model, amounts, ts)
+    return _sensitivities(_one_curve_ad(_simulated_pv(s, amounts, ts), s.model, grid, order), order)
 end
 
 # The mean present value of fixed cashflows across the paths, simulated to one year past the

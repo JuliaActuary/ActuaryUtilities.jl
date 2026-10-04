@@ -188,6 +188,36 @@ v6 requires FinanceModels 7 and FinanceCore 3.
   the context. v5 valued an unknown contract as if it needed no index curve, so a custom
   floating contract never saw it; a contract with neither a projection nor a closed form now
   throws a `MethodError`.
+- **`sensitivities` has one result shape, and its order is a marker.** It returns
+  `(; value, duration, dv01)`, or with [`SecondOrder()`](@ref) `(; value, duration, dv01, convexity)`.
+  [`FirstOrder()`](@ref) is the default. `value` is always a number. Without `KeyRates` the
+  derivative fields are numbers for one parallel shift; with `KeyRates(tenors)` they are
+  per-tenor vectors and a convexity matrix; with several curves they are keyed by role:
+  `s.dv01.base`, `s.convexity.base.credit`. Key-rate cashflow and callback forms used to
+  return convexities by default: pass `SecondOrder()` for them. The `DV01()` forms of
+  `sensitivities` are removed, since every result has `dv01`.
+
+  | v6 pre-release field | v6 field |
+  |:--|:--|
+  | `durations`, `dv01s`, `convexities` | `duration`, `dv01`, `convexity` (`SecondOrder()`) |
+  | `base_durations`, `credit_durations`, `base_dv01s`, `credit_dv01s` | `duration.base`, `duration.credit`, `dv01.base`, `dv01.credit` |
+  | `convexities.base`, `.credit`, `.cross` | `convexity.base.base`, `.credit.credit`, `.base.credit` |
+  | named curves and market inputs: `key_rate.role`, `key_rate_dv01.role` | `duration.role`, `dv01.role` |
+  | named curves and market inputs: parallel `duration.role`, `dv01.role` | the same call without `KeyRates`, or `sum(s.duration.role)` |
+  | contracts: `spread_*`, `forward_*` | `duration.discount`, `dv01.discount`; `duration.index`, `dv01.index` |
+  | contracts: `effective_duration`, `effective_dv01` | `duration.discount + duration.index` (and `dv01`), or `duration(Effective(), ...)` |
+  | contracts: `*_key_rate` | the same fields with `KeyRates(tenors)` |
+- **Contract measures take the curve first and the index curve as a keyword**, as FinanceCore
+  and FinanceModels do: `duration(Effective(), discount, contract; index = discount)`, and the same
+  for `Spread()`, `dv01`, `convexity`, `sensitivities` and `zspread(discount, contract, price; index = discount)`.
+  The contract-first calls and the positional `(forward, credit)` curves throw `MethodError`.
+  Contract `sensitivities` report the index exposure separately under the role names of
+  `Models(discount; index)`: `s.dv01.discount` (spread risk) and `s.dv01.index` (coupon reset). The
+  layered form `sensitivities(KeyRates(tenors), target; discount = (; rf, credit), index)` becomes
+  `sensitivities(KeyRates(tenors), (; rf, credit), target; index)`. `convexity(Spread(), ...)` is
+  new; effective convexity includes the cross terms between the curves. A vector of `Cashflow`s
+  after a curve is fixed cashflows; to value one as a portfolio of contracts, give it the element
+  type `AbstractContract`.
 - **Amounts and times pair by position in every cashflow form**, including `present_values`,
   `breakeven` and `spread`: the k-th amount is paid at the k-th time, counted from each
   vector's first entry. Offset time vectors used to pair by index:

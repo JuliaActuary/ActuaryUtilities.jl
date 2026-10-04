@@ -189,7 +189,7 @@ end
     @test_throws "NaN" spread(0.03, 0.04, [NaN, 1.0])
     @test_throws ErrorException spread(0.03, 0.04, fill(10.0, 10); maxiter = 1)
     base = FM.Yield.Constant(FC.Continuous(0.03))
-    @test_throws ErrorException zspread(FC.Cashflow(1.0, 2.0), base, exp(-0.1); maxiter = 1)
+    @test_throws ErrorException zspread(base, FC.Cashflow(1.0, 2.0), exp(-0.1); maxiter = 1)
 end
 
 @testset "spread and zspread do not depend on notional" begin
@@ -201,14 +201,14 @@ end
     stream(k) = FM.Composite(FM.Composite(FC.Cashflow(k * cfs[1], times[1]), FC.Cashflow(k * cfs[2], times[2])), FC.Cashflow(k * cfs[3], times[3]))
     price = sum(c * exp(-0.05 * t) for (c, t) in zip(cfs, times))   # priced at a 5% force
     dv01 = sum(c * t * exp(-0.05 * t) for (c, t) in zip(cfs, times)) / 10_000
-    unit_z = zspread(stream(1.0), base, price)
+    unit_z = zspread(base, stream(1.0), price)
     unit_s = spread(curve, curve + 0.01, cfs, times)
     for k in (1.0e-12, 1.0, 1.0e10)
         # a two-year payment priced at a 5% force is 2% over the 3% base
-        z = zspread(FC.Cashflow(k, 2.0), base, k * exp(-0.1))
+        z = zspread(base, FC.Cashflow(k, 2.0), k * exp(-0.1))
         @test FC.rate(z.zspread) ≈ 0.02 atol = 1.0e-14
         @test z.zspread_dv01 ≈ k * 2 * exp(-0.1) / 10_000 rtol = 1.0e-12
-        z = zspread(stream(k), base, k * price)
+        z = zspread(base, stream(k), k * price)
         @test FC.rate(z.zspread) ≈ 0.02 atol = 1.0e-14
         @test z.zspread ≈ unit_z.zspread atol = 1.0e-15
         @test z.zspread_dv01 ≈ k * dv01 rtol = 1.0e-12
@@ -221,7 +221,7 @@ end
         @test FC.rate(spread(0.04, 0.05, k .* fill(10.0, 10))) ≈ 0.01 atol = 1.0e-14
         # zero price, mixed signs: 100 at 1 and -95 at 2 have zero value at a force of log(0.95)
         mixed = FM.Composite(FC.Cashflow(100k, 1.0), FC.Cashflow(-95k, 2.0))
-        @test FC.rate(zspread(mixed, base, 0.0).zspread) ≈ log(0.95) - 0.03 atol = 1.0e-14
+        @test FC.rate(zspread(base, mixed, 0.0).zspread) ≈ log(0.95) - 0.03 atol = 1.0e-14
         @test FC.rate(spread(0.03, -0.05, k .* [100.0, -95.0], [1.0, 2.0])) ≈ -0.08 atol = 1.0e-14
     end
 end
@@ -229,13 +229,13 @@ end
 @testset "Newton solves keep their own safeguards" begin
     base = FM.Yield.Constant(FC.Continuous(0.03))
     # A payment at time zero does not depend on the spread, so zspread's Newton step is infinite.
-    @test_throws r"zspread did not converge \(last Newton step = -?Inf" zspread(FC.Cashflow(1.0, 0.0), base, 0.5)
+    @test_throws r"zspread did not converge \(last Newton step = -?Inf" zspread(base, FC.Cashflow(1.0, 0.0), 0.5)
     # Both solvers report the last Newton step when they run out of iterations.
     @test_throws "spread did not converge in 2 iterations" spread(0.03, 0.04, fill(10.0, 10); maxiter = 2)
-    @test_throws "zspread did not converge (last Newton step = " zspread(FC.Cashflow(1.0, 2.0), base, exp(-0.1); maxiter = 1)
+    @test_throws "zspread did not converge (last Newton step = " zspread(base, FC.Cashflow(1.0, 2.0), exp(-0.1); maxiter = 1)
     # A start at the root is returned as it is.
     @test FC.rate(spread(0.04, 0.04, [1.0, 2.0])) == 0.0
-    @test FC.rate(zspread(FC.Cashflow(1.0, 2.0), base, FC.pv(base, FC.Cashflow(1.0, 2.0)); s0 = 0.0).zspread) ≈ 0.0 atol = 1.0e-15
+    @test FC.rate(zspread(base, FC.Cashflow(1.0, 2.0), FC.pv(base, FC.Cashflow(1.0, 2.0)); s0 = 0.0).zspread) ≈ 0.0 atol = 1.0e-15
     # From a base near the edge of its domain, the damped steps reach a distant root:
     # a semiannual base adds the spread nominally, 2((1 + s)^(1/2) - 1) = 0.05 + 1.9.
     @test FC.rate(spread(FC.Periodic(-1.9, 2), FC.Periodic(0.05, 2), [1.0], [1.0])) ≈ 1.975^2 - 1 rtol = 1.0e-12
