@@ -11,11 +11,11 @@ end
 
 ## Analytic derivatives for fixed cashflows
 # After locating its hat interval, each payment updates at most two gradient
-# entries and a 2×2 Hessian block. The value is Σ cf(t) * discount(curve, t).
+# entries and a 2×2 Hessian block. The value is Σ cf(t) * discount(curve, t), over the 1-based,
+# equal-length inputs of `_cashflow_inputs`.
 # Inline to eliminate result tuples across derivative-order and zero-stream branches.
 @inline function _keyrate_analytic(curve, tenors::AbstractVector, cfs::AbstractVector, times; order = 1)
     _validate_tenors(tenors)
-    _check_cashflow_times(cfs, times)
     n = length(tenors)
     disc(t) = FinanceCore.discount(curve, t)
     zero_stream = _iszero_cashflow_stream(cfs)
@@ -27,9 +27,8 @@ end
     end
     # Seed from a discounted payment to preserve curve numeric types and AD.
     # Its type must accommodate later terms, including payments at t=0.
-    k0 = firstindex(cfs)
-    t0 = FinanceCore.timepoint(cfs[k0], times[k0])
-    cfd0 = _cf_value(cfs[k0]) * disc(t0)
+    t0 = FinanceCore.timepoint(cfs[1], times[1])
+    cfd0 = _cf_value(cfs[1]) * disc(t0)
     _, w0, _, _ = _active_hats(tenors, t0)
     T = promote_type(typeof(cfd0), typeof(t0 * cfd0 * w0), eltype(tenors))
     if order >= 2
@@ -108,8 +107,8 @@ Empty and all-zero cashflow streams return zero key-rate durations, one per teno
 see [Zero cashflow streams](@ref). Every cashflow needs a time; unused trailing times
 are ignored. Wrapped `Cashflow` objects use their embedded amounts and payment times,
 including when explicit `times` are supplied. Numeric amounts use the explicit times,
-which default to `eachindex(cfs)` (periods `1:n`). The same holds for every key-rate,
-two-curve, and named-curve cashflow form.
+which default to `eachindex(cfs)` (periods `1:n`), and pair with the amounts by position, as
+in [`duration`](@ref). The same holds for every key-rate cashflow form.
 
 # Tenor grid
 
@@ -140,8 +139,8 @@ function duration(valuation_fn::F, kr::KeyRates, curve::AYM) where {F}
     r = _keyrate(curve, kr.tenors, valuation_fn)
     return _relative(r, r.gradient; negate = true)
 end
-function duration(kr::KeyRates, curve::AYM, cfs::AbstractVector, times = eachindex(cfs))
-    r = _keyrate_analytic(curve, kr.tenors, cfs, times)
+function duration(kr::KeyRates, curve::AYM, cfs::_CashflowCollection, times...)
+    r = _keyrate_analytic(curve, kr.tenors, _cashflow_inputs(cfs, times...)...)
     return _relative(r, r.gradient; negate = true)
 end
 
@@ -157,8 +156,8 @@ function duration(valuation_fn::F, ::DV01, kr::KeyRates, curve::AYM) where {F}
     r = _keyrate(curve, kr.tenors, valuation_fn)
     return _per_bp(r, r.gradient)
 end
-function duration(::DV01, kr::KeyRates, curve::AYM, cfs::AbstractVector, times = eachindex(cfs))
-    r = _keyrate_analytic(curve, kr.tenors, cfs, times)
+function duration(::DV01, kr::KeyRates, curve::AYM, cfs::_CashflowCollection, times...)
+    r = _keyrate_analytic(curve, kr.tenors, _cashflow_inputs(cfs, times...)...)
     return _per_bp(r, r.gradient)
 end
 
@@ -222,8 +221,8 @@ function convexity(valuation_fn::F, kr::KeyRates, curve::AYM) where {F}
     r = _keyrate(curve, kr.tenors, valuation_fn; order = 2)
     return _relative(r, r.hessian)
 end
-function convexity(kr::KeyRates, curve::AYM, cfs::AbstractVector, times = eachindex(cfs))
-    r = _keyrate_analytic(curve, kr.tenors, cfs, times; order = 2)
+function convexity(kr::KeyRates, curve::AYM, cfs::_CashflowCollection, times...)
+    r = _keyrate_analytic(curve, kr.tenors, _cashflow_inputs(cfs, times...)...; order = 2)
     return _relative(r, r.hessian)
 end
 
@@ -258,8 +257,8 @@ value from them gives undefined normalized risk.
 function sensitivities(valuation_fn::F, kr::KeyRates, curve::AYM) where {F}
     return _single_curve_sensitivities(_keyrate(curve, kr.tenors, valuation_fn; order = 2))
 end
-function sensitivities(kr::KeyRates, curve::AYM, cfs::AbstractVector, times = eachindex(cfs))
-    return _single_curve_sensitivities(_keyrate_analytic(curve, kr.tenors, cfs, times; order = 2))
+function sensitivities(kr::KeyRates, curve::AYM, cfs::_CashflowCollection, times...)
+    return _single_curve_sensitivities(_keyrate_analytic(curve, kr.tenors, _cashflow_inputs(cfs, times...)...; order = 2))
 end
 _single_curve_sensitivities(r) = (;
     value = r.value,
@@ -270,8 +269,8 @@ _single_curve_sensitivities(r) = (;
 function sensitivities(valuation_fn::F, ::DV01, kr::KeyRates, curve::AYM) where {F}
     return _single_curve_dv01s(_keyrate(curve, kr.tenors, valuation_fn; order = 2))
 end
-function sensitivities(::DV01, kr::KeyRates, curve::AYM, cfs::AbstractVector, times = eachindex(cfs))
-    return _single_curve_dv01s(_keyrate_analytic(curve, kr.tenors, cfs, times; order = 2))
+function sensitivities(::DV01, kr::KeyRates, curve::AYM, cfs::_CashflowCollection, times...)
+    return _single_curve_dv01s(_keyrate_analytic(curve, kr.tenors, _cashflow_inputs(cfs, times...)...; order = 2))
 end
 _single_curve_dv01s(r) = (;
     value = r.value,

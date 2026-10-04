@@ -27,7 +27,9 @@ julia> spread(0.04, 0.05, fill(10.0, 10))
 Periodic(0.009999999999999964, 1)
 ```
 """
-function spread(curve1, curve2, cashflows, times = eachindex(cashflows); tol = 1.0e-12, maxiter = 100)
+spread(curve1, curve2, cashflows, times...; tol = 1.0e-12, maxiter = 100) =
+    _spread(curve1, curve2, _cashflow_inputs(cashflows, times...)...; tol, maxiter)
+function _spread(curve1, curve2, cashflows, times; tol, maxiter)
     times = FinanceCore.timepoint.(cashflows, times)
     cashflows = FinanceCore.amount.(cashflows)
     pv2 = FinanceCore.pv(curve2, cashflows, times)

@@ -10,7 +10,8 @@ Empty collections return an empty vector. Collections whose amounts are all
 exactly zero return a vector of positive zeros without valuing any payment; the
 element type is the one a nonempty stream's result would have (see
 [Zero cashflow streams](@ref)).
-Every cashflow requires a time; additional trailing times are ignored.
+Every cashflow requires a time; additional trailing times are ignored. Amounts and times pair
+by position, so offset vectors pair too.
 
 # Examples
 ```julia-repl
@@ -28,8 +29,8 @@ julia> present_values(0.05, [10,10,110], [1,2,3])
 ```
 
 """
-function present_values(interest, cashflows, times = eachindex(cashflows))
-    _check_cashflow_times(cashflows, times)
+present_values(interest, cashflows, times...) = _present_values(interest, _cashflow_inputs(cashflows, times...)...)
+function _present_values(interest, cashflows, times)
     n = length(cashflows)
     _iszero_cashflow_stream(cashflows) && return zeros(typeof(_zero_stream_value(interest, cashflows, times)), n)
     # Discount backward in one pass; derive the accumulator type from valuation.
@@ -64,7 +65,9 @@ julia> breakeven(0.10, [-10,-15,2,3,4,8]) # returns the `nothing` value
 
 ```
 """
-function breakeven(y, cashflows, timepoints = (eachindex(cashflows) .- 1))
+breakeven(y, cashflows) = (cfs = _vector(cashflows); breakeven(y, cfs, eachindex(cfs) .- 1))
+breakeven(y, cashflows, timepoints) = _breakeven(y, _cashflow_inputs(cashflows, timepoints)...)
+@inline function _breakeven(y, cashflows, timepoints)
     accum = 0.0
     last_neg = nothing
 
@@ -74,7 +77,8 @@ function breakeven(y, cashflows, timepoints = (eachindex(cashflows) .- 1))
         last_neg = FinanceCore.timepoint(cashflows[1], timepoints[1])
     end
 
-    for i in 2:length(cashflows)
+    # The inputs of `_cashflow_inputs` are 1-based and of equal length.
+    @inbounds for i in 2:length(cashflows)
         # accumulate the flow from each timepoint to the next
         a = FinanceCore.timepoint(cashflows[i - 1], timepoints[i - 1])
         b = FinanceCore.timepoint(cashflows[i], timepoints[i])

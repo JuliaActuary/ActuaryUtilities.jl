@@ -36,7 +36,8 @@ vector or a vector of zeros.
 
 Every cashflow needs a corresponding time, but the time grid may be longer.
 Unused trailing times are ignored, including when deriving a Hull–White simulation
-horizon. Too few times throws `DimensionMismatch`.
+horizon. Too few times throws `DimensionMismatch`. Amounts and times pair by position
+from their first entries, so offset vectors pair too.
 Empty cashflows are valid with either an empty or populated time grid.
 
 | Cashflow amounts | Value and dollar risk | Normalized risk |

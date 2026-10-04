@@ -5,11 +5,6 @@
 const _YieldInput = Union{Real, FinanceCore.Rate, AYM}
 const _CashflowCollection = Union{AbstractArray, Tuple, Base.Generator}
 
-# Indexed kernels share one representation; materialize generators before AD
-# reevaluates a valuation, including generators backed by a stateful iterator.
-_cashflow_vector(cfs::AbstractArray) = vec(cfs)
-_cashflow_vector(cfs::Union{Tuple, Base.Generator}) = _cashflow_vector(collect(cfs))
-
 """
     duration(Macaulay(),interest_rate,cfs,times)
     duration(Modified(),interest_rate,cfs,times)
@@ -26,9 +21,11 @@ For numeric amounts, omitted `times` default to `1:length(cfs)`.
 explicit `times` supply payment times for numeric amounts. If supplied, `times`
 must still contain an entry for each cashflow; unused trailing entries are ignored.
 
-Scalar cashflow methods accept arrays, tuples, and finite generators. Arrays are
-flattened in column-major order; generators are collected once before valuation.
-Use `collect` for other iterables, such as `Iterators.take` or `skipmissing`.
+Cashflow methods accept arrays, tuples, and finite generators, for amounts and for
+times. Arrays are flattened in column-major order; generators are collected once
+before valuation. Amounts and times pair by position, so offset vectors pair too, and
+omitted times are the amounts' indices. Use `collect` for other iterables, such as
+`Iterators.take` or `skipmissing`.
 Normalized duration is unchanged when the position sign reverses; dollar DV01
 reverses sign with the position.
 
@@ -114,12 +111,6 @@ julia> duration(0.03) do i
 """
 duration(yield::_YieldInput, cfs::_CashflowCollection, times...) = duration(Modified(), yield, cfs, times...)
 
-# Tuples and generators are collected, and arrays flattened, once before the indexed kernels.
-duration(d::Union{Macaulay, Modified, DV01}, yield::_YieldInput, cfs::_CashflowCollection) =
-    duration(d, yield, _cashflow_vector(cfs))
-duration(d::Union{Macaulay, Modified, DV01}, yield::_YieldInput, cfs::_CashflowCollection, times) =
-    duration(d, yield, _cashflow_vector(cfs), times)
-
 ## Analytic measures for fixed cashflows
 # Each single-rate input moves in its own shock coordinate (docs: "Shock coordinates").
 # A rate compounded m times a year gives the convexity weight t(t + 1/m), and the divisor
@@ -134,17 +125,18 @@ end
 _coordinate(::Union{FinanceCore.Rate{<:Real, FinanceCore.Continuous}, AYM}) =
     (; inv_m = false, divisor = 1)
 
-duration(::Macaulay, yield::_YieldInput, cfs::AbstractVector, times = eachindex(cfs)) =
-    _weighted_ratio(yield, identity, cfs, times)
-duration(::Modified, yield::_YieldInput, cfs::AbstractVector, times = eachindex(cfs)) =
-    _weighted_ratio(yield, identity, cfs, times; divisor = _coordinate(yield).divisor)
+duration(::Macaulay, yield::_YieldInput, cfs::_CashflowCollection, times...) =
+    _weighted_ratio(yield, identity, _cashflow_inputs(cfs, times...)...)
+duration(::Modified, yield::_YieldInput, cfs::_CashflowCollection, times...) =
+    _weighted_ratio(yield, identity, _cashflow_inputs(cfs, times...)...; divisor = _coordinate(yield).divisor)
 
 # -∂V/∂s is Σ t·cf·d divided by the coordinate's divisor; do not divide by V so dollar
 # exposure remains defined at zero present value.
-function duration(::DV01, yield::_YieldInput, cfs::AbstractVector, times = eachindex(cfs))
+function duration(::DV01, yield::_YieldInput, cfs::_CashflowCollection, times...)
+    amounts, ts = _cashflow_inputs(cfs, times...)
     divisor = _coordinate(yield).divisor * 10_000
-    sums = _weighted_sums(yield, identity, cfs, times)
-    isnothing(sums) && return _zero_weighted(yield, identity, cfs, times, divisor)
+    sums = _weighted_sums(yield, identity, amounts, ts)
+    isnothing(sums) && return _zero_weighted(yield, identity, amounts, ts, divisor)
     return last(sums) / divisor
 end
 
@@ -190,9 +182,6 @@ julia> convexity(i -> 100 / (1 + i)^5, 0.03)
 28.277877274012642
 ```
 """
-convexity(yield::_YieldInput, cfs::_CashflowCollection) = convexity(yield, _cashflow_vector(cfs))
-convexity(yield::_YieldInput, cfs::_CashflowCollection, times) = convexity(yield, _cashflow_vector(cfs), times)
-
 # The weight t(t + 1/m) and squared divisor of the shock coordinate (see `_coordinate`):
 #
 # * `Real` y: V(x) = Σ cf·(1+y+x)^(-t) → Σ cf·d·t(t+1) / V / (1+y)²
@@ -203,16 +192,15 @@ convexity(yield::_YieldInput, cfs::_CashflowCollection, times) = convexity(yield
 #   callback form for rate-dependent cashflows.
 #
 # Signed normalization makes convexity invariant to position sign.
-function convexity(yield::_YieldInput, cfs::AbstractVector, times = eachindex(cfs))
+function convexity(yield::_YieldInput, cfs::_CashflowCollection, times...)
     c = _coordinate(yield)
-    return _weighted_ratio(yield, t -> t * (t + c.inv_m), cfs, times; divisor = c.divisor^2)
+    return _weighted_ratio(yield, t -> t * (t + c.inv_m), _cashflow_inputs(cfs, times...)...; divisor = c.divisor^2)
 end
 
-# Shared accumulation kernel: V = Σ cf·d and Vw = Σ weight(t)·cf·d. Every cashflow needs a
-# time, checked before the zero-stream test and the @inbounds loop. A zero stream returns
-# `nothing` without valuing any payment; callers return its typed zero.
+# Shared accumulation kernel: V = Σ cf·d and Vw = Σ weight(t)·cf·d, over the 1-based, equal-length
+# inputs of `_cashflow_inputs`. A zero stream returns `nothing` without valuing any payment;
+# callers return its typed zero.
 function _weighted_sums(yield, weight::W, cfs, times) where {W}
-    _check_cashflow_times(cfs, times)
     _iszero_cashflow_stream(cfs) && return nothing
     t1 = FinanceCore.timepoint(first(cfs), first(times))
     z = _cf_value(first(cfs)) * FinanceCore.discount(yield, t1)

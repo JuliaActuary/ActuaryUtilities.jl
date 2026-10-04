@@ -73,7 +73,7 @@ struct Spread end
 Select the tenor grid for key-rate [`duration`](@ref), [`convexity`](@ref), and
 [`sensitivities`](@ref). Results contain per-tenor vectors and convexity matrices.
 `tenors` must be a nonempty `AbstractVector{<:Real}` of finite, positive, strictly
-increasing knot times in years.
+increasing knot times in years. `KeyRates` keeps its own 1-based copy of them.
 
 ```julia
 tenors = [1.0, 2.0, 5.0, 10.0, 30.0]
@@ -85,11 +85,12 @@ sensitivities(KeyRates(tenors), curve, cfs, times)       # value + durations + c
 
 See also: [`DV01`](@ref), [`IR01`](@ref), [`CS01`](@ref)
 """
-struct KeyRates{T <: AbstractVector{<:Real}}
-    tenors::T
-    function KeyRates(tenors::T) where {T <: AbstractVector{<:Real}}
-        _validate_tenors(tenors)
-        return new{T}(tenors)
+struct KeyRates{T <: Real}
+    tenors::Vector{T}
+    function KeyRates(tenors::AbstractVector{<:Real})
+        grid = collect(tenors)
+        _validate_tenors(grid)
+        return new{eltype(grid)}(grid)
     end
 end
 

@@ -47,24 +47,23 @@ sensitivities(valuation_fn::F, kr::KeyRates, s::Scenarios) where {F} = sensitivi
 sensitivities(valuation_fn::F, ::DV01, kr::KeyRates, s::Scenarios) where {F} = sensitivities(_simulated(valuation_fn, s), DV01(), kr, s.model)
 
 # Zero streams are valued on `s.model` without simulating: its discount factors are its curve's.
-function sensitivities(kr::KeyRates, s::Scenarios, cfs::AbstractVector, times = eachindex(cfs))
-    _check_cashflow_times(cfs, times)
-    _iszero_cashflow_stream(cfs) && return sensitivities(kr, s.model, cfs, times)
-    return sensitivities(_simulated_pv(s, cfs, times), kr, s.model)
+function sensitivities(kr::KeyRates, s::Scenarios, cfs::_CashflowCollection, times...)
+    amounts, ts = _cashflow_inputs(cfs, times...)
+    _iszero_cashflow_stream(amounts) && return sensitivities(kr, s.model, amounts, ts)
+    return sensitivities(_simulated_pv(s, amounts, ts), kr, s.model)
 end
-function sensitivities(::DV01, kr::KeyRates, s::Scenarios, cfs::AbstractVector, times = eachindex(cfs))
-    _check_cashflow_times(cfs, times)
-    _iszero_cashflow_stream(cfs) && return sensitivities(DV01(), kr, s.model, cfs, times)
-    return sensitivities(_simulated_pv(s, cfs, times), DV01(), kr, s.model)
+function sensitivities(::DV01, kr::KeyRates, s::Scenarios, cfs::_CashflowCollection, times...)
+    amounts, ts = _cashflow_inputs(cfs, times...)
+    _iszero_cashflow_stream(amounts) && return sensitivities(DV01(), kr, s.model, amounts, ts)
+    return sensitivities(_simulated_pv(s, amounts, ts), DV01(), kr, s.model)
 end
 
 # The mean present value of fixed cashflows across the paths, simulated to one year past the
-# last payment unless `s` sets a horizon. FinanceCore pairs equal lengths only, so the unused
-# trailing times of a shared grid are left out.
+# last payment unless `s` sets a horizon. The inputs are those of `_cashflow_inputs`, so their
+# lengths are equal, as FinanceCore requires.
 function _simulated_pv(s::Scenarios, cfs, times)
     horizon = something(s.horizon, _maximum_cashflow_time(cfs, times) + 1.0)
-    paid = view(times, eachindex(cfs))
     return _simulated(s, horizon) do paths
-        sum(FinanceCore.pv(p, cfs, paid) for p in paths) / s.n_scenarios
+        sum(FinanceCore.pv(p, cfs, times) for p in paths) / s.n_scenarios
     end
 end

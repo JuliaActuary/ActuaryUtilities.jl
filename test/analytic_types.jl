@@ -36,7 +36,7 @@
     big_grid = kernel(makecurve(0.04), big.(tenors), cfs, times; order = 2)
     @test eltype(big_grid.gradient) == BigFloat
     @test eltype(big_grid.hessian) == BigFloat
-    @test_throws DimensionMismatch kernel(makecurve(0.04), tenors, cfs, [1.0])
+    @test_throws DimensionMismatch duration(kr, makecurve(0.04), cfs, [1.0])
 
     @testset "ZeroRateCurve knot Jacobian with time-zero cashflows" begin
         rates = [0.02, 0.03, 0.04]

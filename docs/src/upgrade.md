@@ -188,6 +188,15 @@ v6 requires FinanceModels 7 and FinanceCore 3.
   the context. v5 valued an unknown contract as if it needed no index curve, so a custom
   floating contract never saw it; a contract with neither a projection nor a closed form now
   throws a `MethodError`.
+- **Amounts and times pair by position in every cashflow form**, including `present_values`,
+  `breakeven` and `spread`: the k-th amount is paid at the k-th time, counted from each
+  vector's first entry. Offset time vectors used to pair by index:
+  `present_values(Yield.Constant(Continuous(0.03)), [100, 100], OffsetArray([1, 2, 3], 0:2))`
+  valued the payments at times 2 and 3 (185.57) and now values them at 1 and 2 (191.22).
+  Offset key-rate grids read out of bounds; `KeyRates` now keeps its own 1-based copy of its
+  tenors. Key-rate and `Scenarios` cashflow forms accept tuples and generators, as the scalar
+  forms already did. `spread` now ignores unused trailing times like the other forms, and
+  `breakeven` throws `DimensionMismatch` for too few times instead of `BoundsError`.
 - **`price` is removed.** It was `abs(present_value(...))`; write that instead, or use
   `present_value` when the position's sign matters.
 - **The unused `Duration` supertype of the measure markers is removed.**

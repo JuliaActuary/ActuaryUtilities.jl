@@ -27,3 +27,19 @@ end
 _same_sensitivity(a, b) = isapprox(a, b; rtol = 1.0e-12, atol = 1.0e-12)
 _same_sensitivity(a::NamedTuple, b::NamedTuple) =
     keys(a) == keys(b) && all(map(_same_sensitivity, values(a), values(b)))
+
+# An iterator that can be read only once, so reading it twice, or losing its first item, shows.
+mutable struct OnePass{T}
+    items::Vector{T}
+    read::Bool
+end
+OnePass(items) = OnePass(collect(items), false)
+function Base.iterate(p::OnePass, i = 1)
+    if i == 1
+        p.read && error("OnePass iterator read twice")
+        p.read = true
+    end
+    return i > length(p.items) ? nothing : (p.items[i], i + 1)
+end
+Base.IteratorSize(::Type{<:OnePass}) = Base.SizeUnknown()
+Base.eltype(::Type{OnePass{T}}) where {T} = T

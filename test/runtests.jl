@@ -5,6 +5,7 @@ using Test
 using Distributions
 using StatsBase
 using Random
+using OffsetArrays
 import ForwardDiff
 import QuadGK
 

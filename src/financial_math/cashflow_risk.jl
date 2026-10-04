@@ -1,3 +1,31 @@
+## Cashflow inputs
+# Every fixed-cashflow kernel takes its amounts and times from `_cashflow_inputs`, as 1-based vectors
+# of equal length that pair by position:
+#
+# - Omitted times are the amounts' indices, taken before any reindexing, so an offset vector's
+#   amounts are paid at its indices. A `Cashflow` is paid at its own time whatever its paired time.
+# - Another array is flattened in column-major order, and a tuple or generator is collected once,
+#   so a single-pass iterator is read once. A 1-based vector is used as it is; an offset vector is
+#   viewed from 1.
+# - Times pair from their first entry, so offset times pair too. There must be one for each amount;
+#   a view leaves out the unused trailing ones.
+_cashflow_inputs(cfs) = (amounts = _vector(cfs); _paired(amounts, eachindex(amounts)))
+_cashflow_inputs(cfs, times) = _paired(_vector(cfs), _vector(times))
+
+function _paired(amounts::AbstractVector, times::AbstractVector)
+    n = length(amounts)
+    length(times) >= n || throw(DimensionMismatch("times must contain at least one entry for each cashflow"))
+    first_time = firstindex(times)
+    return _one_based(amounts, axes(amounts, 1)), view(times, first_time:(first_time + n - 1))
+end
+
+_vector(x::AbstractVector) = x
+_vector(x::AbstractArray) = vec(x)
+_vector(x::Union{Tuple, Base.Generator}) = collect(x)
+
+_one_based(x, ::Base.OneTo) = x
+_one_based(x, _) = view(x, firstindex(x):lastindex(x))
+
 @inline _cf_value(c::FinanceCore.Cashflow) = FinanceCore.amount(c)
 @inline _cf_value(c) = c
 
@@ -6,17 +34,8 @@
 # continue through valuation. Never infer a zero stream from its net present value.
 _iszero_cashflow_stream(cfs) = all(cf -> iszero(_cf_value(cf)), cfs)
 
-# A shared projection grid may extend beyond a stream. Every cashflow needs an
-# indexable time; unused trailing times do not enter valuation or derived defaults.
-function _check_cashflow_times(cfs, times)
-    checkbounds(Bool, times, eachindex(cfs)) || throw(
-        DimensionMismatch("times must contain at least one entry for each cashflow")
-    )
-    return nothing
-end
-
-# Call after bounds validation and the zero-stream return. Simulation horizons must use
-# the same embedded payment times as valuation.
+# Call after the zero-stream return. Simulation horizons must use the same embedded payment times
+# as valuation.
 _maximum_cashflow_time(cfs, times) = maximum(k -> FinanceCore.timepoint(cfs[k], times[k]), eachindex(cfs))
 
 # Zero streams return exact zeros without valuing each payment; linearity forces the value.
