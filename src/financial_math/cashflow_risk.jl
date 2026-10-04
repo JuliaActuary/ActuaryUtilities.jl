@@ -34,10 +34,6 @@ _one_based(x, _) = view(x, firstindex(x):lastindex(x))
 # continue through valuation. Never infer a zero stream from its net present value.
 _iszero_cashflow_stream(cfs) = all(cf -> iszero(_cf_value(cf)), cfs)
 
-# Call after the zero-stream return. Simulation horizons must use the same embedded payment times
-# as valuation.
-_maximum_cashflow_time(cfs, times) = maximum(k -> FinanceCore.timepoint(cfs[k], times[k]), eachindex(cfs))
-
 # Zero streams return exact zeros without valuing each payment; linearity forces the value.
 # Its type is a convention: the type a nonempty stream's result would have, the promotion of
 # the amount, time and discount types. The discount type comes from one query at time zero

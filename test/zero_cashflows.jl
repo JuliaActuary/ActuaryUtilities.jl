@@ -118,10 +118,11 @@
         hw = FM.ShortRate.HullWhite(0.1, 0.01, FM.Yield.Constant(0.04))
         for (cfs, times) in ((Float64[], Float64[]), (Float64[], [1.0, 2.0]), (zeros(2), [1.0, 2.0]), (zeros(2), [1.0, 2.0, NaN]))
             rng = MersenneTwister(123)
+            s = Scenarios(hw; horizon = 3.0, rng)
             untouched = copy(rng)
-            @test isequal(sensitivities(kr, Scenarios(hw; rng), cfs, times), (; value = 0.0, duration = z, dv01 = z))
-            @test isequal(sensitivities(SecondOrder(), kr, Scenarios(hw; rng), cfs, times), (; value = 0.0, duration = z, dv01 = z, convexity = zz))
-            @test isequal(sensitivities(Scenarios(hw; rng), cfs, times), (; value = 0.0, duration = 0.0, dv01 = 0.0))
+            @test isequal(sensitivities(kr, s, cfs, times), (; value = 0.0, duration = z, dv01 = z))
+            @test isequal(sensitivities(SecondOrder(), kr, s, cfs, times), (; value = 0.0, duration = z, dv01 = z, convexity = zz))
+            @test isequal(sensitivities(s, cfs, times), (; value = 0.0, duration = 0.0, dv01 = 0.0))
             @test rand(rng) == rand(untouched)
         end
     end
@@ -150,15 +151,15 @@ end
     @test convexity(kr, curve, cfs, extra) == convexity(kr, curve, cfs, times)
     @test convexity(curve, cfs, extra) == convexity(curve, cfs, times)
 
-    # A trailing time must not extend the inferred horizon or change RNG use.
+    # A trailing time, even past the horizon, is not valued and does not change RNG use.
     hw = FM.ShortRate.HullWhite(0.1, 0.01, flat)
     for m in ((), (SecondOrder(),))
         rng_short, rng_long = MersenneTwister(42), MersenneTwister(42)
-        short = sensitivities(m..., kr, Scenarios(hw; n_scenarios = 8, timestep = 0.25, rng = rng_short), cfs, times)
-        long = sensitivities(m..., kr, Scenarios(hw; n_scenarios = 8, timestep = 0.25, rng = rng_long), cfs, extra)
+        short = sensitivities(m..., kr, Scenarios(hw; n_scenarios = 8, timestep = 0.25, horizon = 3.0, rng = rng_short), cfs, times)
+        long = sensitivities(m..., kr, Scenarios(hw; n_scenarios = 8, timestep = 0.25, horizon = 3.0, rng = rng_long), cfs, extra)
         @test isequal(short, long)
         @test rand(rng_short) == rand(rng_long)
-        @test_throws DimensionMismatch sensitivities(m..., kr, Scenarios(hw), cfs, [1.0])
+        @test_throws DimensionMismatch sensitivities(m..., kr, Scenarios(hw; horizon = 3.0), cfs, [1.0])
     end
 end
 

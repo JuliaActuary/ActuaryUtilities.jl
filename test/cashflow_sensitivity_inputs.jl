@@ -151,7 +151,7 @@ end
     end
 end
 
-@testset "Derived sensitivity grids use embedded payment times" begin
+@testset "Scenarios value wrapped cashflows at their embedded times" begin
     curve = FM.Yield.Constant(FC.Continuous(0.04))
     cfs = [5.0, 5.0, 105.0]
     times = [0.0, 1.5, 3.5]
@@ -161,8 +161,8 @@ end
     kr = KeyRates([1.0, 2.0, 5.0])
     for m in ((), (SecondOrder(),)), supplied in (fallback, [7.0, 8.0, 9.0, 100.0])
         rng_numeric, rng_wrapped = MersenneTwister(42), MersenneTwister(42)
-        numeric = sensitivities(m..., kr, Scenarios(hw; n_scenarios = 8, timestep = 0.5, rng = rng_numeric), cfs, times)
-        actual = sensitivities(m..., kr, Scenarios(hw; n_scenarios = 8, timestep = 0.5, rng = rng_wrapped), wrapped, supplied)
+        numeric = sensitivities(m..., kr, Scenarios(hw; n_scenarios = 8, timestep = 0.5, horizon = 4.0, rng = rng_numeric), cfs, times)
+        actual = sensitivities(m..., kr, Scenarios(hw; n_scenarios = 8, timestep = 0.5, horizon = 4.0, rng = rng_wrapped), wrapped, supplied)
         @test _same_sensitivity(actual, numeric)
         @test rand(rng_numeric) == rand(rng_wrapped)
     end

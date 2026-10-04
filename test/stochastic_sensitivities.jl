@@ -30,10 +30,9 @@
 end
 
 @testset "Hull-White scenarios: pathwise consistency" begin
-    # The four `sensitivities(..., KeyRates, Scenarios(hw), ...)` methods snapshot
-    # one UInt64 from the user's rng and rebuild Xoshiro(seed) inside each AD
-    # evaluation. Two calls seeded the same way must produce bit-identical
-    # results — otherwise ForwardDiff's many evaluations of the closure each
+    # `Scenarios` draws one UInt64 from the user's rng when it is constructed and rebuilds
+    # Xoshiro(seed) inside each AD evaluation. Two calls seeded the same way must produce
+    # bit-identical results — otherwise ForwardDiff's many evaluations of the closure each
     # draw different MC samples and KRD = -∇V/V is biased by MC noise.
     rates = [0.03, 0.03, 0.03, 0.03, 0.03]
     tenors = [1.0, 2.0, 3.0, 4.0, 5.0]
@@ -42,17 +41,17 @@ end
     hw = FM.ShortRate.HullWhite(0.1, 0.01, zrc)
 
     for order in (FirstOrder(), SecondOrder())
-        r1 = sensitivities(order, KeyRates(tenors), Scenarios(hw; n_scenarios = 500, rng = Xoshiro(42)), cfs, tenors)
-        r2 = sensitivities(order, KeyRates(tenors), Scenarios(hw; n_scenarios = 500, rng = Xoshiro(42)), cfs, tenors)
+        r1 = sensitivities(order, KeyRates(tenors), Scenarios(hw; horizon = 6.0, n_scenarios = 500, rng = Xoshiro(42)), cfs, tenors)
+        r2 = sensitivities(order, KeyRates(tenors), Scenarios(hw; horizon = 6.0, n_scenarios = 500, rng = Xoshiro(42)), cfs, tenors)
         @test isequal(r1, r2)
         # Different seeds give different MC samples (sanity check the seed is actually used)
-        r3 = sensitivities(order, KeyRates(tenors), Scenarios(hw; n_scenarios = 500, rng = Xoshiro(43)), cfs, tenors)
+        r3 = sensitivities(order, KeyRates(tenors), Scenarios(hw; horizon = 6.0, n_scenarios = 500, rng = Xoshiro(43)), cfs, tenors)
         @test !(r1.value ≈ r3.value && r1.duration ≈ r3.duration)
     end
 
     # Omitted times default to periods 1:n, and wrapped cashflows simulate too.
     wrapped = FC.Cashflow.(cfs, tenors)
-    scenarios() = Scenarios(hw; n_scenarios = 500, rng = Xoshiro(42))
+    scenarios() = Scenarios(hw; horizon = 6.0, n_scenarios = 500, rng = Xoshiro(42))
     for m in ((), (SecondOrder(),))
         seeded = sensitivities(m..., KeyRates(tenors), scenarios(), cfs, tenors)
         @test isequal(sensitivities(m..., KeyRates(tenors), scenarios(), cfs), seeded)
@@ -60,13 +59,13 @@ end
     end
     @test !(sensitivities(KeyRates(tenors), scenarios(), wrapped).duration ≈ sensitivities(KeyRates(tenors), hw.curve, wrapped).duration)
 
-    # A callback receives the simulated paths, from one seed per call.
+    # A callback receives the simulated paths, from the seed fixed at construction.
     value(paths) = sum(FC.pv(p, cfs, tenors) for p in paths) / length(paths)
     for m in ((), (SecondOrder(),))
         s = Scenarios(hw; n_scenarios = 50, timestep = 0.25, horizon = 6.0, rng = Xoshiro(1))
         first_call, second_call = sensitivities(value, m..., KeyRates(tenors), s), sensitivities(value, m..., KeyRates(tenors), s)
         @test isequal(sensitivities(value, m..., KeyRates(tenors), Scenarios(hw; n_scenarios = 50, timestep = 0.25, horizon = 6.0, rng = Xoshiro(1))), first_call)
-        @test !isequal(first_call, second_call)
+        @test isequal(first_call, second_call)
     end
 end
 
@@ -78,10 +77,56 @@ end
     kr = KeyRates(tenors)
     value(c) = FC.pv(c, cfs, tenors)
     # Without `Scenarios`, every measure values `hw` on its discount function.
-    @test !(Scenarios(hw) isa FM.Yield.AbstractYieldModel)
+    @test !(Scenarios(hw; horizon = 6.0) isa FM.Yield.AbstractYieldModel)
     for o in ((), (SecondOrder(),)), g in ((), (kr,))
         @test sensitivities(o..., g..., hw, cfs, tenors) == sensitivities(o..., g..., zrc, cfs, tenors)
         @test _same_sensitivity(sensitivities(value, o..., g..., hw), sensitivities(value, o..., g..., zrc))
     end
     @test sensitivities(kr, hw, cfs, tenors).duration == duration(kr, hw, cfs, tenors)
+end
+
+@testset "Scenarios fix the horizon, the grid and the seed" begin
+    tenors = [1.0, 2.0, 5.0]
+    kr = KeyRates(tenors)
+    curve = FM.ZeroRateCurve([0.03, 0.032, 0.035], tenors)
+    hw = FM.ShortRate.HullWhite(0.1, 0.01, curve)
+
+    # The horizon is required and must lie on the time grid, up to rounding.
+    @test_throws UndefKeywordError Scenarios(hw)
+    @test Scenarios(hw; horizon = 0.07, timestep = 0.01).nsteps == 7   # 0.07 / 0.01 is 7.000000000000001
+    @test Scenarios(hw; horizon = 0.9, timestep = 0.3).nsteps == 3     # 0.9 / 0.3 is 3.0000000000000004
+    @test Scenarios(hw; horizon = 5, timestep = 1 / 12).nsteps == 60
+    # An unaligned horizon throws before the seed is drawn.
+    rng = Xoshiro(3)
+    untouched = copy(rng)
+    @test_throws ArgumentError Scenarios(hw; horizon = 0.9, timestep = 0.5, rng)
+    @test_throws ArgumentError Scenarios(hw; horizon = -1.0, rng)
+    @test rand(rng) == rand(untouched)
+
+    # Construction draws one seed from `rng`; valuation, zero streams included, never uses it.
+    rng, expected = Xoshiro(4), Xoshiro(4)
+    s = Scenarios(hw; horizon = 5.0, timestep = 0.25, n_scenarios = 64, rng)
+    @test s.seed == rand(expected, UInt64) && s.nsteps == 20
+    short, long = ([5.0, 105.0], [1.0, 2.0]), ([4.0, 4.0, 104.0], [1.0, 3.0, 5.0])   # 5.0 is the horizon
+    value(paths) = sum(FC.pv(p, short...) for p in paths) / length(paths)
+    for order in (FirstOrder(), SecondOrder()), grid in ((), (kr,))
+        both = sensitivities(order, grid..., s, [short[1]; long[1]], [short[2]; long[2]])
+        a, b = sensitivities(order, grid..., s, short...), sensitivities(order, grid..., s, long...)
+        # The same paths every call, so values and dollar derivatives add across unequal maturities,
+        # and normalized measures add when weighted by value.
+        @test isequal(a, sensitivities(order, grid..., s, short...))
+        @test both.value ≈ a.value + b.value rtol = 1.0e-12
+        @test both.dv01 ≈ a.dv01 .+ b.dv01 rtol = 1.0e-12
+        @test both.duration ≈ (a.value .* a.duration .+ b.value .* b.duration) ./ both.value rtol = 1.0e-12
+        if order isa SecondOrder
+            @test both.convexity ≈ (a.value .* a.convexity .+ b.value .* b.convexity) ./ both.value rtol = 1.0e-12
+        end
+        @test _same_sensitivity(sensitivities(value, order, grid..., s), a)
+        @test isequal(sensitivities(order, grid..., s, zeros(2), [1.0, 50.0]), sensitivities(order, grid..., hw, zeros(2), [1.0, 50.0]))
+    end
+    @test rand(rng) == rand(expected)
+    # Same seed, same results; the paths end at the horizon, so a later payment throws.
+    @test isequal(sensitivities(kr, Scenarios(hw; horizon = 5.0, timestep = 0.25, n_scenarios = 64, rng = Xoshiro(4)), long...), sensitivities(kr, s, long...))
+    @test_throws "Cannot extrapolate" sensitivities(s, [1.0, 1.0], [1.0, 5.5])
+    @test_throws "Cannot extrapolate" sensitivities(paths -> sum(FC.pv(p, [1.0], [6.0]) for p in paths), s)
 end

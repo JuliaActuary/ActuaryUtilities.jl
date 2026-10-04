@@ -101,8 +101,7 @@ v6 requires FinanceModels 7 and FinanceCore 3.
   configurable basis-point bump, including the old normalization convention.
 - **Embedded cashflow times take precedence.** Key-rate forms now accept a `Cashflow`
   vector together with a `times` vector; each `Cashflow` keeps its own time. Scalar,
-  key-rate, and bundled sensitivities use embedded payment times, as do Hull–White
-  default horizons.
+  key-rate, and bundled sensitivities use embedded payment times.
   Numeric amounts use the corresponding explicit times. Explicit time vectors must
   cover the collection; trailing entries are ignored. Omitted times default to
   `eachindex(cfs)` in every key-rate, two-curve, named-curve, and `Scenarios` cashflow
@@ -115,16 +114,25 @@ v6 requires FinanceModels 7 and FinanceCore 3.
   `duration`, `convexity`, and the cashflow forms without times, but a scenario
   generator to `sensitivities` callbacks and to cashflow forms with times, so two
   believable key-rate vectors could come back for the same position. The simulation
-  keywords move into [`Scenarios`](@ref); the per-call seed, defaults, and results are
-  unchanged:
+  keywords move into [`Scenarios`](@ref):
 
   | v5 call | v6 replacement |
   |:--|:--|
-  | `sensitivities(KeyRates(tenors), hw, cfs, times; n_scenarios, timestep, horizon, rng)` (and `DV01()`) | `sensitivities(KeyRates(tenors), Scenarios(hw; n_scenarios, timestep, horizon, rng), cfs, times)` |
-  | `sensitivities(KeyRates(tenors), hw; kws...) do paths ... end` (and `DV01()`) | `sensitivities(KeyRates(tenors), Scenarios(hw; kws...)) do paths ... end` |
+  | `sensitivities(KeyRates(tenors), hw, cfs, times; n_scenarios, timestep, horizon, rng)` (and `DV01()`) | `sensitivities(SecondOrder(), KeyRates(tenors), Scenarios(hw; horizon, n_scenarios, timestep, rng), cfs, times)` |
+  | `sensitivities(KeyRates(tenors), hw; kws...) do paths ... end` (and `DV01()`) | `sensitivities(SecondOrder(), KeyRates(tenors), Scenarios(hw; horizon, kws...)) do paths ... end` |
 
   `sensitivities(KeyRates(tenors), hw, cfs, times)` without `Scenarios` now discounts on
   `hw`, as `duration(KeyRates(tenors), hw, cfs, times)` does.
+- **A `Scenarios` fixes its horizon, time grid and seed when it is constructed.** `horizon` is
+  required: v5 defaulted to 30 years for callbacks and to one year past the last payment for
+  cashflows, so two positions were simulated on different grids and their risks did not add.
+  It must be a whole number of `timestep`s, up to rounding: `horizon = 0.9, timestep = 0.5`
+  used to reach 1.0 silently and now throws `ArgumentError`. A payment after the horizon
+  throws. The constructor draws one seed from `rng`, and every valuation with the same
+  `Scenarios` reuses it, where v5 drew a new seed from `rng` on each call. Results are
+  therefore reproducible and add across calls: values and dollar derivatives add, and
+  normalized measures add when weighted by value. For the v5 default horizon of cashflows, pass
+  `horizon` = the last payment time + 1.
 - Unmarked contract and portfolio DV01 and convexity, which v5 did not define, now
   default to `Effective()`, as unmarked duration already did. So do
   `duration(DV01(), KeyRates(tenors), target, curve)` (or `dv01`) and
