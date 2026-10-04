@@ -226,6 +226,21 @@ end
     end
 end
 
+@testset "Newton solves keep their own safeguards" begin
+    base = FM.Yield.Constant(FC.Continuous(0.03))
+    # A payment at time zero does not depend on the spread, so zspread's Newton step is infinite.
+    @test_throws r"zspread did not converge \(last Newton step = -?Inf" zspread(FC.Cashflow(1.0, 0.0), base, 0.5)
+    # Both solvers report the last Newton step when they run out of iterations.
+    @test_throws "spread did not converge in 2 iterations" spread(0.03, 0.04, fill(10.0, 10); maxiter = 2)
+    @test_throws "zspread did not converge (last Newton step = " zspread(FC.Cashflow(1.0, 2.0), base, exp(-0.1); maxiter = 1)
+    # A start at the root is returned as it is.
+    @test FC.rate(spread(0.04, 0.04, [1.0, 2.0])) == 0.0
+    @test FC.rate(zspread(FC.Cashflow(1.0, 2.0), base, FC.pv(base, FC.Cashflow(1.0, 2.0)); s0 = 0.0).zspread) ≈ 0.0 atol = 1.0e-15
+    # From a base near the edge of its domain, the damped steps reach a distant root:
+    # a semiannual base adds the spread nominally, 2((1 + s)^(1/2) - 1) = 0.05 + 1.9.
+    @test FC.rate(spread(FC.Periodic(-1.9, 2), FC.Periodic(0.05, 2), [1.0], [1.0])) ≈ 1.975^2 - 1 rtol = 1.0e-12
+end
+
 @testset "moic of one-sign and empty streams" begin
     @test moic([-10, 20, 30]) ≈ 5.0
     # an empty sum is zero: a total loss is 0x, no contributions is x/0, nothing at all is 0/0

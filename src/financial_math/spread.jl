@@ -41,12 +41,7 @@ function _spread(curve1, curve2, cashflows, times; tol, maxiter)
     # near the domain edge a full step would leave it.
     max_step = 0.25
     floor = _spread_floor(curve1)
-    s = 0.0
-    newton = NaN
-    for _ in 1:maxiter
-        fs, dfs = _value_and_derivative(f, s)
-        iszero(fs) && return FinanceCore.Periodic(s, 1)
-        newton = fs / dfs
+    converged, s, newton = _newton(f, 0.0, maxiter) do s, newton, dfs
         isnan(_primal(newton)) && throw(
             ErrorException("spread: the valuation or its derivative is NaN at spread $(_primal(s))")
         )
@@ -59,14 +54,32 @@ function _spread(curve1, curve2, cashflows, times; tol, maxiter)
             scale = gross1 + _primal(gross2)
             isfinite(residual) && isfinite(scale) &&
                 abs(residual) <= sqrt(eps(float(typeof(residual)))) * scale &&
-                return FinanceCore.Periodic(c, 1)
+                return true, c
         end
         # the damping choice is discrete, so it uses the primal step; an undamped step keeps its partials
         p = _primal(newton)
         step = !isfinite(p) || abs(p) > max_step ? copysign(max_step, p) : newton
-        s = max(s - step, (s + floor) / 2)
+        return false, max(s - step, (s + floor) / 2)
     end
-    throw(ErrorException("spread did not converge in $maxiter iterations (last Newton step = $newton)"))
+    converged || throw(ErrorException("spread did not converge in $maxiter iterations (last Newton step = $newton)"))
+    return FinanceCore.Periodic(s, 1)
+end
+
+# The Newton iteration `spread` and `zspread` share; each keeps its own coordinate, safeguards and
+# acceptance rule in `advance`. From `s`, every iteration evaluates `f` and `f′` together, and an
+# exact root ends the solve. Otherwise `advance(s, newton, f′)`, given the Newton step `f / f′`,
+# returns `(true, root)` to accept a root or `(false, next)` to continue from `next`. Returns
+# `(converged, s, newton)`: the root, or the last iterate and Newton step after `maxiter` iterations.
+function _newton(advance::A, f::F, s, maxiter) where {A, F}
+    newton = oftype(s, NaN)
+    for _ in 1:maxiter
+        fs, dfs = _value_and_derivative(f, s)
+        iszero(fs) && return true, s, newton
+        newton = fs / dfs
+        done, s = advance(s, newton, dfs)
+        done && return true, s, newton
+    end
+    return false, s, newton
 end
 
 # The lowest spread `s` for which `curve1 + Periodic(s, 1)` is a valid rate. `Periodic(s, 1)` needs

@@ -140,22 +140,17 @@ An `ErrorException` is thrown if that does not happen within `maxiter` steps.
 function zspread(contract::FinanceCore.AbstractContract, credit::AYM, market_price; forward::AYM = credit, s0 = 0.0, tol = 1.0e-12, maxiter = 100)
     pvs(s) = _contract_parallel_value(Spread(), contract, forward, credit, s)
     f(s) = pvs(s) - market_price
-    result(s) = (; zspread = FinanceCore.Continuous(s), zspread_dv01 = -ForwardDiff.derivative(pvs, s) / 10_000)
-    s = float(FinanceCore.rate(FinanceCore.Continuous(s0)))
-    step = oftype(s, NaN)
-    for _ in 1:maxiter
-        fs, dfs = _value_and_derivative(f, s)
-        iszero(fs) && return result(s)
-        step = fs / dfs
-        isfinite(step) || break
-        s -= step
+    failed(step, s) = ErrorException("zspread did not converge (last Newton step = $step, residual = $(f(s)))")
+    converged, s, step = _newton(f, float(FinanceCore.rate(FinanceCore.Continuous(s0))), maxiter) do s, step, _
+        isfinite(step) || throw(failed(step, s))
         # A Newton step in rate units, unlike a price residual, does not scale with the notional.
         # In continuous coordinates |f′| ≤ t_max ⋅ Σ|terms|, so a small step bounds the residual
         # locally: |f|/Σ|terms| ≤ |step| ⋅ t_max at this iterate. That assumes positive discount
         # factors and finite terms; it is not a global guarantee about other roots.
-        abs(step) < tol && return result(s)
+        return abs(step) < tol, s - step
     end
-    throw(ErrorException("zspread did not converge (last Newton step = $step, residual = $(f(s)))"))
+    converged || throw(failed(step, s))
+    return (; zspread = FinanceCore.Continuous(s), zspread_dv01 = -ForwardDiff.derivative(pvs, s) / 10_000)
 end
 
 """
