@@ -4,7 +4,9 @@
     present_values(interest, cashflows, timepoints)
 
 Return the value of remaining cashflows before each payment period.
-Entry `k` values cashflows `k:end` at `timepoints[k-1]`, or time zero for `k = 1`.
+Entry `k` values payments `k:end` at the time payment `k-1` is made, or time zero for `k = 1`.
+A `Cashflow` is paid at its own time, whatever its paired time; a number is paid at its paired time.
+The entries are numbers.
 
 Empty collections return an empty vector. Collections whose amounts are all
 exactly zero return a vector of positive zeros without valuing any payment; the
@@ -31,14 +33,16 @@ julia> present_values(0.05, [10,10,110], [1,2,3])
 """
 present_values(interest, cashflows, times...) = _present_values(interest, _cashflow_inputs(cashflows, times...)...)
 function _present_values(interest, cashflows, times)
-    n = length(cashflows)
-    _iszero_cashflow_stream(cashflows) && return zeros(typeof(_zero_stream_value(interest, cashflows, times)), n)
-    # Discount backward in one pass; derive the accumulator type from valuation.
-    acc = zero(FinanceCore.discount(interest, first(times)) * first(cashflows))
-    pvs = Vector{typeof(acc)}(undef, n)
-    @inbounds for k in n:-1:1
-        from = k == 1 ? zero(times[k]) : times[k - 1]
-        acc = FinanceCore.discount(interest, from, times[k]) * (acc + cashflows[k])
+    # The entries have the type of a nonempty stream's value, from the amounts and the payment times,
+    # so a zero stream returns these zeros without valuing any payment.
+    acc = _zero_stream_value(interest, cashflows, times)
+    pvs = fill(acc, length(cashflows))
+    _iszero_cashflow_stream(cashflows) && return pvs
+    # Discount backward in one pass, each payment at its own time.
+    paid(k) = FinanceCore.timepoint(cashflows[k], times[k])
+    @inbounds for k in reverse(eachindex(cashflows))
+        from = k == 1 ? zero(paid(k)) : paid(k - 1)
+        acc = FinanceCore.discount(interest, from, paid(k)) * (acc + _cf_value(cashflows[k]))
         pvs[k] = acc
     end
     return pvs

@@ -115,6 +115,31 @@ end
     @test g < 0 # value decreases in the rate
 
     @test_throws DimensionMismatch present_values(0.05, [1, 2], [1.0])
+
+    # A `Cashflow` is paid at its own time, whatever its paired time, and the entries are numbers.
+    curve = FM.Yield.Constant(FC.Continuous(0.03))
+    v = present_values(curve, [FC.Cashflow(100.0, 2.0)], [10.0])
+    @test v isa Vector{Float64} && only(v) ≈ 100 * exp(-0.06)
+    wrapped = [FC.Cashflow(100.0, 2.0), FC.Cashflow(50.0, 3.0)]
+    @test present_values(curve, wrapped) ≈ [100 * exp(-0.06) + 50 * exp(-0.09), 50 * exp(-0.03)]
+    @test present_values(curve, wrapped, [7.0, 9.0]) == present_values(curve, wrapped)
+    numeric = present_values(curve, [100.0, 50.0], [2.0, 3.0])
+    @test present_values(curve, wrapped) ≈ numeric
+    # mixed: the number is paid at its paired time, after the `Cashflow`'s own time
+    mixed = Any[FC.Cashflow(100.0, 2.0), 50.0]
+    @test present_values(curve, mixed, [10.0, 3.0]) ≈ numeric
+    @test present_values(curve, (FC.Cashflow(100.0, 2.0), FC.Cashflow(50.0, 3.0))) ≈ numeric
+    @test present_values(curve, (cf for cf in wrapped)) ≈ numeric
+    @test present_values(curve, OffsetArray(wrapped, 0:1)) ≈ numeric
+    @test present_values(curve, [100.0, 50.0], OffsetArray([2.0, 3.0], -1:0)) ≈ numeric
+    # number types: Float32 stays Float32 under a Float32 rate; BigFloat and AD propagate
+    @test eltype(present_values(0.03f0, [FC.Cashflow(100.0f0, 2.0f0)])) == Float32
+    big = present_values(FC.Continuous(big"0.03"), [FC.Cashflow(big"100.0", big"2.0")])
+    @test eltype(big) == BigFloat && only(big) ≈ 100 * exp(-big"0.06")
+    g = ForwardDiff.derivative(r -> sum(present_values(FC.Continuous(r), wrapped, [7.0, 9.0])), 0.03)
+    @test g ≈ ForwardDiff.derivative(r -> sum(present_values(FC.Continuous(r), [100.0, 50.0], [2.0, 3.0])), 0.03)
+    da = ForwardDiff.derivative(a -> first(present_values(curve, [FC.Cashflow(a, 2.0)])), 100.0)
+    @test da ≈ exp(-0.06)
 end
 
 @testset "risk measure exact empirical estimators" begin

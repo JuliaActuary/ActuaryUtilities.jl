@@ -138,6 +138,10 @@ which defaults to the discount curve.
   paid at periods `1:n` as in the scalar measures.
   **Migration:** to change payment dates, construct updated `Cashflow` objects or
   pass numeric amounts with the desired times.
+- **`present_values` pays a `Cashflow` at its own time and returns numbers.** v5 discounted a
+  `Cashflow` over its paired time (or its index) and returned `Cashflow`s, so
+  `present_values(curve, [Cashflow(100.0, 2.0)], [10.0])` under a 3% continuous curve gave a
+  `Cashflow` worth 74.08 instead of 94.18, and `Cashflow`s at different times threw.
 - **Hull–White simulation is requested with `Scenarios`.** A bare `HullWhite` model is
   now a curve everywhere: a bump moves `hw.curve`, cashflows are discounted on it, and caps and
   swaptions keep their Hull–White closed forms on the bumped curve. In v5 it was a curve to
