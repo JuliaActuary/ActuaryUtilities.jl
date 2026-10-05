@@ -1,7 +1,6 @@
 module OptimalTransport
 
 import ..Distributions
-import ..StatsBase
 import ..RiskMeasures
 import ..RiskMeasures: RiskMeasure, CTE, VaR
 import ..QuadGK
@@ -105,6 +104,17 @@ function wasserstein(
     return _wasserstein(isnothing(aa) ? a : aa, isnothing(bb) ? b : bb, p; rtol, atol, maxevals)
 end
 
+# The quantile gap |x - y| in the accumulator's float type `T`. Equal values give an exact zero,
+# also when both are infinite. Two `Signed` or `Unsigned` integers subtract exactly and round once.
+# Converting each to `T` first rounds `typemax(Int) - 1` and `typemax(Int)` to the same float, and
+# subtracting in their own type wraps (`UInt8(0) - UInt8(1)` is 255). One integer type subtracts in
+# its wider type; two different ones (`Int8(-100) - UInt8(100)` is 56) subtract in `BigInt`. Other
+# pairs, including `Bool` and integer–float pairs, convert to `T` first.
+_gap(::Type{T}, x, y) where {T} = x == y ? zero(T) : abs(T(x) - T(y))
+_gap(::Type{T}, x::I, y::I) where {T, I <: Union{Signed, Unsigned}} =
+    T(x > y ? widen(x) - widen(y) : widen(y) - widen(x))
+_gap(::Type{T}, x::Union{Signed, Unsigned}, y::Union{Signed, Unsigned}) where {T} = T(abs(big(x) - big(y)))
+
 # Sample pairs need only sorted values. Integer ranks on a common denominator
 # preserve every overlap without allocating rational weights or cumulative sums.
 function _wasserstein(a::AbstractVector{<:Real}, b::AbstractVector{<:Real}, p; kwargs...)
@@ -115,7 +125,7 @@ function _wasserstein(a::AbstractVector{<:Real}, b::AbstractVector{<:Real}, p; k
     if na == nb
         acc = zero(float(promote_type(eltype(as), eltype(bs), Float64)))
         for i in eachindex(as, bs)
-            gap = as[i] == bs[i] ? zero(acc) : typeof(acc)(abs(as[i] - bs[i]))
+            gap = _gap(typeof(acc), as[i], bs[i])
             acc = isinf(p) ? max(acc, gap) : acc + gap^p
         end
         return isinf(p) ? acc : (acc / na)^(1 / p)
@@ -135,7 +145,7 @@ function _wasserstein_samples(as, bs, p, denominator)
     while i <= na && j <= nb
         ua, ub = i * step_a, j * step_b
         u = min(ua, ub)
-        gap = as[i] == bs[j] ? zero(acc) : typeof(acc)(abs(as[i] - bs[j]))
+        gap = _gap(typeof(acc), as[i], bs[j])
         acc = isinf(p) ? max(acc, gap) : acc + (typeof(acc)(u - prev) / denominator) * gap^p
         prev = u
         ua <= ub && (i += 1)
@@ -159,7 +169,7 @@ function _wasserstein(a::FiniteAtoms, b::FiniteAtoms, p; kwargs...)
         advance_b = bc[j] <= ac[i]
         u = advance_a ? ac[i] : bc[j]
         if u > prev
-            gap = as[i] == bs[j] ? zero(acc) : typeof(acc)(abs(as[i] - bs[j]))
+            gap = _gap(typeof(acc), as[i], bs[j])
             acc = isinf(p) ? max(acc, gap) : acc + (u - prev) * gap^p
         end
         prev = u

@@ -11,12 +11,6 @@ import StatsBase
 using PrecompileTools
 import Distributions
 
-# Declare the generic function here (with no methods) so both the FinancialMath
-# and Utilities submodules can add methods to the same `duration` without one
-# shadowing the other. `function duration end` adds no method; `duration()` with
-# parens would define a callable zero-arg method that silently returns `nothing`.
-function duration end
-
 include("financial_math.jl")
 include("atomic_measures.jl")
 include("risk_measures.jl")

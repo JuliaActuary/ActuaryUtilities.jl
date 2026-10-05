@@ -6,7 +6,7 @@ Provides miscellaneous routines common in actuarial and financial work.
 
 ### Exported API
 ```@docs
-Utilities.duration
+Utilities.policy_duration
 Utilities.years_between
 Utilities.accum_offset
 ```

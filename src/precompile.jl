@@ -23,7 +23,6 @@
             duration(Macaulay(), v, cfs)
             duration(DV01(), v, cfs)
             duration(Modified(), v, cfs)
-            # duration(KeyRate(5),v,cfs)
 
             breakeven(v, [-10, 1, 2, 3, 4, 8])
 
@@ -34,7 +33,7 @@
 
 
         years_between(Dates.Date(2018, 9, 30), Dates.Date(2018, 9, 30))
-        duration(Dates.Date(2018, 9, 30), Dates.Date(2019, 9, 30))
+        policy_duration(Dates.Date(2018, 9, 30), Dates.Date(2019, 9, 30))
 
     end
 end

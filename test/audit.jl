@@ -1,10 +1,14 @@
 # Regression and equivalence tests from the 2026-06 ecosystem audit
 @testset "analytic fast paths match the generic AD path" begin
-    # the generic scalar path: nested ForwardDiff through `i + yield`
-    generic_duration(yield, cfs, times) = duration(yield, i -> ActuaryUtilities.FinancialMath.price(i, cfs, times))
+    # The generic scalar path uses the input's own compounding convention for
+    # rates and a continuous-zero shift for yield models.
+    generic_duration(yield, cfs, times) = duration(i -> FC.pv(i, cfs, times), yield)
+    parallel_bump(yield, x) = yield + x
+    parallel_bump(yield::FM.Yield.AbstractYieldModel, x) =
+        FM.Yield.TenorShift(yield, (z, t) -> FC.Continuous(x) + z)
     function generic_convexity(yield, cfs, times)
-        vf = i -> ActuaryUtilities.FinancialMath.price(i, cfs, times)
-        v(x) = abs(vf(yield + x))
+        vf = i -> FC.pv(i, cfs, times)
+        v(x) = abs(vf(parallel_bump(yield, x)))
         ForwardDiff.derivative(y -> ForwardDiff.derivative(v, y), 0.0) / v(0.0)
     end
 
@@ -25,6 +29,7 @@
         FM.Yield.Constant(0.03),
         FM.Yield.Constant(FC.Continuous(0.03)),
         FM.Yield.Constant(FC.Periodic(0.04, 2)),
+        PeriodicZeroSensitivityCurve(0.04),
     ]
     @testset "yield=$y" for y in yields
         for (cfs, times) in cases
@@ -35,17 +40,34 @@
     end
 
     @testset "fast-path dispatch is actually selected" begin
+        # Every yield input must reach the analytic methods: the prior fast paths were
+        # unreachable (`Constant{<:Continuous}` can never match `Constant{<:Rate}`) and silently
+        # fell through to AD. The results are the closed forms summed in payment order, to the bit.
+        analytic_duration = which(duration, (Modified, Float64, Vector{Float64}, Vector{Float64}))
+        analytic_convexity = which(convexity, (Float64, Vector{Float64}, Vector{Float64}))
+        @test analytic_duration.module === analytic_convexity.module === ActuaryUtilities.FinancialMath
         cfs = [5.0, 5.0, 105.0]
         times = [1.0, 2.0, 3.0]
-        generic_sig = Tuple{typeof(duration), Modified, Any, Any, Any}
+        divisor(y::Real) = 1 + y
+        divisor(y::FC.Rate{<:Real, FC.Periodic}) = 1 + FC.rate(y) / y.compounding.frequency
+        divisor(y) = 1
+        inv_m(y::Real) = 1
+        inv_m(y::FC.Rate{<:Real, FC.Periodic}) = 1 / y.compounding.frequency
+        inv_m(y) = 0
         for y in (0.03, FC.Periodic(0.04, 2), FC.Continuous(0.03), FM.Yield.Constant(0.03), FM.Yield.Constant(FC.Continuous(0.03)))
-            m = which(duration, (Modified, typeof(y), typeof(cfs), typeof(times)))
-            # an analytic method must be selected, not the generic AD fallback —
-            # the prior fast paths were unreachable (`Constant{<:Continuous}` can
-            # never match `Constant{<:Rate}`) and silently fell through
-            @test m.sig != generic_sig
-            cm = which(convexity, (typeof(y), typeof(cfs), typeof(times)))
-            @test cm.sig != Tuple{typeof(convexity), Any, Any, Any}
+            V = Vt = Vtt = 0.0
+            for (cf, t) in zip(cfs, times)
+                cfd = cf * FC.discount(y, t)
+                V += cfd
+                Vt += t * cfd
+                Vtt += t * (t + inv_m(y)) * cfd
+            end
+            @test which(duration, (Modified, typeof(y), typeof(cfs), typeof(times))) === analytic_duration
+            @test which(convexity, (typeof(y), typeof(cfs), typeof(times))) === analytic_convexity
+            @test duration(Modified(), y, cfs, times) === Vt / V / divisor(y)
+            @test duration(y, cfs, times) === Vt / V / divisor(y)
+            @test duration(DV01(), y, cfs, times) === Vt / (divisor(y) * 10_000)
+            @test convexity(y, cfs, times) === Vtt / V / divisor(y)^2
         end
     end
 
@@ -93,6 +115,31 @@ end
     @test g < 0 # value decreases in the rate
 
     @test_throws DimensionMismatch present_values(0.05, [1, 2], [1.0])
+
+    # A `Cashflow` is paid at its own time, whatever its paired time, and the entries are numbers.
+    curve = FM.Yield.Constant(FC.Continuous(0.03))
+    v = present_values(curve, [FC.Cashflow(100.0, 2.0)], [10.0])
+    @test v isa Vector{Float64} && only(v) ≈ 100 * exp(-0.06)
+    wrapped = [FC.Cashflow(100.0, 2.0), FC.Cashflow(50.0, 3.0)]
+    @test present_values(curve, wrapped) ≈ [100 * exp(-0.06) + 50 * exp(-0.09), 50 * exp(-0.03)]
+    @test present_values(curve, wrapped, [7.0, 9.0]) == present_values(curve, wrapped)
+    numeric = present_values(curve, [100.0, 50.0], [2.0, 3.0])
+    @test present_values(curve, wrapped) ≈ numeric
+    # mixed: the number is paid at its paired time, after the `Cashflow`'s own time
+    mixed = Any[FC.Cashflow(100.0, 2.0), 50.0]
+    @test present_values(curve, mixed, [10.0, 3.0]) ≈ numeric
+    @test present_values(curve, (FC.Cashflow(100.0, 2.0), FC.Cashflow(50.0, 3.0))) ≈ numeric
+    @test present_values(curve, (cf for cf in wrapped)) ≈ numeric
+    @test present_values(curve, OffsetArray(wrapped, 0:1)) ≈ numeric
+    @test present_values(curve, [100.0, 50.0], OffsetArray([2.0, 3.0], -1:0)) ≈ numeric
+    # number types: Float32 stays Float32 under a Float32 rate; BigFloat and AD propagate
+    @test eltype(present_values(0.03f0, [FC.Cashflow(100.0f0, 2.0f0)])) == Float32
+    big = present_values(FC.Continuous(big"0.03"), [FC.Cashflow(big"100.0", big"2.0")])
+    @test eltype(big) == BigFloat && only(big) ≈ 100 * exp(-big"0.06")
+    g = ForwardDiff.derivative(r -> sum(present_values(FC.Continuous(r), wrapped, [7.0, 9.0])), 0.03)
+    @test g ≈ ForwardDiff.derivative(r -> sum(present_values(FC.Continuous(r), [100.0, 50.0], [2.0, 3.0])), 0.03)
+    da = ForwardDiff.derivative(a -> first(present_values(curve, [FC.Cashflow(a, 2.0)])), 100.0)
+    @test da ≈ exp(-0.06)
 end
 
 @testset "risk measure exact empirical estimators" begin
@@ -161,28 +208,116 @@ end
     @test FC.pv(y + s2, cfs) ≈ FC.pv(y + 0.01, cfs) rtol = 1.0e-12
 end
 
-@testset "moic degenerate input errors" begin
+@testset "spread near the edge of its domain" begin
+    # Near a combined annual rate of -100% the price derivative is so large that the
+    # Newton step is tiny far from the root: a small step alone must not be accepted.
+    for base in (-0.99, -0.999999, -1 + 1.0e-10, -1 + 1.0e-13)
+        s = spread(base, 0.05, [1.0], [1.0])
+        @test FC.rate(s) ≈ 0.05 - base rtol = 1.0e-12
+        @test FC.pv(base + s, [1.0], [1.0]) ≈ FC.pv(0.05, [1.0], [1.0]) rtol = 1.0e-12
+    end
+    # Steps stop halfway to the domain edge, so spreads close to it are reachable: the
+    # combined rate must exceed -1 (base -0.5) and so must the spread itself (base 0).
+    @test FC.rate(spread(-0.5, -0.99, [1.0], [1.0])) ≈ -0.49 rtol = 1.0e-12
+    @test FC.rate(spread(0.0, -0.9999, [1.0], [1.0])) ≈ -0.9999 rtol = 1.0e-12
+    # a semiannual base adds the spread in its own convention: 2((1 + s)^(1/2) - 1) = -0.05
+    @test FC.rate(spread(FC.Periodic(-1.9, 2), FC.Periodic(-1.95, 2), [1.0], [1.0])) ≈ 0.975^2 - 1 rtol = 1.0e-12
+
+    @test ForwardDiff.derivative(y -> FC.rate(spread(0.04, y, fill(10.0, 10))), 0.05) ≈ 1 rtol = 1.0e-10
+    # where the solve is damped, the damping decision uses primal values and the root keeps
+    # its partials: the spread over the base is target - base
+    @test ForwardDiff.derivative(y -> FC.rate(spread(-0.5, y, [1.0], [1.0])), -0.99) ≈ 1 rtol = 1.0e-10
+    @test ForwardDiff.derivative(b -> FC.rate(spread(b, -0.99, [1.0], [1.0])), -0.5) ≈ -1 rtol = 1.0e-10
+    @test_throws "NaN" spread(0.03, 0.04, [NaN, 1.0])
+    @test_throws ErrorException spread(0.03, 0.04, fill(10.0, 10); maxiter = 1)
+    base = FM.Yield.Constant(FC.Continuous(0.03))
+    @test_throws ErrorException zspread(base, FC.Cashflow(1.0, 2.0), exp(-0.1); maxiter = 1)
+end
+
+@testset "spread and zspread do not depend on notional" begin
+    # Scaling every cashflow by k scales values and dollar sensitivities by k and leaves the
+    # spreads unchanged. Each case is also checked against an independent closed form.
+    base = FM.Yield.Constant(FC.Continuous(0.03))
+    curve = FM.Yield.Constant(0.03)
+    cfs, times = [5.0, 5.0, 105.0], [1.0, 2.0, 3.0]
+    stream(k) = FM.Composite(FM.Composite(FC.Cashflow(k * cfs[1], times[1]), FC.Cashflow(k * cfs[2], times[2])), FC.Cashflow(k * cfs[3], times[3]))
+    price = sum(c * exp(-0.05 * t) for (c, t) in zip(cfs, times))   # priced at a 5% force
+    dv01 = sum(c * t * exp(-0.05 * t) for (c, t) in zip(cfs, times)) / 10_000
+    unit_z = zspread(base, stream(1.0), price)
+    unit_s = spread(curve, curve + 0.01, cfs, times)
+    for k in (1.0e-12, 1.0, 1.0e10)
+        # a two-year payment priced at a 5% force is 2% over the 3% base
+        z = zspread(base, FC.Cashflow(k, 2.0), k * exp(-0.1))
+        @test FC.rate(z.zspread) ≈ 0.02 atol = 1.0e-14
+        @test z.zspread_dv01 ≈ k * 2 * exp(-0.1) / 10_000 rtol = 1.0e-12
+        z = zspread(base, stream(k), k * price)
+        @test FC.rate(z.zspread) ≈ 0.02 atol = 1.0e-14
+        @test z.zspread ≈ unit_z.zspread atol = 1.0e-15
+        @test z.zspread_dv01 ≈ k * dv01 rtol = 1.0e-12
+        @test z.zspread_dv01 ≈ k * unit_z.zspread_dv01 rtol = 1.0e-12
+        # `curve + 0.01` adds an annual 1%, so the spread over `curve` is exactly 0.01
+        s = spread(curve, curve + 0.01, k .* cfs, times)
+        @test FC.rate(s) ≈ 0.01 atol = 1.0e-14
+        @test FC.rate(s) ≈ FC.rate(unit_s) atol = 1.0e-15
+        @test FC.pv(curve + s, k .* cfs, times) ≈ k * FC.pv(curve + 0.01, cfs, times) rtol = 1.0e-12
+        @test FC.rate(spread(0.04, 0.05, k .* fill(10.0, 10))) ≈ 0.01 atol = 1.0e-14
+        # zero price, mixed signs: 100 at 1 and -95 at 2 have zero value at a force of log(0.95)
+        mixed = FM.Composite(FC.Cashflow(100k, 1.0), FC.Cashflow(-95k, 2.0))
+        @test FC.rate(zspread(base, mixed, 0.0).zspread) ≈ log(0.95) - 0.03 atol = 1.0e-14
+        @test FC.rate(spread(0.03, -0.05, k .* [100.0, -95.0], [1.0, 2.0])) ≈ -0.08 atol = 1.0e-14
+    end
+end
+
+@testset "Newton solves keep their own safeguards" begin
+    base = FM.Yield.Constant(FC.Continuous(0.03))
+    # A payment at time zero does not depend on the spread, so zspread's Newton step is infinite.
+    @test_throws r"zspread did not converge \(last Newton step = -?Inf" zspread(base, FC.Cashflow(1.0, 0.0), 0.5)
+    # Both solvers report the last Newton step when they run out of iterations.
+    @test_throws "spread did not converge in 2 iterations" spread(0.03, 0.04, fill(10.0, 10); maxiter = 2)
+    @test_throws "zspread did not converge (last Newton step = " zspread(base, FC.Cashflow(1.0, 2.0), exp(-0.1); maxiter = 1)
+    # A start at the root is returned as it is.
+    @test FC.rate(spread(0.04, 0.04, [1.0, 2.0])) == 0.0
+    @test FC.rate(zspread(base, FC.Cashflow(1.0, 2.0), FC.pv(base, FC.Cashflow(1.0, 2.0)); s0 = 0.0).zspread) ≈ 0.0 atol = 1.0e-15
+    # From a base near the edge of its domain, the damped steps reach a distant root:
+    # a semiannual base adds the spread nominally, 2((1 + s)^(1/2) - 1) = 0.05 + 1.9.
+    @test FC.rate(spread(FC.Periodic(-1.9, 2), FC.Periodic(0.05, 2), [1.0], [1.0])) ≈ 1.975^2 - 1 rtol = 1.0e-12
+end
+
+@testset "moic of one-sign and empty streams" begin
     @test moic([-10, 20, 30]) ≈ 5.0
-    @test_throws ArgumentError moic([10, 20, 30])
-    @test_throws ArgumentError moic([-10, -20])
+    # an empty sum is zero: a total loss is 0x, no contributions is x/0, nothing at all is 0/0
+    @test moic([-10, -20]) === 0.0
+    @test moic([10, 20, 30]) === Inf
+    @test isnan(moic(Float64[]))
+    @test isnan(moic([0, 0]))
+    # the amounts' type is kept
+    @test moic(Float32[-10, 20]) === 2.0f0
+    @test moic(Float32[-10, -20]) === 0.0f0
+    @test moic(Float32[10]) === Inf32
+    @test moic(FC.Cashflow.([-10.0, -5.0], [0.0, 1.0])) === 0.0
+    # no contributions is +Inf, not -Inf from a negated zero, including with floating-point amounts
+    @test moic([1.0]) === Inf
+    @test moic([-1.0, 0.0]) === 0.0
+    @test moic(FC.Cashflow.([10.0], [1.0])) === Inf
+    # abstractly typed streams
+    @test isnan(moic(Any[]))
+    @test moic(Any[-10, 20.0]) === 2.0
+    # the sums are type-stable for a concrete element type
+    @test @inferred(moic([-10.0, 20.0, 30.0])) === 5.0
+    @test @inferred(moic(FC.Cashflow.([-10.0, 20.0], [0.0, 1.0]))) === 2.0
+    # Narrow integers: the sums widen before the contributions are negated.
+    for T in (Int8, Int16, Int32)
+        m = typemin(T)
+        @test moic(T[m, -1, 64]) ≈ 64 / (1 - Int(m))
+        @test moic(T[m, 64]) ≈ 64 / -Int(m)
+        @test moic(FC.Cashflow.(T[m, -1, 64], [0, 1, 2])) ≈ 64 / (1 - Int(m))
+    end
 end
 
 @testset "duration with a negative-valued valuation function" begin
     liability(i) = -100 / (1 + i)^5
-    @test duration(0.03, liability) ≈ duration(0.03, i -> 100 / (1 + i)^5)
-    @test convexity(0.03, liability) ≈ convexity(0.03, i -> 100 / (1 + i)^5)
-end
-
-@testset "legacy KeyRateDuration conveniences" begin
-    rf_curve = FM.fit(FM.Spline.Cubic(), FM.ZCBYield.([0.04, 0.05, 0.055, 0.06, 0.062], 1:5), FM.Fit.Bootstrap())
-    cfs_real = fill(10.0, 5)
-    cfs_cf = FC.Cashflow.(fill(10.0, 5), [1.0, 2.0, 3.0, 4.0, 5.0])
-    # a Cashflow vector uses embedded times for the krd grid, equal to the plain form
-    @test duration(KeyRate(2), rf_curve, cfs_cf) ≈ duration(KeyRate(2), rf_curve, cfs_real, 1:5)
-    # all-sub-1-year cashflows have an empty default grid: loud error, not a crash
-    @test_throws ArgumentError duration(KeyRate(0.5), rf_curve, [10.0], [0.5])
-    # a shifted timepoint outside the krd grid is a loud error, not a MethodError
-    @test_throws ArgumentError duration(KeyRate(7), rf_curve, cfs_cf)
+    @test duration(liability, 0.03) ≈ duration(i -> 100 / (1 + i)^5, 0.03)
+    @test convexity(liability, 0.03) ≈ convexity(i -> 100 / (1 + i)^5, 0.03)
 end
 
 @testset "mismatched cfs/times lengths error loudly" begin
@@ -212,14 +347,14 @@ end
 @testset "two-curve scalar convexity matches the AD path" begin
     base = FM.Yield.Constant(0.03)
     credit = FM.Yield.Constant(0.015)
-    tenors = [1.0, 2.0, 5.0]
     cfs = [5.0, 5.0, 105.0]
     times = [1.0, 2.0, 3.0]
-    an = convexity(base, credit, tenors, cfs, times)
-    # the AD do-block form computes the same blocks via a (2n)² Hessian
+    # every block of the AD callback's 2×2 parallel Hessian is the combined curve's convexity
+    an = convexity(base + credit, cfs, times)
     vf2 = (b, c) -> sum(cf * b(t) * c(t) for (cf, t) in zip(cfs, times))
-    ad = convexity(vf2, base, credit, tenors)
-    @test an.base ≈ ad.base rtol = 1.0e-10
-    @test an.credit ≈ ad.credit rtol = 1.0e-10
-    @test an.cross ≈ ad.cross rtol = 1.0e-10
+    ad = convexity(vf2, base, credit)
+    @test an ≈ ad.base.base rtol = 1.0e-10
+    @test an ≈ ad.credit.credit rtol = 1.0e-10
+    @test an ≈ ad.base.credit rtol = 1.0e-10
+    @test ad.credit.base == ad.base.credit
 end

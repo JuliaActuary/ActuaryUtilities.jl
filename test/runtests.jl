@@ -5,12 +5,14 @@ using Test
 using Distributions
 using StatsBase
 using Random
+using OffsetArrays
 import ForwardDiff
 import QuadGK
 
 const FM = ActuaryUtilities.FinanceModels
 const FC = ActuaryUtilities.FinanceCore
 
+include("sensitivity_fixtures.jl")
 
 include("risk_measures.jl")
 include("optimal_transport.jl")
@@ -31,17 +33,18 @@ include("audit.jl")
         @test years_between(Date(2018, 9, 30), Date(2019, 10, 1), false) == 1
     end
 
-    @testset "duration tests" begin
-        @test duration(Date(2018, 9, 30), Date(2019, 9, 30)) == 2
-        @test duration(Date(2018, 9, 30), Date(2018, 9, 30)) == 1
-        @test duration(Date(2018, 9, 30), Date(2018, 10, 1)) == 1
-        @test duration(Date(2018, 9, 30), Date(2019, 10, 1)) == 2
-        @test duration(Date(2018, 9, 30), Date(2018, 6, 30)) == 0
-        @test duration(Date(2018, 9, 30), Date(2017, 6, 30)) == -1
-        @test duration(Date(2018, 10, 15), Date(2019, 9, 30)) == 1
-        @test duration(Date(2018, 10, 15), Date(2019, 10, 30)) == 2
-        @test duration(Date(2018, 10, 15), Date(2019, 10, 15)) == 2
-        @test duration(Date(2018, 10, 15), Date(2019, 10, 14)) == 1
+    @testset "policy_duration" begin
+        @test policy_duration(Date(2018, 9, 30), Date(2019, 9, 30)) == 2
+        @test policy_duration(Date(2018, 9, 30), Date(2018, 9, 30)) == 1
+        @test policy_duration(Date(2018, 9, 30), Date(2018, 10, 1)) == 1
+        @test policy_duration(Date(2018, 9, 30), Date(2019, 10, 1)) == 2
+        @test policy_duration(Date(2018, 9, 30), Date(2018, 6, 30)) == 0
+        @test policy_duration(Date(2018, 9, 30), Date(2017, 6, 30)) == -1
+        @test policy_duration(Date(2018, 10, 15), Date(2019, 9, 30)) == 1
+        @test policy_duration(Date(2018, 10, 15), Date(2019, 10, 30)) == 2
+        @test policy_duration(Date(2018, 10, 15), Date(2019, 10, 15)) == 2
+        @test policy_duration(Date(2018, 10, 15), Date(2019, 10, 14)) == 1
+        @test_throws MethodError duration(Date(2018, 9, 30), Date(2019, 9, 30))
     end
 end
 
@@ -58,11 +61,8 @@ end
 
 @testset "financial calcs" begin
 
-    @testset "price and present_value" begin
-        cf = [100, 100]
-
-        @test price(0.05, cf) ≈ pv(0.05, cf)
-
+    @testset "present_value" begin
+        @test !isdefined(ActuaryUtilities, :price)
 
         cfs = ones(3)
         @test present_values(FM.Yield.Constant(0.0), cfs) == [3, 2, 1]
@@ -83,11 +83,7 @@ end
 
         @test pv(0.05, cf, ts) ≈ 100 / 1.05^0.5 + 100 / 1.05^1
 
-        @test price(0.05, cf, ts) ≈ pv(0.05, cf, ts)
-        @test price(0.05, -1 .* cf, ts) ≈ abs(pv(0.05, cf, ts))
-
         @test pv(0.05, FC.Cashflow.(cf, ts)) ≈ pv(0.05, cf, ts)
-        @test price(0.05, FC.Cashflow.(cf, ts)) ≈ price(0.05, cf, ts)
 
 
     end
@@ -154,10 +150,19 @@ end
 include("duration.jl")
 include("key_rate_durations.jl")
 include("sensitivities.jl")
+include("sensitivity_engine.jl")
+include("callable_valuations.jl")
 include("analytic_types.jl")
 include("zero_cashflows.jl")
+include("sensitivity_regressions.jl")
+include("cashflow_sensitivity_inputs.jl")
+include("dollar_risk_regressions.jl")
+include("convexity_conventions.jl")
 include("stochastic_sensitivities.jl")
 include("contract_sensitivities.jl")
+include("projection_models.jl")
+include("parallel_measures.jl")
+include("market_inputs.jl")
 
 using Aqua
 @testset "Aqua.jl" begin
