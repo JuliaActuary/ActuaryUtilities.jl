@@ -19,7 +19,9 @@ end
 ```
 
 Each input must be an `AbstractVector{<:Real}`; wrap a scalar input in a one-element
-vector. The valuation receives vectors of the same shapes. As for curves, `order` is
+vector. Inputs are read by position: the valuation receives 1-based vectors of the same
+lengths, also for offset inputs, and the derivative vectors and matrices are 1-based. As for
+curves, `order` is
 [`FirstOrder()`](@ref) (the default) or [`SecondOrder()`](@ref), and the result is
 `(; value, duration, dv01)`, with `convexity` at second order. Each derivative field is keyed
 by input name, with one entry per element:

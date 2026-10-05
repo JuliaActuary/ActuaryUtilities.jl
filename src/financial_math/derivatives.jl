@@ -48,7 +48,9 @@ function _named_ad(f::F, x::NamedTuple{roles}, order) where {F, roles}
     # Closures read the typed tuple's length, which keeps the callback's return type inferable.
     part(v, i) = length(x) == 1 ? v : view(v, ranges[i])
     g(z) = f(NamedTuple{roles}(ntuple(i -> part(z, i), length(x))))
-    result = _ad_derivatives(g, reduce(vcat, map(v -> float.(v), values(x))), order)
+    # Inputs are read by position: one 1-based vector, so ForwardDiff never sees an offset axis,
+    # even for a single role, which `reduce(vcat, ...)` returns as it is.
+    result = _ad_derivatives(g, reduce(vcat, map(v -> float.(_one_based(v, axes(v, 1))), values(x))), order)
     gradient = NamedTuple{roles}(ntuple(i -> part(result.gradient, i), length(x)))
     return _with_hessian((; result.value, gradient, zero_stream = false), result, ranges, roles, order)
 end

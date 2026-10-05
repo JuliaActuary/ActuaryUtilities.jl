@@ -72,6 +72,25 @@
         @test r.dv01.x ≈ -2 .* collect(1.0:n) ./ 10_000
     end
 
+    @testset "offset inputs are read by position" begin
+        x, y = [1.0, 2.0], [0.5, -1.0, 3.0]
+        v(m) = sum(abs2, m.x) * (1 + sum(m.y)) + m.x[1] * m.y[end]
+        w(m) = sum(abs2, m.x)
+        seen = Ref{Any}(nothing)
+        for order in (FirstOrder(), SecondOrder())
+            one = sensitivities(w, order, (; x = OffsetArray(x, 0:1)))
+            @test isequal(one, sensitivities(w, order, (; x)))
+            @test one.dv01.x isa Vector{Float64}
+            two = sensitivities(order, (; x = OffsetArray(x, 0:1), y = OffsetArray(y, -5:-3))) do m
+                seen[] = map(r -> axes(r, 1), m)
+                v(m)
+            end
+            @test isequal(two, sensitivities(v, order, (; x, y)))
+            @test seen[] == (; x = Base.OneTo(2), y = Base.OneTo(3))
+            @inferred sensitivities(w, order, (; x = OffsetArray(x, 0:1)))
+        end
+    end
+
     @testset "named curves and named inputs dispatch separately" begin
         curve = linear(zeros_)
         by_curve = sensitivities(c -> FC.present_value(c.curve, cfs, times), KeyRates(tenors), (; curve))
