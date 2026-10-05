@@ -70,21 +70,20 @@
             # The second-order fields extend the first-order ones from the same derivatives.
             f = sensitivities(credit, target; index = curve)
             @test _same_sensitivity(f, (; s.value, s.duration, s.dv01))
-            @test dv01(Effective(), credit, target; index = curve) ≈ f.dv01.discount + f.dv01.index
+            @test duration(DV01(), Effective(), credit, target; index = curve) ≈ f.dv01.discount + f.dv01.index
         end
     end
 
-    @testset "default duration & dv01 verb" begin
+    @testset "default duration and DV01" begin
         for target in (fb, flm, [fb, flm])
             @test duration(curve, target) ≈ duration(Effective(), curve, target)
-            @test dv01(curve, target) ≈ dv01(Effective(), curve, target)
-            @test duration(DV01(), curve, target) ≈ dv01(Effective(), curve, target)
+            @test duration(DV01(), curve, target) ≈ duration(DV01(), Effective(), curve, target)
             @test convexity(curve, target) ≈ convexity(Effective(), curve, target)
             # The parallel measures equal the roles of the bundle and the sums of the key-rate one.
             p = sensitivities(curve, target)
             @test duration(curve, target) ≈ p.duration.discount + p.duration.index atol = 1.0e-12
             @test duration(Spread(), curve, target) ≈ p.duration.discount atol = 1.0e-12
-            @test dv01(Spread(), curve, target) ≈ p.dv01.discount atol = 1.0e-12
+            @test duration(DV01(), Spread(), curve, target) ≈ p.dv01.discount atol = 1.0e-12
             s = sensitivities(KeyRates(tenors), curve, target)
             # Key-rate durations match the bundle; unmarked key-rate risk is effective risk.
             kr = KeyRates(tenors)
@@ -92,17 +91,15 @@
             @test duration(kr, curve, target) == duration(Effective(), kr, curve, target)
             @test duration(Spread(), kr, curve, target) ≈ s.duration.discount atol = 1.0e-12
             @test duration(DV01(), kr, curve, target) ≈ s.dv01.discount .+ s.dv01.index atol = 1.0e-12
-            @test dv01(Spread(), kr, curve, target) ≈ s.dv01.discount atol = 1.0e-12
-            @test dv01(kr, curve, target) == duration(DV01(), kr, curve, target)
+            @test duration(DV01(), Spread(), kr, curve, target) ≈ s.dv01.discount atol = 1.0e-12
             @test sum(convexity(kr, curve, target)) ≈ convexity(curve, target) atol = 1.0e-10
         end
-        @test (@inferred dv01(curve, fb)) isa Float64
+        @test (@inferred duration(DV01(), curve, fb)) isa Float64
         @test (@inferred convexity(curve, fb)) isa Float64
         # A contract under Hull-White is valued on the model's discount function, as its duration is.
         hw = FM.ShortRate.HullWhite(0.1, 0.01, curve)
         s = sensitivities(KeyRates(tenors), hw, flm)
         @test s.duration.discount .+ s.duration.index ≈ duration(KeyRates(tenors), hw, flm) atol = 1.0e-12
-        @test dv01(0.05, [5.0, 5.0, 105.0]) ≈ duration(DV01(), 0.05, [5.0, 5.0, 105.0])   # cashflow fallback
         # A vector of `Cashflow`s is fixed cashflows, and a vector of other contracts a portfolio.
         cfs = collect(FM.Projection(fb, curve, FM.CashflowProjection()))
         @test duration(curve, cfs) == duration(Modified(), curve, cfs)
@@ -242,9 +239,9 @@ end
         effective_dv01 = p.dv01.discount + p.dv01.index
         @test effective_dv01 ≈ ir01_ref rtol = 1.0e-4
         @test p.dv01.discount ≈ cs01_ref rtol = 1.0e-4
-        @test dv01(Effective(), credit, fl; index = rf) ≈ ir01_ref rtol = 1.0e-4   # public verbs
-        @test dv01(Spread(), credit, fl; index = rf) ≈ cs01_ref rtol = 1.0e-4
-        @test dv01(Effective(), credit, fl; index = rf) ≈ effective_dv01 atol = 1.0e-12  # eff = index + discount
+        @test duration(DV01(), Effective(), credit, fl; index = rf) ≈ ir01_ref rtol = 1.0e-4   # public verbs
+        @test duration(DV01(), Spread(), credit, fl; index = rf) ≈ cs01_ref rtol = 1.0e-4
+        @test duration(DV01(), Effective(), credit, fl; index = rf) ≈ effective_dv01 atol = 1.0e-12  # eff = index + discount
         @test sum(s.dv01.discount .+ s.dv01.index) ≈ effective_dv01 atol = 1.0e-12
         @test effective_dv01 ≈ -2.381601e-6 rtol = 1.0e-5            # regression anchors
         @test p.dv01.discount ≈ 4.585068e-4 rtol = 1.0e-5

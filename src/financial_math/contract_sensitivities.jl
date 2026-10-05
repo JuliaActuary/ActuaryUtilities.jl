@@ -27,12 +27,11 @@ end
     duration(Effective(), discount, contract; index = discount)     # rate duration, yrs
     duration(Spread(),    discount, contract; index = discount)     # spread duration, yrs
     duration(Effective(), KeyRates(tenors), discount, contract; index = discount)   # vector
-    dv01(Effective(), discount, contract; index = discount)         # the dollar versions
+    duration(DV01(), Effective(), discount, contract; index = discount)   # the dollar versions
     convexity(Effective(), discount, contract; index = discount)    # and the convexities
     duration(discount, contract; index = discount)                  # Effective() by default
-    dv01(discount, contract; index = discount)
-    convexity(discount, contract; index = discount)
     duration(DV01(), [KeyRates(tenors),] discount, contract; index = discount)
+    convexity(discount, contract; index = discount)
 
 Effective (rate) and spread (credit) duration, DV01 and convexity for a contract or a portfolio
 (a vector of contracts), reprojecting cashflows under continuous-zero shifts. Coupons project on
@@ -41,7 +40,8 @@ the `index` curve, which defaults to `discount`, and every payment is discounted
 - `Effective()` shifts both curves, so floating coupons reset.
 - `Spread()` shifts the discount curve only, so projected coupons stay fixed.
 
-Without a marker, contract and portfolio measures use `Effective()`. The parallel forms take no
+Markers come in the order `DV01()`, then `Effective()` or `Spread()`, then `KeyRates(tenors)`.
+Without `Effective()` or `Spread()`, contract and portfolio measures use `Effective()`. The parallel forms take no
 tenor grid; `KeyRates(tenors)` gives per-tenor vectors and convexity matrices. Effective
 convexity includes the cross terms between the curves: for the parallel second derivatives `Cᵢᵢ`,
 `Cᵢd`, `Cdᵢ` and `Cdd` of the index and discount roles, it is their sum, and spread convexity is
@@ -57,41 +57,13 @@ function duration(metric::_ContractMetric, kr::KeyRates, discount::AYM, target::
     return _relative(r, r.gradient; negate = true)
 end
 
-"""
-    dv01(args...)
-    dv01(valuation, args...)
-
-Return signed dollar risk `-∂V/∂r / 10000`. Cashflow forms are `duration(DV01(), args...)`, and
-callback forms are `duration(valuation, DV01(), args...)`, so the valuation comes first and
-do-block syntax works:
-
-```julia
-dv01(valuation, curve)                   # parallel DV01
-dv01(valuation, KeyRates(tenors), curve) # key-rate DV01s
-dv01(valuation, base, credit)            # (; base, credit)
-dv01(valuation, (; rf, credit))          # (; rf, credit)
-dv01(curve) do c
-    present_value(c, cfs, times)
-end
-```
-
-Contract forms accept `Effective()` or `Spread()`; unmarked contract and portfolio calls use
-`Effective()`.
-"""
-function dv01(metric::_ContractMetric, discount::AYM, target::_Contractish; index::AYM = discount)
+function duration(::DV01, metric::_ContractMetric, discount::AYM, target::_Contractish; index::AYM = discount)
     return -ForwardDiff.derivative(s -> _parallel_value(metric, target, discount, index, s), 0.0) / 10_000
 end
-function dv01(metric::_ContractMetric, kr::KeyRates, discount::AYM, target::_Contractish; index::AYM = discount)
+function duration(::DV01, metric::_ContractMetric, kr::KeyRates, discount::AYM, target::_Contractish; index::AYM = discount)
     r = _contract_keyrate(metric, kr.tenors, discount, target, index, FirstOrder())
     return _per_bp(r, r.gradient)
 end
-dv01(args...; kwargs...) = duration(DV01(), args...; kwargs...)
-dv01(valuation::F, yield::_YieldInput) where {F} = duration(valuation, DV01(), yield)
-dv01(valuation::F, kr::KeyRates, curve::AYM) where {F} = duration(valuation, DV01(), kr, curve)
-dv01(valuation::F, base::AYM, credit::AYM) where {F} = duration(valuation, DV01(), base, credit)
-dv01(valuation::F, kr::KeyRates, base::AYM, credit::AYM) where {F} = duration(valuation, DV01(), kr, base, credit)
-dv01(valuation::F, curves::_NamedCurves) where {F} = duration(valuation, DV01(), curves)
-dv01(valuation::F, kr::KeyRates, curves::_NamedCurves) where {F} = duration(valuation, DV01(), kr, curves)
 
 convexity(metric::_ContractMetric, discount::AYM, target::_Contractish; index::AYM = discount) =
     _second_over_value(s -> _parallel_value(metric, target, discount, index, s))

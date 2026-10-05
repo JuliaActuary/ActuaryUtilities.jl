@@ -492,11 +492,11 @@ floater = Bond.Floating(0.015, Periodic(1), 5.0, "SOFR")   # SOFR + 150bp, 5y an
 
 (effective = duration(Effective(), zrc, floater),   # rate duration, yrs — small
  spread    = duration(Spread(),    zrc, floater),   # spread duration, yrs — near a 5-year bond's
- dv01      = dv01(Effective(),     zrc, floater))   # effective DV01, $/bp
+ dv01      = duration(DV01(), Effective(), zrc, floater))   # effective DV01, $/bp
 ```
 
 The curve comes before the contract. Calls without a marker default to `Effective()` for
-all three verbs, including portfolios. Request spread risk explicitly with `Spread()`.
+`duration`, `duration(DV01(), …)` and `convexity`, including portfolios. Request spread risk explicitly with `Spread()`.
 Coupons project on the keyword `index` curve, which defaults to the discount curve, and
 every payment is discounted on the curve passed: `duration(Effective(), credit_curve,
 floater; index = sofr_curve)`. The parallel measures take no tenor grid; use
@@ -504,7 +504,7 @@ floater; index = sofr_curve)`. The parallel measures take no tenor grid; use
 
 ```@example sensitivities
 (duration(zrc, floater) ≈ duration(Effective(), zrc, floater),
- dv01(zrc, floater) ≈ dv01(Effective(), zrc, floater),
+ duration(DV01(), zrc, floater) ≈ duration(DV01(), Effective(), zrc, floater),
  convexity(zrc, floater) ≈ convexity(Effective(), zrc, floater))
 ```
 

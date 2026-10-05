@@ -84,7 +84,7 @@ _npartials(::Type) = 0
         )
         empty!(c.depths)
         @test duration(metric, base, c) ≈ dur
-        @test dv01(metric, base, c) ≈ dollars
+        @test duration(DV01(), metric, base, c) ≈ dollars
         @test duration(metric, kr, base, c) ≈ key_rate
         @test sum(key_rate) ≈ dur
         @test maximum(c.depths) == 1
@@ -93,7 +93,7 @@ _npartials(::Type) = 0
     sb = sensitivities(base + credit, floater; index = base)
     @test duration(Effective(), base + credit, floater; index = base) ≈ sb.duration.discount + sb.duration.index atol = 1.0e-12
     @test duration(Spread(), base + credit, floater; index = base) ≈ sb.duration.discount
-    @test dv01(Effective(), base + credit, floater; index = base) ≈ sb.dv01.discount + sb.dv01.index atol = 1.0e-12
+    @test duration(DV01(), Effective(), base + credit, floater; index = base) ≈ sb.dv01.discount + sb.dv01.index atol = 1.0e-12
 
     for bad in (Float64[], [2.0, 1.0], [1.0, 1.0], [0.0, 1.0], [1.0, Inf], [1.0, NaN])
         @test_throws ArgumentError KeyRates(bad)

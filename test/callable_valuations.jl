@@ -72,7 +72,7 @@
     end
 end
 
-@testset "dv01 takes the valuation first" begin
+@testset "DV01 of a valuation callback" begin
     curve = FM.Yield.Constant(FC.Continuous(0.04))
     credit = FM.Yield.Constant(FC.Continuous(0.01))
     kr = KeyRates([1.0, 3.0, 7.0])
@@ -80,39 +80,37 @@ end
     closure(c) = value(c)
     pair(b, c) = value(b, c)
     named(c) = value(c.rf + c.spread)
+    # A callable struct, a closure and a do-block give the same DV01.
     for yield in (0.04, FC.Periodic(0.04, 2), FC.Continuous(0.04), curve)
-        @test dv01(value, yield) == duration(value, DV01(), yield)
-        @test dv01(closure, yield) == duration(closure, DV01(), yield)
-        @test dv01(yield) do c
+        @test duration(value, DV01(), yield) == duration(closure, DV01(), yield)
+        @test duration(DV01(), yield) do c
             value(c)
         end == duration(closure, DV01(), yield)
     end
-    @test dv01(value, kr, curve) == duration(value, DV01(), kr, curve)
-    @test dv01(kr, curve) do c
+    @test duration(value, DV01(), kr, curve) == duration(closure, DV01(), kr, curve)
+    @test duration(DV01(), kr, curve) do c
         value(c)
     end == duration(closure, DV01(), kr, curve)
-    @test dv01(value, curve) ≈ sensitivities(value, curve).dv01
-    @test dv01(value, kr, curve) ≈ sensitivities(value, kr, curve).dv01
+    @test duration(value, DV01(), curve) ≈ sensitivities(value, curve).dv01
+    @test duration(value, DV01(), kr, curve) ≈ sensitivities(value, kr, curve).dv01
     # Several curves: one DV01 per role, the `dv01` field of `sensitivities`.
     for grid in ((), (kr,))
-        d = dv01(pair, grid..., curve, credit)
+        d = duration(pair, DV01(), grid..., curve, credit)
         @test keys(d) == (:base, :credit)
         @test d.base ≈ duration(pair, IR01(), grid..., curve, credit) rtol = 1.0e-12
         @test d.credit ≈ duration(pair, CS01(), grid..., curve, credit) rtol = 1.0e-12
         @test _same_sensitivity(d, sensitivities(pair, grid..., curve, credit).dv01)
-        @test _same_sensitivity(dv01(value, grid..., curve, credit), d)
+        @test _same_sensitivity(duration(value, DV01(), grid..., curve, credit), d)
         @test _same_sensitivity(
-            dv01(grid..., curve, credit) do b, c
+            duration(DV01(), grid..., curve, credit) do b, c
                 pair(b, c)
             end, d
         )
-        n = dv01(named, grid..., (; rf = curve, spread = credit))
+        n = duration(named, DV01(), grid..., (; rf = curve, spread = credit))
         @test keys(n) == (:rf, :spread)
         @test _same_sensitivity(n, sensitivities(named, grid..., (; rf = curve, spread = credit)).dv01)
-        @test _same_sensitivity(n, duration(named, DV01(), grid..., (; rf = curve, spread = credit)))
         @test n.rf ≈ d.base rtol = 1.0e-12
     end
-    # Cashflow and contract forms are unchanged.
-    @test dv01(curve, [5.0, 105.0], [2.0, 6.0]) == duration(DV01(), curve, [5.0, 105.0], [2.0, 6.0])
-    @test dv01(kr, curve, [5.0, 105.0], [2.0, 6.0]) == duration(DV01(), kr, curve, [5.0, 105.0], [2.0, 6.0])
+    # `dv01` is removed: `duration(DV01(), ...)` is the one standalone DV01.
+    @test !isdefined(ActuaryUtilities, :dv01)
 end

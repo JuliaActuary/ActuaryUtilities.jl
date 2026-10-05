@@ -13,7 +13,7 @@ export irr, internal_rate_of_return, spread,
     breakeven, moic,
     Macaulay, Modified, DV01, IR01, CS01, Effective, Spread, KeyRates, FirstOrder, SecondOrder,
     duration, convexity,
-    sensitivities, dv01, zspread, locked_floater, Scenarios
+    sensitivities, zspread, locked_floater, Scenarios
 
 include("financial_math/cashflow_risk.jl")
 include("financial_math/measures.jl")

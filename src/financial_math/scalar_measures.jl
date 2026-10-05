@@ -143,7 +143,7 @@ duration(::Modified, yield::_YieldInput, cfs::_CashflowCollection, times...) =
     _weighted_ratio(yield, identity, _cashflow_inputs(cfs, times...)...; divisor = _coordinate(yield).divisor)
 
 duration(::DV01, yield::_YieldInput, x::_Instrument, times...; kwargs...) =
-    _fixed(x) ? _fixed_dv01(yield, x, times...; kwargs...) : dv01(Effective(), yield, x, times...; kwargs...)
+    _fixed(x) ? _fixed_dv01(yield, x, times...; kwargs...) : duration(DV01(), Effective(), yield, x, times...; kwargs...)
 
 # -∂V/∂s is Σ t·cf·d divided by the coordinate's divisor; do not divide by V so dollar
 # exposure remains defined at zero present value.

@@ -151,7 +151,7 @@ function duration(valuation_fn::F, ::DV01, kr::KeyRates, curve::AYM) where {F}
     return _per_bp(r, r.gradient)
 end
 duration(::DV01, kr::KeyRates, curve::AYM, x::_Instrument, times...; kwargs...) =
-    _fixed(x) ? _keyrate_dv01(curve, kr, x, times...; kwargs...) : dv01(Effective(), kr, curve, x, times...; kwargs...)
+    _fixed(x) ? _keyrate_dv01(curve, kr, x, times...; kwargs...) : duration(DV01(), Effective(), kr, curve, x, times...; kwargs...)
 function _keyrate_dv01(curve, kr, cfs, times...)
     r = _fixed_keyrate(curve, kr, FirstOrder(), cfs, times...)
     return _per_bp(r, r.gradient)

@@ -17,16 +17,15 @@ which defaults to the discount curve.
 | Measure | Fixed cashflows | Valuation callback | Contract or portfolio |
 |:--|:--|:--|:--|
 | duration | `duration([Macaulay(),] curve, cfs, times)` | `duration(valuation, curve)` | `duration([Spread(),] discount, contract; index)` |
-| DV01 | `dv01(curve, cfs, times)` | `dv01(valuation, curve)` | `dv01([Spread(),] discount, contract; index)` |
+| DV01 | `duration(DV01(), curve, cfs, times)` | `duration(valuation, DV01(), curve)` | `duration(DV01(), [Spread(),] discount, contract; index)` |
 | convexity | `convexity(curve, cfs, times)` | `convexity(valuation, curve)` | `convexity([Spread(),] discount, contract; index)` |
 | key rates | `duration(KeyRates(t), curve, cfs, times)` | `duration(valuation, KeyRates(t), curve)` | `duration(KeyRates(t), discount, contract; index)` |
-| two curves | `dv01(base + credit, cfs, times)` | `duration(valuation, IR01(), base, credit)`, `dv01(valuation, base, credit)` | `dv01(discount, contract; index)` |
+| two curves | `duration(DV01(), base + credit, cfs, times)` | `duration(valuation, IR01(), base, credit)`, `duration(valuation, DV01(), base, credit)` | `duration(DV01(), discount, contract; index)` |
 | all at once | `sensitivities([SecondOrder(),] [KeyRates(t),] curve, cfs, times)` | `sensitivities(valuation, [SecondOrder(),] [KeyRates(t),] curve)` | `sensitivities([SecondOrder(),] [KeyRates(t),] discount, contract; index)` |
 | spreads | `spread(curve1, curve2, cfs, times)` | | `zspread(discount, contract, price; index)` |
 
-- `dv01(args...)` is `duration(DV01(), args...)`, and `dv01(valuation, args...)` is
-  `duration(valuation, DV01(), args...)`. Key-rate forms take `KeyRates(t)` after any `DV01()`
-  or `Effective()`/`Spread()` marker. Contract forms default to `Effective()`.
+- Markers come in the order `DV01()`, then `Effective()` or `Spread()`, then `KeyRates(t)`.
+  Contract forms default to `Effective()`.
 - Callbacks also take two curves, `(valuation, base, credit)`, named curves,
   `(valuation, curves::NamedTuple)`, and market inputs, `sensitivities(valuation, inputs::NamedTuple)`.
   A [`Scenarios`](@ref) takes the place of a Hull–White curve: `Scenarios(hw; horizon, ...)`.
@@ -254,11 +253,21 @@ which defaults to the discount curve.
   role**, the `convexity` field of `sensitivities(valuation, SecondOrder(), ...)`: `.base`,
   `.credit` and `.cross` become `.base.base`, `.credit.credit` and `.base.credit`. `.credit.base`
   equals `.base.credit` for parallel shifts and is its transpose with `KeyRates`.
-- **`dv01` takes the valuation first**, as `duration` does: `dv01(valuation, curve)`,
-  `dv01(valuation, KeyRates(tenors), curve)` and do-blocks such as `dv01(curve) do c ... end` are
-  `duration(valuation, DV01(), ...)`. With two curves or a `NamedTuple` of curves,
-  `dv01(valuation, base, credit)` and `dv01(valuation, curves)` return one DV01 per role, the
-  `dv01` field of `sensitivities`; `duration(valuation, DV01(), ...)` has the same forms.
+- **`dv01` is removed**; `duration(DV01(), ...)` is the one standalone DV01, and every
+  `sensitivities` result keeps its `dv01` field. The valuation callback still comes first, so
+  do-blocks work: `duration(DV01(), curve) do c ... end`. With two curves or a `NamedTuple` of
+  curves, the callback form returns one DV01 per role, the `dv01` field of `sensitivities`.
+
+  | Removed call | v6 replacement |
+  |:--|:--|
+  | `dv01(curve, cfs, times)` | `duration(DV01(), curve, cfs, times)` |
+  | `dv01(kr, curve, cfs, times)` | `duration(DV01(), kr, curve, cfs, times)` |
+  | `dv01(f, curve)` | `duration(f, DV01(), curve)` |
+  | `dv01(f, kr, curve)` | `duration(f, DV01(), kr, curve)` |
+  | `dv01(f, base, credit)` | `duration(f, DV01(), base, credit)` |
+  | `dv01(f, named_curves)` | `duration(f, DV01(), named_curves)` |
+  | `dv01(Effective(), contract, curve)` | `duration(DV01(), Effective(), discount, contract; index)` |
+  | `dv01(Spread(), contract, curve)` | `duration(DV01(), Spread(), discount, contract; index)` |
 - **Contract measures take the curve first and the index curve as a keyword**, as FinanceCore
   and FinanceModels do: `duration(Effective(), discount, contract; index = discount)`, and the same
   for `Spread()`, `dv01`, `convexity`, `sensitivities` and `zspread(discount, contract, price; index = discount)`.

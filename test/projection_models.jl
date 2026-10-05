@@ -14,7 +14,7 @@
             reference = sensitivities(explicit, order, grid..., (; discount = credit, index))
             @test _same_sensitivity(sensitivities(order, grid..., credit, c; index), reference)
         end
-        @test dv01(Effective(), credit, c; index) ≈ sum(values(sensitivities(credit, c; index).dv01)) atol = 1.0e-12
+        @test duration(DV01(), Effective(), credit, c; index) ≈ sum(values(sensitivities(credit, c; index).dv01)) atol = 1.0e-12
     end
     for c in (floater, swap, forward)
         spread = 0.007
@@ -59,7 +59,7 @@ end
         @test duration(Effective(), curve, composite) ≈ duration(value, curve)
         @test duration(Spread(), curve, composite) ≈ duration(value, curve)
         @test convexity(Effective(), curve, composite) ≈ convexity(value, curve)
-        @test dv01(curve, composite) ≈ sum(dv01(curve, p) for p in parts)
+        @test duration(DV01(), curve, composite) ≈ sum(duration(DV01(), curve, p) for p in parts)
         s = sensitivities(kr, curve, composite)
         @test s.value ≈ value(curve)
         @test s.duration.discount .+ s.duration.index ≈ duration(value, kr, curve)
@@ -77,7 +77,7 @@ end
     for target in (cap, swaption)
         value(c) = FC.pv(on(c), target)
         @test duration(Effective(), hw, target) ≈ duration(value, curve)
-        @test dv01(hw, target) ≈ duration(value, DV01(), curve)
+        @test duration(DV01(), hw, target) ≈ duration(value, DV01(), curve)
         @test duration(Effective(), hw, FC.Composite(target, target)) ≈ duration(value, curve)
         s = sensitivities(kr, hw, target)
         @test s.duration.discount .+ s.duration.index ≈ duration(value, kr, curve)
@@ -88,7 +88,7 @@ end
     @test_throws "first-order ForwardDiff derivatives only" convexity(Effective(), hw, swaption)
     @test_throws "first-order ForwardDiff derivatives only" sensitivities(SecondOrder(), hw, swaption)
     @test_throws "first-order ForwardDiff derivatives only" sensitivities(SecondOrder(), kr, hw, swaption)
-    @test sensitivities(hw, swaption).dv01.discount ≈ dv01(Spread(), hw, swaption)
+    @test sensitivities(hw, swaption).dv01.discount ≈ duration(DV01(), Spread(), hw, swaption)
 end
 
 # At t = 2, pays principal plus the index forward rate from t = 1 to 2, valued in closed form

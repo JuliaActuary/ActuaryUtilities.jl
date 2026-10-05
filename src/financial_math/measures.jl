@@ -49,7 +49,7 @@ struct CS01 end
 
 Measure contract risk while reprojecting cashflows under shifted curves, so floating
 coupons reset: `duration(Effective(), discount, contract; index = discount)` shifts both
-the index and the discount curve. The same marker applies to `dv01` and `convexity`.
+the index and the discount curve. The same marker applies to `duration(DV01(), …)` and `convexity`.
 `Modified` and `Macaulay` operate on fixed cashflows.
 
 See also: [`Spread`](@ref), [`sensitivities`](@ref), [`locked_floater`](@ref).
