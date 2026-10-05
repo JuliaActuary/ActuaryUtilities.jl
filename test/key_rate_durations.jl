@@ -198,12 +198,13 @@ end
 
         conv = convexity((b, c) -> FC.present_value(b + c, cfs, tenors), KeyRates(tenors), base, credit)
 
-        @test !all(isapprox.(conv.cross, 0.0, atol = 1.0e-10))
-        @test !all(isapprox.(conv.base, 0.0, atol = 1.0e-10))
-        @test !all(isapprox.(conv.credit, 0.0, atol = 1.0e-10))
+        @test !all(isapprox.(conv.base.credit, 0.0, atol = 1.0e-10))
+        @test !all(isapprox.(conv.base.base, 0.0, atol = 1.0e-10))
+        @test !all(isapprox.(conv.credit.credit, 0.0, atol = 1.0e-10))
         # For symmetric additive combination, cross ≈ base ≈ the combined curve's matrix
-        @test conv.cross ≈ conv.base atol = 1.0e-10
-        @test conv.base ≈ convexity(KeyRates(tenors), base + credit, cfs, tenors) atol = 1.0e-10
+        @test conv.base.credit ≈ conv.base.base atol = 1.0e-10
+        @test conv.credit.base ≈ transpose(conv.base.credit)
+        @test conv.base.base ≈ convexity(KeyRates(tenors), base + credit, cfs, tenors) atol = 1.0e-10
     end
 
     @testset "scalar curve measures equal sums of KeyRates results" begin
@@ -264,10 +265,11 @@ end
         # Two-curve convexity: scalars = sums of matrices
         scalar_conv = convexity(pv2, base, credit)
         mat_conv = convexity(pv2, KeyRates(tenors), base, credit)
-        @test scalar_conv.base isa Real
-        @test scalar_conv.base ≈ sum(mat_conv.base) atol = 1.0e-12
-        @test scalar_conv.credit ≈ sum(mat_conv.credit) atol = 1.0e-12
-        @test scalar_conv.cross ≈ sum(mat_conv.cross) atol = 1.0e-12
+        @test scalar_conv.base.base isa Real
+        @test scalar_conv.base.base ≈ sum(mat_conv.base.base) atol = 1.0e-12
+        @test scalar_conv.credit.credit ≈ sum(mat_conv.credit.credit) atol = 1.0e-12
+        @test scalar_conv.base.credit ≈ sum(mat_conv.base.credit) atol = 1.0e-12
+        @test scalar_conv.credit.base ≈ sum(mat_conv.credit.base) atol = 1.0e-12
     end
 
     @testset "cubic vs linear: same on flat curve" begin

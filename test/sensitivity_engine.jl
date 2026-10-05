@@ -35,7 +35,7 @@ _npartials(::Type) = 0
     @test r.hessian.base.credit ./ r.value ≈ pair.convexity.base.credit
     @test r.hessian.credit.base ≈ transpose(r.hessian.base.credit)
     @test pair.convexity.credit.base ≈ transpose(pair.convexity.base.credit)
-    @test _same_sensitivity(convexity(v2, kr, base, credit), (; base = pair.convexity.base.base, credit = pair.convexity.credit.credit, cross = pair.convexity.base.credit))
+    @test _same_sensitivity(convexity(v2, kr, base, credit), pair.convexity)
     three = engine(c -> v(c.base + c.credit + c.liquidity), (; base, credit, liquidity = credit), tenors, SecondOrder())
     @test three.gradient.base ≈ three.gradient.liquidity
     @test three.hessian.base.credit ≈ three.hessian.liquidity.credit
@@ -46,7 +46,7 @@ _npartials(::Type) = 0
     @test parallel.dv01.base ≈ sum(pair.dv01.base) && parallel.dv01.credit ≈ sum(pair.dv01.credit)
     @test parallel.duration.credit ≈ sum(pair.duration.credit)
     @test parallel.convexity.base.credit ≈ sum(pair.convexity.base.credit)
-    @test convexity(v2, base, credit) == (; base = parallel.convexity.base.base, credit = parallel.convexity.credit.credit, cross = parallel.convexity.base.credit)
+    @test convexity(v2, base, credit) == parallel.convexity
     @test duration(v2, IR01(), base, credit) ≈ parallel.dv01.base
     widths = Int[]
     counted(b, c) = (x = v2(b, c); push!(widths, _npartials(typeof(x))); x)

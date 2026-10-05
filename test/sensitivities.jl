@@ -335,7 +335,7 @@ end
     bond = FM.Bond.Fixed(0.04, FC.Periodic(2), 10.0)
     @test @inferred(duration(kr, curve, amts, times)) isa Vector{Float64}
     @test @inferred(duration(two_curves, IR01(), kr, curve, credit)) isa Vector{Float64}
-    @test @inferred(convexity(two_curves, curve, credit)).cross isa Float64
+    @test @inferred(convexity(two_curves, curve, credit)).base.credit isa Float64
     @test @inferred(duration(one_curve, kr, curve)) isa Vector{Float64}
     @test @inferred(duration(two_curves, CS01(), curve, credit)) isa Float64
     # The fields of each order: `value` is a number; the derivative fields follow the grid and roles.

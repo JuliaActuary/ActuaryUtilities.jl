@@ -105,16 +105,25 @@ end
 
     blocks = convexity(floater, base, credit)
     matrices = convexity(floater, kr, base, credit)
-    @test blocks.base ≈ sum(matrices.base) rtol = 1.0e-10
-    @test blocks.credit ≈ sum(matrices.credit) rtol = 1.0e-10
-    @test blocks.cross ≈ sum(matrices.cross) rtol = 1.0e-10
+    @test blocks.base.base ≈ sum(matrices.base.base) rtol = 1.0e-10
+    @test blocks.credit.credit ≈ sum(matrices.credit.credit) rtol = 1.0e-10
+    @test blocks.base.credit ≈ sum(matrices.base.credit) rtol = 1.0e-10
+    @test blocks.credit.base == blocks.base.credit
+    # The floater uses the curves differently, so the key-rate cross block is not symmetric;
+    # the two cross blocks are each other's transposes.
+    @test !(matrices.base.credit ≈ transpose(matrices.base.credit))
+    @test matrices.credit.base ≈ transpose(matrices.base.credit)
+    @test blocks == sensitivities(floater, SecondOrder(), base, credit).convexity
 
     fixed_value(b, c) = FC.present_value(b + c, cfs, times)
     fixed = convexity(fixed_value, base, credit)
     fixed_matrices = convexity(fixed_value, kr, base, credit)
-    @test fixed.base ≈ sum(fixed_matrices.base) rtol = 1.0e-12
-    @test fixed.cross ≈ fixed.base
-    @test fixed.base ≈ convexity(base + credit, cfs, times) rtol = 1.0e-12
+    @test fixed.base.base ≈ sum(fixed_matrices.base.base) rtol = 1.0e-12
+    @test fixed.base.credit ≈ fixed.base.base
+    @test fixed.base.base ≈ convexity(base + credit, cfs, times) rtol = 1.0e-12
+    # Shifting both curves together shifts the combined rate twice: all four blocks add up.
+    both = fixed.base.base + fixed.base.credit + fixed.credit.base + fixed.credit.credit
+    @test both ≈ 4 * convexity(base + credit, cfs, times) rtol = 1.0e-10
 end
 
 @testset "Removed v5 call shapes throw" begin

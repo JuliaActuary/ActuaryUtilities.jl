@@ -83,13 +83,6 @@ end
 _fixed_keyrate(curve, kr::KeyRates, order, cfs, times...) =
     _keyrate_analytic(curve, kr.tenors, _cashflow_inputs(cfs, times...)..., order)
 
-# The public two-curve convexity blocks. Only the three returned blocks are normalized.
-_base_credit_cross(r) = (;
-    base = _relative(r, r.hessian.base.base),
-    credit = _relative(r, r.hessian.credit.credit),
-    cross = _relative(r, r.hessian.base.credit),
-)
-
 ## Public yield-model sensitivities
 
 const _NamedCurves = NamedTuple{<:Any, <:Tuple{AYM, Vararg{AYM}}}
@@ -225,13 +218,15 @@ Return normalized convexity for a yield model or a pair of curves. Matrix entrie
 Empty and all-zero cashflow streams return zero convexity in the usual shape; see
 [Zero cashflow streams](@ref).
 
-The two-curve scalar forms return the parallel blocks `(; base, credit, cross)`,
-each `(∂²V/∂sᵢ∂sⱼ) / V` for continuous-zero parallel shifts of the named curves.
-They are ≈ the sums of the corresponding `KeyRates` blocks, including cross terms.
-`cross` is the mixed derivative divided by `V`, without an extra factor of two.
-For decimal shifts `u` and `v`, the second-order P&L is
-`V / 2 * (base * u^2 + 2 * cross * u * v + credit * v^2)`.
-For fixed cashflows discounted at `base + credit`, all three blocks equal
+The two-curve forms return the blocks keyed by role,
+`(; base = (; base, credit), credit = (; base, credit))`, the `convexity` field of
+[`sensitivities`](@ref) with [`SecondOrder`](@ref): each block is `(∂²V/∂sᵢ∂sⱼ) / V` for
+continuous-zero shifts of the named curves. The parallel blocks are numbers, ≈ the sums of the
+`KeyRates` blocks, and `base.credit == credit.base`. The `KeyRates` blocks are matrices, and
+`credit.base` is the transpose of `base.credit`, which need not be symmetric. For decimal parallel
+shifts `u` and `v`, the second-order P&L is
+`V / 2 * (base.base * u^2 + 2 * base.credit * u * v + credit.credit * v^2)`.
+For fixed cashflows discounted at `base + credit`, all four blocks equal
 `convexity(base + credit, cfs, times)` when the value is nonzero. Shifting both curves by one
 basis point shifts their combined continuous zero rates by two basis points. See
 [Two-curve convexity blocks](@ref).
@@ -250,9 +245,9 @@ function _keyrate_convexity(curve, kr, cfs, times...)
 end
 
 convexity(valuation_fn::F, base::AYM, credit::AYM) where {F} =
-    _base_credit_cross(_curve_ad(c -> valuation_fn(c.base, c.credit), (; base, credit), nothing, SecondOrder()))
+    _convexities(_curve_ad(c -> valuation_fn(c.base, c.credit), (; base, credit), nothing, SecondOrder()))
 convexity(valuation_fn::F, kr::KeyRates, base::AYM, credit::AYM) where {F} =
-    _base_credit_cross(_curve_ad(c -> valuation_fn(c.base, c.credit), (; base, credit), kr.tenors, SecondOrder()))
+    _convexities(_curve_ad(c -> valuation_fn(c.base, c.credit), (; base, credit), kr.tenors, SecondOrder()))
 
 ## Value, duration, DV01 and convexity together
 

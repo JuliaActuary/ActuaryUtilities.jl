@@ -250,6 +250,10 @@ which defaults to the discount curve.
   | contracts: `spread_*`, `forward_*` | `duration.discount`, `dv01.discount`; `duration.index`, `dv01.index` |
   | contracts: `effective_duration`, `effective_dv01` | `duration.discount + duration.index` (and `dv01`), or `duration(Effective(), ...)` |
   | contracts: `*_key_rate` | the same fields with `KeyRates(tenors)` |
+- **Two-curve `convexity(valuation, [KeyRates(t),] base, credit)` returns the blocks keyed by
+  role**, the `convexity` field of `sensitivities(valuation, SecondOrder(), ...)`: `.base`,
+  `.credit` and `.cross` become `.base.base`, `.credit.credit` and `.base.credit`. `.credit.base`
+  equals `.base.credit` for parallel shifts and is its transpose with `KeyRates`.
 - **`dv01` takes the valuation first**, as `duration` does: `dv01(valuation, curve)`,
   `dv01(valuation, KeyRates(tenors), curve)` and do-blocks such as `dv01(curve) do c ... end` are
   `duration(valuation, DV01(), ...)`. With two curves or a `NamedTuple` of curves,

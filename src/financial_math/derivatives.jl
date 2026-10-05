@@ -78,9 +78,10 @@ function _sensitivities(r, order)
     duration = _per_role(g -> _risk_ratio(g, r.value, r.zero_stream; negate = true), r.gradient)
     dv01 = _per_role(g -> _risk_ratio(g, 10_000, r.zero_stream; negate = true), r.gradient)
     order isa FirstOrder && return (; r.value, duration, dv01)
-    convexity = _per_role(h -> _risk_ratio(h, r.value, r.zero_stream), r.hessian)
-    return (; r.value, duration, dv01, convexity)
+    return (; r.value, duration, dv01, convexity = _convexities(r))
 end
+# The convexity blocks alone, keyed by role as the Hessian is: `convexity.base.credit`.
+_convexities(r) = _per_role(h -> _risk_ratio(h, r.value, r.zero_stream), r.hessian)
 _per_role(f::F, x::NamedTuple) where {F} = map(y -> _per_role(f, y), x)
 _per_role(f::F, x) where {F} = f(x)
 

@@ -90,8 +90,8 @@ base curve fixed. Both use the same sign and one-basis-point scaling as DV01.
 !!! note "When rate and credit sensitivities coincide"
     For fixed cashflows discounted at `base + credit`, matching one-basis-point
     shifts to either curve produce the same change in the combined continuous
-    zero rates. IR01, CS01 and combined-curve DV01 are therefore equal. The `base`,
-    `credit` and `cross` convexity blocks are also equal when the value is nonzero.
+    zero rates. IR01, CS01 and combined-curve DV01 are therefore equal. The four
+    convexity blocks are also equal when the value is nonzero.
     Here, credit is an additive discount spread.
 
     More generally, the equality requires the same shock coordinate, shape and
@@ -154,15 +154,16 @@ Legend(fig[1, 2], [PolyElement(polycolor = c) for c in colors], ["IR01 (base cur
 fig
 ```
 
-Two-curve convexity returns the parallel `base`, `credit`, and `cross` blocks.
-They coincide for the fixed cashflows and can differ for the floater:
+Two-curve convexity returns the parallel blocks keyed by role: `base.base`, `credit.credit`, and
+the cross block `base.credit`, equal to `credit.base`. They coincide for the fixed cashflows and can
+differ for the floater:
 
 ```@example sensitivities
 (fixed   = convexity(fixed_value, base, credit),
  floater = convexity(floater_value, base, credit))
 ```
 
-The `cross` block is the mixed second derivative divided by the initial value;
+The cross block is the mixed second derivative divided by the initial value;
 it contains no extra factor of two. See [Two-curve convexity blocks](@ref) for
 the second-order P&L formula.
 

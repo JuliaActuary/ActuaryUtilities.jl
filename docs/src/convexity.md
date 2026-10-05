@@ -49,7 +49,9 @@ use a callback or contract so the derivative includes changes in the payments.
 ## Two-curve convexity blocks
 
 For parallel continuous-zero shifts ``u`` to the base curve and ``v`` to the
-credit curve, `convexity(valuation, base, credit)` returns `(; base, credit, cross)`. With nonzero initial value ``V``, these are
+credit curve, `convexity(valuation, base, credit)` returns the blocks keyed by role,
+`(; base = (; base, credit), credit = (; base, credit))`, as the `convexity` field of
+`sensitivities(valuation, SecondOrder(), base, credit)` does. With nonzero initial value ``V``, these are
 
 ```math
 C_{bb} = \frac{V_{uu}}{V}, \qquad
@@ -57,7 +59,9 @@ C_{cc} = \frac{V_{vv}}{V}, \qquad
 C_{bc} = \frac{V_{uv}}{V}.
 ```
 
-The `cross` field is ``C_{bc}``, with no extra factor of two. Including the
+`base.base` is ``C_{bb}``, `credit.credit` is ``C_{cc}``, and `base.credit` and `credit.base` are
+both ``C_{bc}``, with no extra factor of two. With `KeyRates`, each block is a matrix, and
+`credit.base` is the transpose of `base.credit`, which need not be symmetric. Including the
 first-order exposures, the change in value is approximately
 
 ```math
@@ -70,7 +74,7 @@ term thus contributes ``V C_{bc}uv``. Its two symmetric entries in the Hessian
 cancel the one-half in the quadratic expansion.
 
 For fixed cashflows discounted at `base + credit`, value depends on ``u+v``, so
-all three blocks equal the combined curve's convexity. A five-year zero-coupon
+all four blocks equal the combined curve's convexity. A five-year zero-coupon
 payment has continuous-zero convexity ``5^2 = 25``:
 
 ```jldoctest two_curve_convexity
@@ -80,12 +84,12 @@ julia> base = Yield.Constant(Continuous(0.03)); credit = Yield.Constant(Continuo
 
 julia> blocks = convexity((b, c) -> pv(b + c, [100.0], [5.0]), base, credit);
 
-julia> all(c -> c ≈ 25, values(blocks))
+julia> all(c -> c ≈ 25, (blocks.base.base, blocks.base.credit, blocks.credit.base, blocks.credit.credit))
 true
 
 julia> combined = convexity(base + credit, [100.0], [5.0]);
 
-julia> blocks.base + 2 * blocks.cross + blocks.credit ≈ 4 * combined
+julia> blocks.base.base + 2 * blocks.base.credit + blocks.credit.credit ≈ 4 * combined
 true
 ```
 
