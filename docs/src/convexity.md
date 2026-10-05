@@ -101,6 +101,38 @@ curves have different roles and their convexities differ.
 
 Empty and all-zero streams follow the [Zero cashflow streams](@ref) convention.
 
+## Dollar convexity
+
+[`DollarConvexity`](@ref) selects the second derivative itself, ``H = ∂^2V/∂s^2`` (a matrix
+``∂^2V/∂s_i∂s_j`` with `KeyRates`, blocks keyed by role for several curves), in the same shock
+coordinates. It has no factor of one-half and no basis-point scaling: its unit is currency per
+squared unit of decimal rate. Normalized convexity is ``H/V``. Second-order
+[`sensitivities`](@ref) return it as `dollar_convexity`.
+
+For a shift of ``b`` basis points, the second-order change in value and the derivative per squared
+basis point are
+
+```julia
+estimated_pnl = -dv01 * b + 0.5 * dollar_convexity * (b / 10_000)^2
+hessian_per_bp_squared = dollar_convexity * 1e-8
+```
+
+Like DV01, dollar convexity is defined at zero value, keeps the position's sign, and adds across
+positions; normalized convexity needs a nonzero portfolio value. A position worth zero at a 0%
+continuous rate still has dollar risk:
+
+```jldoctest dollar_convexity
+julia> using ActuaryUtilities, FinanceCore
+
+julia> cfs, times = [-1.0, 1.0], [0.0, 1.0];
+
+julia> pv(Continuous(0.0), cfs, times), duration(DV01(), Continuous(0.0), cfs, times)
+(0.0, 0.0001)
+
+julia> convexity(DollarConvexity(), Continuous(0.0), cfs, times)
+1.0
+```
+
 ## Worked example: 11.26, 8.40, and annual-yield convexity
 
 Consider cashflows `[5, 5, 105]` at years `[1, 2, 3]`, discounted at a 4% annual

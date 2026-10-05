@@ -19,17 +19,19 @@ which defaults to the discount curve.
 | duration | `duration([Macaulay(),] curve, cfs, times)` | `duration(valuation, curve)` | `duration([Spread(),] discount, contract; index)` |
 | DV01 | `duration(DV01(), curve, cfs, times)` | `duration(valuation, DV01(), curve)` | `duration(DV01(), [Spread(),] discount, contract; index)` |
 | convexity | `convexity(curve, cfs, times)` | `convexity(valuation, curve)` | `convexity([Spread(),] discount, contract; index)` |
+| dollar convexity | `convexity(DollarConvexity(), curve, cfs, times)` | `convexity(valuation, DollarConvexity(), curve)` | `convexity(DollarConvexity(), [Spread(),] discount, contract; index)` |
 | key rates | `duration(KeyRates(t), curve, cfs, times)` | `duration(valuation, KeyRates(t), curve)` | `duration(KeyRates(t), discount, contract; index)` |
 | two curves | `duration(DV01(), base + credit, cfs, times)` | `duration(valuation, IR01(), base, credit)`, `duration(valuation, DV01(), base, credit)` | `duration(DV01(), discount, contract; index)` |
 | all at once | `sensitivities([SecondOrder(),] [KeyRates(t),] curve, cfs, times)` | `sensitivities(valuation, [SecondOrder(),] [KeyRates(t),] curve)` | `sensitivities([SecondOrder(),] [KeyRates(t),] discount, contract; index)` |
 | spreads | `spread(curve1, curve2, cfs, times)` | | `zspread(discount, contract, price; index)` |
 
-- Markers come in the order `DV01()`, then `Effective()` or `Spread()`, then `KeyRates(t)`.
-  Contract forms default to `Effective()`.
+- Markers come in the order `DV01()` or `DollarConvexity()`, then `Effective()` or `Spread()`,
+  then `KeyRates(t)`. Contract forms default to `Effective()`.
 - Callbacks also take two curves, `(valuation, base, credit)`, named curves,
   `(valuation, curves::NamedTuple)`, and market inputs, `sensitivities(valuation, inputs::NamedTuple)`.
   A [`Scenarios`](@ref) takes the place of a Hull–White curve: `Scenarios(hw; horizon, ...)`.
-- `sensitivities` returns `(; value, duration, dv01)`, and with `SecondOrder()` also `convexity`.
+- `sensitivities` returns `(; value, duration, dv01)`, and with `SecondOrder()` also `convexity`
+  and `dollar_convexity`.
   `value` is a number. The other fields are numbers without `KeyRates`, vectors (and a convexity
   matrix) with it, and keyed by role for several curves: `s.dv01.base`, `s.dv01.discount`,
   `s.convexity.discount.index`.
@@ -230,7 +232,7 @@ which defaults to the discount curve.
   floating contract never saw it; a contract with neither a projection nor a closed form now
   throws a `MethodError`.
 - **`sensitivities` has one result shape, and its order is a marker.** It returns
-  `(; value, duration, dv01)`, or with [`SecondOrder()`](@ref) `(; value, duration, dv01, convexity)`.
+  `(; value, duration, dv01)`, or with [`SecondOrder()`](@ref) `(; value, duration, dv01, convexity, dollar_convexity)`.
   [`FirstOrder()`](@ref) is the default. `value` is always a number. Without `KeyRates` the
   derivative fields are numbers for one parallel shift; with `KeyRates(tenors)` they are
   per-tenor vectors and a convexity matrix; with several curves they are keyed by role:
@@ -253,6 +255,13 @@ which defaults to the discount curve.
   role**, the `convexity` field of `sensitivities(valuation, SecondOrder(), ...)`: `.base`,
   `.credit` and `.cross` become `.base.base`, `.credit.credit` and `.base.credit`. `.credit.base`
   equals `.base.credit` for parallel shifts and is its transpose with `KeyRates`.
+- **Dollar convexity is new.** `DollarConvexity()` selects the signed second derivative
+  `∂²V/∂sᵢ∂sⱼ` in the usual shock coordinates, with no factor of one-half and no basis-point scaling:
+  `convexity(DollarConvexity(), curve, cfs, times)`, `convexity(valuation, DollarConvexity(), curve)`
+  and `convexity(DollarConvexity(), [Effective() | Spread(),] [KeyRates(t),] discount, contract; index)`,
+  with the layouts of `convexity`. Second-order `sensitivities` return it as `dollar_convexity`. It
+  is defined at zero value and adds across positions, as DV01 does; a shift of `b` basis points
+  changes value by about `-dv01 * b + 0.5 * dollar_convexity * (b / 10_000)^2`.
 - **`dv01` is removed**; `duration(DV01(), ...)` is the one standalone DV01, and every
   `sensitivities` result keeps its `dv01` field. The valuation callback still comes first, so
   do-blocks work: `duration(DV01(), curve) do c ... end`. With two curves or a `NamedTuple` of

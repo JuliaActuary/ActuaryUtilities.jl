@@ -220,7 +220,7 @@ The parallel measures are ≈ the sums of the decomposition:
 ```
 
 Use [`sensitivities`](@ref) to calculate the value, durations and DV01s together, and with
-[`SecondOrder()`](@ref) the convexities too, from one derivative calculation:
+[`SecondOrder()`](@ref) the convexities and dollar convexities too, from one derivative calculation:
 
 ```@example sensitivities
 result = sensitivities(SecondOrder(), KeyRates(tenors), zrc, cfs, times)
@@ -228,6 +228,7 @@ result = sensitivities(SecondOrder(), KeyRates(tenors), zrc, cfs, times)
 # result.duration  — key-rate durations (modified, vector)
 # result.dv01      — key-rate DV01s (vector)
 # result.convexity — key-rate convexity matrix
+# result.dollar_convexity — its unnormalized second derivatives, defined at zero value
 result
 ```
 

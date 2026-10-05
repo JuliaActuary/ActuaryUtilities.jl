@@ -88,6 +88,8 @@ end
     @test_throws "first-order ForwardDiff derivatives only" convexity(Effective(), hw, swaption)
     @test_throws "first-order ForwardDiff derivatives only" sensitivities(SecondOrder(), hw, swaption)
     @test_throws "first-order ForwardDiff derivatives only" sensitivities(SecondOrder(), kr, hw, swaption)
+    @test_throws "first-order ForwardDiff derivatives only" convexity(DollarConvexity(), hw, swaption)
+    @test_throws "first-order ForwardDiff derivatives only" convexity(DollarConvexity(), Spread(), kr, hw, swaption)
     @test sensitivities(hw, swaption).dv01.discount ≈ duration(DV01(), Spread(), hw, swaption)
 end
 

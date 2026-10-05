@@ -212,7 +212,7 @@ duration(valuation_fn::F, ::CS01, kr::KeyRates, base::AYM, credit::AYM) where {F
     convexity(valuation_fn, kr::KeyRates, base, credit) -> NamedTuple
 
 Return normalized convexity for a yield model or a pair of curves. Matrix entries are
-`(∂²V/∂rᵢ∂rⱼ) / V`. For a single curve's scalar parallel convexity, use
+`(∂²V/∂rᵢ∂rⱼ) / V`; for `∂²V/∂rᵢ∂rⱼ` itself, put [`DollarConvexity`](@ref) after the valuation. For a single curve's scalar parallel convexity, use
 `convexity(curve, cfs, times)` or `convexity(valuation_fn, curve)`.
 
 Empty and all-zero cashflow streams return zero convexity in the usual shape; see
@@ -246,6 +246,17 @@ end
 
 convexity(valuation_fn::F, base::AYM, credit::AYM) where {F} =
     _convexities(_curve_ad(c -> valuation_fn(c.base, c.credit), (; base, credit), nothing, SecondOrder()))
+
+# Dollar convexity (see `DollarConvexity`): the raw Hessians, in the layouts above.
+convexity(::DollarConvexity, kr::KeyRates, curve::AYM, x::_Instrument, times...; kwargs...) =
+    _fixed(x) ? _fixed_keyrate(curve, kr, SecondOrder(), x, times...; kwargs...).hessian :
+    convexity(DollarConvexity(), Effective(), kr, curve, x, times...; kwargs...)
+convexity(valuation::F, ::DollarConvexity, kr::KeyRates, curve::AYM) where {F} =
+    _one_curve_ad(valuation, curve, kr.tenors, SecondOrder()).hessian
+convexity(valuation::F, ::DollarConvexity, base::AYM, credit::AYM) where {F} =
+    _curve_ad(c -> valuation(c.base, c.credit), (; base, credit), nothing, SecondOrder()).hessian
+convexity(valuation::F, ::DollarConvexity, kr::KeyRates, base::AYM, credit::AYM) where {F} =
+    _curve_ad(c -> valuation(c.base, c.credit), (; base, credit), kr.tenors, SecondOrder()).hessian
 convexity(valuation_fn::F, kr::KeyRates, base::AYM, credit::AYM) where {F} =
     _convexities(_curve_ad(c -> valuation_fn(c.base, c.credit), (; base, credit), kr.tenors, SecondOrder()))
 
@@ -261,7 +272,7 @@ Return value and risk from one derivative calculation. `order` is [`FirstOrder()
 default, or [`SecondOrder()`](@ref):
 
 - `FirstOrder()` returns `(; value, duration, dv01)`.
-- `SecondOrder()` returns `(; value, duration, dv01, convexity)`.
+- `SecondOrder()` returns `(; value, duration, dv01, convexity, dollar_convexity)`.
 
 `value` is always a number. The derivative fields are numbers for one parallel shift of the
 curve, which moves in its own coordinate as in [`duration`](@ref) (see
@@ -273,6 +284,7 @@ its own shock, so the cross blocks of `convexity` are the mixed derivatives.
 - `duration`: `-∂V/∂s / V`
 - `dv01`: `-∂V/∂s / 10000`, the first-order value lost for a one-basis-point increase
 - `convexity`: `∂²V/∂sᵢ∂sⱼ / V`
+- `dollar_convexity`: `∂²V/∂sᵢ∂sⱼ`, defined at zero value (see [`DollarConvexity`](@ref))
 
 Without `KeyRates`, each role's shift is differentiated directly. With them, the hats sum to one,
 so the parallel measures are ≈ the sums of the key-rate ones. `FirstOrder()` takes no second

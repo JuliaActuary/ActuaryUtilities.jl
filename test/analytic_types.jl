@@ -25,7 +25,7 @@
 
     analytic(r) = sensitivities(SecondOrder(), kr, makecurve(r), cfs, times)
     automatic(r) = sensitivities(value, SecondOrder(), kr, makecurve(r))
-    for field in (:duration, :dv01, :convexity)
+    for field in (:duration, :dv01, :convexity, :dollar_convexity)
         fa(r) = sum(getproperty(analytic(r), field))
         fd(r) = sum(getproperty(automatic(r), field))
         @test ForwardDiff.derivative(fa, 0.04) ≈ ForwardDiff.derivative(fd, 0.04)
@@ -80,22 +80,22 @@ end
         @test iszero(convexity(curve, cfs, times))
 
         @test sensitivities(kr, curve, cfs, times) == (; value = 0.0, duration = z, dv01 = z)
-        @test sensitivities(SecondOrder(), kr, curve, cfs, times) == (; value = 0.0, duration = z, dv01 = z, convexity = zz)
-        @test sensitivities(SecondOrder(), curve, cfs, times) == (; value = 0.0, duration = 0.0, dv01 = 0.0, convexity = 0.0)
+        @test sensitivities(SecondOrder(), kr, curve, cfs, times) == (; value = 0.0, duration = z, dv01 = z, convexity = zz, dollar_convexity = zz)
+        @test sensitivities(SecondOrder(), curve, cfs, times) == (; value = 0.0, duration = 0.0, dv01 = 0.0, convexity = 0.0, dollar_convexity = 0.0)
     end
     big_grid = kernel(curve, big.(tenors), Float64[], Float64[], SecondOrder())
     @test big_grid.value isa Float64
     @test eltype(big_grid.gradient) == eltype(big_grid.hessian) == BigFloat
     big_cfs = sensitivities(SecondOrder(), kr, curve, BigFloat[], Float64[])
     @test big_cfs.value isa BigFloat
-    @test eltype(big_cfs.duration) == eltype(big_cfs.dv01) == eltype(big_cfs.convexity) == BigFloat
+    @test eltype(big_cfs.duration) == eltype(big_cfs.dv01) == eltype(big_cfs.convexity) == eltype(big_cfs.dollar_convexity) == BigFloat
     empty_krd(rs) = duration(kr, FM.ZeroRateCurve(rs, tenors), Float64[], Float64[])
     @test ForwardDiff.jacobian(empty_krd, [0.02, 0.03, 0.04]) == zz
 
     for cfs in (FC.Cashflow{Float64, Float64}[], FC.Cashflow[])
         @test duration(kr, curve, cfs) == z
         @test convexity(kr, curve, cfs) == zz
-        @test sensitivities(SecondOrder(), kr, curve, cfs) == (; value = 0.0, duration = z, dv01 = z, convexity = zz)
+        @test sensitivities(SecondOrder(), kr, curve, cfs) == (; value = 0.0, duration = z, dv01 = z, convexity = zz, dollar_convexity = zz)
         @test iszero(convexity(curve, cfs))
     end
 

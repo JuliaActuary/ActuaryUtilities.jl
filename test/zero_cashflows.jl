@@ -38,13 +38,13 @@
             @test positive_zero(duration(curve, cfs, times))
             @test positive_zero(convexity(curve, cfs, times))
             @test isequal(sensitivities(kr, curve, cfs, times), (; value = 0.0, duration = z, dv01 = z))
-            @test isequal(sensitivities(SecondOrder(), kr, curve, cfs, times), (; value = 0.0, duration = z, dv01 = z, convexity = zz))
+            @test isequal(sensitivities(SecondOrder(), kr, curve, cfs, times), (; value = 0.0, duration = z, dv01 = z, convexity = zz, dollar_convexity = zz))
             @test isequal(sensitivities(curve, cfs, times), (; value = 0.0, duration = 0.0, dv01 = 0.0))
-            @test isequal(sensitivities(SecondOrder(), curve, cfs, times), (; value = 0.0, duration = 0.0, dv01 = 0.0, convexity = 0.0))
+            @test isequal(sensitivities(SecondOrder(), curve, cfs, times), (; value = 0.0, duration = 0.0, dv01 = 0.0, convexity = 0.0, dollar_convexity = 0.0))
         end
         cfs = FC.Cashflow.([0.0, -0.0], [0.0, 2.0])
         @test isequal(duration(kr, curve, cfs), z)
-        @test isequal(sensitivities(SecondOrder(), kr, curve, cfs), (; value = 0.0, duration = z, dv01 = z, convexity = zz))
+        @test isequal(sensitivities(SecondOrder(), kr, curve, cfs), (; value = 0.0, duration = z, dv01 = z, convexity = zz, dollar_convexity = zz))
     end
 
     @testset "Input types and validation" begin
@@ -121,7 +121,7 @@
             s = Scenarios(hw; horizon = 3.0, rng)
             untouched = copy(rng)
             @test isequal(sensitivities(kr, s, cfs, times), (; value = 0.0, duration = z, dv01 = z))
-            @test isequal(sensitivities(SecondOrder(), kr, s, cfs, times), (; value = 0.0, duration = z, dv01 = z, convexity = zz))
+            @test isequal(sensitivities(SecondOrder(), kr, s, cfs, times), (; value = 0.0, duration = z, dv01 = z, convexity = zz, dollar_convexity = zz))
             @test isequal(sensitivities(s, cfs, times), (; value = 0.0, duration = 0.0, dv01 = 0.0))
             @test rand(rng) == rand(untouched)
         end

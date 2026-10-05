@@ -11,12 +11,9 @@ function _value_and_derivative(f::F, x::R) where {F, R <: Real}
     return ForwardDiff.value(T, y), ForwardDiff.extract_derivative(T, y)
 end
 
-# `f″(0) / f(0)`, the normalized second derivative. Taking the absolute value first leaves the
-# ratio unchanged and keeps the nested derivatives of a negative value positive.
-function _second_over_value(f::F) where {F}
-    v(x) = abs(f(x))
-    return ForwardDiff.derivative(y -> ForwardDiff.derivative(v, y), 0.0) / v(0.0)
-end
+# `f″(0)`, the raw second derivative of a scalar shock, and `f(0)` with it.
+_second(f::F) where {F} = ForwardDiff.derivative(y -> ForwardDiff.derivative(f, y), 0.0)
+_value_and_second(f::F) where {F} = (f(0.0), _second(f))
 
 # The value of `f` at the vector `z`, with its gradient at first order, and its gradient and Hessian
 # from one pass at second order. The valuation can return BigFloat or an outer AD Dual even when
@@ -68,8 +65,8 @@ _only_role(r) = haskey(r, :hessian) ?
     (; r.value, gradient = only(r.gradient), r.zero_stream)
 
 ## The one normalizer
-# `(; value, duration, dv01)` at first order, and `convexity` too at second order, from a derivative
-# result `r`. Duration and convexity divide the dollar derivatives by the value; DV01 scales the
+# `(; value, duration, dv01)` at first order, and `convexity` and `dollar_convexity` too at second
+# order, from a derivative result `r`. Duration and convexity divide the dollar derivatives by the value; DV01 scales the
 # first derivative to one basis point. Derivatives keyed by role give measures keyed by role. The
 # derivatives are of the total value, so a portfolio's measures are its total dollar risk divided by
 # its total value: a zero value gives non-finite normalized measures, while a zero stream gives
@@ -78,7 +75,9 @@ function _sensitivities(r, order)
     duration = _per_role(g -> _risk_ratio(g, r.value, r.zero_stream; negate = true), r.gradient)
     dv01 = _per_role(g -> _risk_ratio(g, 10_000, r.zero_stream; negate = true), r.gradient)
     order isa FirstOrder && return (; r.value, duration, dv01)
-    return (; r.value, duration, dv01, convexity = _convexities(r))
+    # The raw Hessian is the dollar convexity: freshly computed, so it shares no storage with the
+    # normalized blocks or with another call.
+    return (; r.value, duration, dv01, convexity = _convexities(r), dollar_convexity = r.hessian)
 end
 # The convexity blocks alone, keyed by role as the Hessian is: `convexity.base.credit`.
 _convexities(r) = _per_role(h -> _risk_ratio(h, r.value, r.zero_stream), r.hessian)

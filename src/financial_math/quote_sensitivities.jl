@@ -23,13 +23,14 @@ vector. Inputs are read by position: the valuation receives 1-based vectors of t
 lengths, also for offset inputs, and the derivative vectors and matrices are 1-based. As for
 curves, `order` is
 [`FirstOrder()`](@ref) (the default) or [`SecondOrder()`](@ref), and the result is
-`(; value, duration, dv01)`, with `convexity` at second order. Each derivative field is keyed
+`(; value, duration, dv01)`, with `convexity` and `dollar_convexity` at second order. Each derivative field is keyed
 by input name, with one entry per element:
 
 - `duration.name`: the vector `-∂V/∂xᵢ / V`
 - `dv01.name`: the vector `-∂V/∂xᵢ / 10000`, the signed value lost for a 0.0001 increase in
   each element (negative when the value rises)
 - `convexity.name.other`: the matrix `∂²V/∂xᵢ∂yⱼ / V`
+- `dollar_convexity.name.other`: the matrix `∂²V/∂xᵢ∂yⱼ`, defined at zero value
 
 Dollar measures assume the inputs are rates in decimal units, so 0.0001 is one basis
 point, and they keep the position's sign. They remain defined at zero value, where

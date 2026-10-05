@@ -340,8 +340,10 @@ end
     @test @inferred(duration(two_curves, CS01(), curve, credit)) isa Float64
     # The fields of each order: `value` is a number; the derivative fields follow the grid and roles.
     V, Vec, Mat = Float64, Vector{Float64}, Matrix{Float64}
+    # Several roles' raw Hessian blocks are views of the one Hessian the engine computes.
+    View = SubArray{Float64, 2, Matrix{Float64}, Tuple{UnitRange{Int64}, UnitRange{Int64}}, false}
     first_order(d) = NamedTuple{(:value, :duration, :dv01), Tuple{V, d, d}}
-    second_order(d, c) = NamedTuple{(:value, :duration, :dv01, :convexity), Tuple{V, d, d, c}}
+    second_order(d, c, h = c) = NamedTuple{(:value, :duration, :dv01, :convexity, :dollar_convexity), Tuple{V, d, d, c, h}}
     roles(names, T) = NamedTuple{names, NTuple{length(names), T}}
     for (f, F, S) in (
             ((o...) -> sensitivities(o..., curve, amts, times), first_order(V), second_order(V, V)),
@@ -356,16 +358,16 @@ end
             ),
             (
                 (o...) -> sensitivities(named, o..., kr, (; a = curve, b = credit)),
-                first_order(roles((:a, :b), Vec)), second_order(roles((:a, :b), Vec), roles((:a, :b), roles((:a, :b), Mat))),
+                first_order(roles((:a, :b), Vec)), second_order(roles((:a, :b), Vec), roles((:a, :b), roles((:a, :b), Mat)), roles((:a, :b), roles((:a, :b), View))),
             ),
             ((o...) -> sensitivities(c -> one_curve(c.a), o..., (; a = curve)), first_order(roles((:a,), V)), second_order(roles((:a,), V), roles((:a,), roles((:a,), V)))),
             (
                 (o...) -> sensitivities(inputs, o..., (; r = [0.03], s = [0.01, 0.02])),
-                first_order(roles((:r, :s), Vec)), second_order(roles((:r, :s), Vec), roles((:r, :s), roles((:r, :s), Mat))),
+                first_order(roles((:r, :s), Vec)), second_order(roles((:r, :s), Vec), roles((:r, :s), roles((:r, :s), Mat)), roles((:r, :s), roles((:r, :s), View))),
             ),
             (
                 (o...) -> sensitivities(o..., kr, curve, bond; index = credit),
-                first_order(roles((:discount, :index), Vec)), second_order(roles((:discount, :index), Vec), roles((:discount, :index), roles((:discount, :index), Mat))),
+                first_order(roles((:discount, :index), Vec)), second_order(roles((:discount, :index), Vec), roles((:discount, :index), roles((:discount, :index), Mat)), roles((:discount, :index), roles((:discount, :index), View))),
             ),
             ((o...) -> sensitivities(o..., curve, bond), first_order(roles((:discount, :index), V)), second_order(roles((:discount, :index), V), roles((:discount, :index), roles((:discount, :index), V)))),
         )

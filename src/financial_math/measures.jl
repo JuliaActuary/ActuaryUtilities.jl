@@ -79,8 +79,8 @@ struct FirstOrder end
 """
     SecondOrder()
 
-Select second-order [`sensitivities`](@ref): `(; value, duration, dv01, convexity)`, from one
-evaluation of the value and its first and second derivatives. A valuation that has no second
+Select second-order [`sensitivities`](@ref): `(; value, duration, dv01, convexity, dollar_convexity)`,
+from one evaluation of the value and its first and second derivatives. A valuation that has no second
 derivative throws its own error; there is no fallback to first order.
 
 This marker belongs to ActuaryUtilities and is unrelated to `DifferentiationInterface.SecondOrder`.
@@ -90,6 +90,35 @@ See also: [`FirstOrder`](@ref).
 struct SecondOrder end
 
 const _Order = Union{FirstOrder, SecondOrder}
+
+"""
+    DollarConvexity()
+
+Select dollar convexity in [`convexity`](@ref): the signed second derivative of value,
+``H_{ij} = ∂^2V/∂s_i∂s_j``, in the shock coordinates of the other measures. It has no factor of
+one-half and no basis-point scaling, so its unit is currency per squared unit of decimal rate.
+Normalized convexity is ``H / V``; dollar convexity is defined at zero value, keeps the
+position's sign and adds across positions. A shift of `b` basis points changes value by about
+`-dv01 * b + H / 2 * (b / 10_000)^2`, and `H * 1e-8` is the second derivative per squared basis
+point.
+
+```julia
+convexity(DollarConvexity(), curve, cfs, times)                  # a number
+convexity(DollarConvexity(), KeyRates(tenors), curve, cfs, times) # a matrix
+convexity(valuation, DollarConvexity(), [KeyRates(tenors),] curve)
+convexity(valuation, DollarConvexity(), [KeyRates(tenors),] base, credit)   # blocks keyed by role
+convexity(DollarConvexity(), [Effective() | Spread(),] [KeyRates(tenors),] discount, contract; index)
+```
+
+Fixed cashflows use analytic derivatives, and the parallel form also takes a scalar or `Rate`.
+Contracts default to `Effective()`, whose parallel dollar convexity includes the cross terms
+between the index and discount curves. Second-order [`sensitivities`](@ref) return the same
+derivatives as their `dollar_convexity` field, also for named curves, market inputs and
+[`Scenarios`](@ref). Empty and all-zero cashflow streams return typed zeros.
+
+See also [`SecondOrder`](@ref), [`DV01`](@ref).
+"""
+struct DollarConvexity end
 
 """
     KeyRates(tenors)

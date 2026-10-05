@@ -170,7 +170,8 @@ end
     convexity(yield,cfs,times)
     convexity(valuation_function,yield)
 
-Calculates the normalized second derivative of value under a parallel rate shock.
+Calculates the normalized second derivative of value under a parallel rate shock. For the second
+derivative itself, defined at zero value, use [`DollarConvexity`](@ref).
 `yield` may be a scalar annual yield (e.g. `0.05`), an explicit `Rate`, or an
 `AbstractYieldModel`. `times` may be omitted for evenly spaced cashflows beginning
 at the end of the first period. Cashflow collections may be arrays, tuples, or
@@ -265,5 +266,23 @@ function _weighted_ratio(yield, weight::W, cfs, times; divisor = 1) where {W}
     return _risk_ratio(Vw, V; divisor)
 end
 
-convexity(valuation_function::F, yield::_YieldInput) where {F} =
-    _second_over_value(x -> valuation_function(_parallel_bumped(yield, x)))
+function convexity(valuation_function::F, yield::_YieldInput) where {F}
+    value, second = _value_and_second(x -> valuation_function(_parallel_bumped(yield, x)))
+    return second / value
+end
+
+# Dollar convexity: the raw second derivatives (see `DollarConvexity`).
+convexity(::DollarConvexity, yield::_YieldInput, x::_Instrument, times...; kwargs...) =
+    _fixed(x) ? _fixed_dollar_convexity(yield, x, times...; kwargs...) :
+    convexity(DollarConvexity(), Effective(), yield, x, times...; kwargs...)
+# ∂²V/∂s² is Σ t(t + 1/m)·cf·d divided by the squared divisor; do not divide by V.
+function _fixed_dollar_convexity(yield, cfs, times...)
+    amounts, ts = _cashflow_inputs(cfs, times...)
+    c = _coordinate(yield)
+    w = _convexity_weight(c)
+    sums = _weighted_sums(yield, w, amounts, ts)
+    isnothing(sums) && return _zero_weighted(yield, w, amounts, ts, c.divisor^2)
+    return last(sums) / c.divisor^2
+end
+convexity(valuation::F, ::DollarConvexity, yield::_YieldInput) where {F} =
+    _one_curve_ad(valuation, yield, nothing, SecondOrder()).hessian

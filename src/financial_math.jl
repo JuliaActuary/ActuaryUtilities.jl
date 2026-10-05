@@ -12,6 +12,7 @@ export irr, internal_rate_of_return, spread,
     pv, present_value, present_values,
     breakeven, moic,
     Macaulay, Modified, DV01, IR01, CS01, Effective, Spread, KeyRates, FirstOrder, SecondOrder,
+    DollarConvexity,
     duration, convexity,
     sensitivities, zspread, locked_floater, Scenarios
 

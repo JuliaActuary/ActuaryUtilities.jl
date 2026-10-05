@@ -58,9 +58,11 @@ result.value     # present value
 result.duration  # key-rate durations (vector)
 result.dv01      # key-rate DV01s (vector)
 result.convexity # key-rate convexity matrix
+result.dollar_convexity # the same second derivatives, not divided by value
 ```
 
-- **`sensitivities`**: value, durations and DV01s in one call, and with `SecondOrder()` convexity; parallel without `KeyRates`, per tenor with it
+- **`sensitivities`**: value, durations and DV01s in one call, and with `SecondOrder()` convexity and dollar convexity; parallel without `KeyRates`, per tenor with it
+- **Dollar risk**: `duration(DV01(), ...)` and `convexity(DollarConvexity(), ...)` are defined at zero value and add across positions
 - **Two-curve decomposition**: separate `IR01` (risk-free) and `CS01` (credit spread) sensitivities
 - **Contracts and portfolios**: `duration(Effective(), curve, contract; index)`, `Spread()`, and `sensitivities(curve, contract; index)` with the discount and index exposures
 - **Do-block syntax**: custom valuation functions for rate-dependent instruments (callable bonds, floaters, caps/floors)

@@ -65,12 +65,18 @@ function duration(::DV01, metric::_ContractMetric, kr::KeyRates, discount::AYM, 
     return _per_bp(r, r.gradient)
 end
 
-convexity(metric::_ContractMetric, discount::AYM, target::_Contractish; index::AYM = discount) =
-    _second_over_value(s -> _parallel_value(metric, target, discount, index, s))
+function convexity(metric::_ContractMetric, discount::AYM, target::_Contractish; index::AYM = discount)
+    value, second = _value_and_second(s -> _parallel_value(metric, target, discount, index, s))
+    return second / value
+end
 function convexity(metric::_ContractMetric, kr::KeyRates, discount::AYM, target::_Contractish; index::AYM = discount)
     r = _contract_keyrate(metric, kr.tenors, discount, target, index, SecondOrder())
     return _relative(r, r.hessian)
 end
+convexity(::DollarConvexity, metric::_ContractMetric, discount::AYM, target::_Contractish; index::AYM = discount) =
+    _second(s -> _parallel_value(metric, target, discount, index, s))
+convexity(::DollarConvexity, metric::_ContractMetric, kr::KeyRates, discount::AYM, target::_Contractish; index::AYM = discount) =
+    _contract_keyrate(metric, kr.tenors, discount, target, index, SecondOrder()).hessian
 
 """
     sensitivities([order,] [KeyRates(tenors),] discount, contract; index = discount) -> NamedTuple
