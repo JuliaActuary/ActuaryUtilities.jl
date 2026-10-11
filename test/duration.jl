@@ -109,8 +109,8 @@
 
         # the same, but with a functional argument
         value(i) = present_value(i, cfs, times)
-        # @test isapprox(duration(0.04,value),4.76190476,atol=1e-6)
-        @test isapprox(convexity(0.04, value), 27.7366864, atol = 1.0e-6)
+        # @test isapprox(duration(value,0.04),4.76190476,atol=1e-6)
+        @test isapprox(convexity(value, 0.04), 27.7366864, atol = 1.0e-6)
     end
 
     @testset "Quantlib" begin
@@ -150,77 +150,25 @@
 end
 
 @testset "IR01 and CS01" begin
-    @testset "flat rates: IR01 ≈ CS01 ≈ DV01" begin
-        cfs = [10, 10, 10, 110]
-        times = [0.5, 1, 1.5, 2]
-        base_rate = 0.03
-        credit_spread = 0.02
-        total_rate = base_rate + credit_spread
-
-        dv01 = duration(DV01(), total_rate, cfs, times)
-        ir01 = duration(IR01(), base_rate, credit_spread, cfs, times)
-        cs01 = duration(CS01(), base_rate, credit_spread, cfs, times)
-
-        @test ir01 ≈ dv01
-        @test cs01 ≈ dv01
-        @test ir01 ≈ cs01
+    # Fixed cashflows discounted at base + credit have one exposure, the combined curve's DV01;
+    # the callback forms measure each curve's role.
+    cfs = [10, 10, 10, 110]
+    times = [0.5, 1, 1.5, 2]
+    rates = [0.01, 0.02, 0.03, 0.04]
+    mats = [1, 2, 3, 5]
+    for base in (FM.Yield.Constant(0.03), FM.fit(FM.Spline.Linear(), FM.CMTYield.(rates, mats), FM.Fit.Bootstrap()))
+        credit = FM.Yield.Constant(FC.Periodic(0.02, 1))
+        fixed(b, c) = FC.pv(b + c, cfs, times)
+        dv01 = duration(DV01(), base + credit, cfs, times)
+        @test dv01 > 0
+        @test duration(fixed, IR01(), base, credit) ≈ dv01 rtol = 1.0e-12
+        @test duration(fixed, CS01(), base, credit) ≈ dv01 rtol = 1.0e-12
+        @test duration(DV01(), base + credit, FC.Cashflow.(cfs, times)) ≈ dv01 rtol = 1.0e-14
     end
-
-    @testset "with Rate objects" begin
-        cfs = [10, 10, 10, 110]
-        times = [0.5, 1, 1.5, 2]
-        base_r = FC.Periodic(0.03, 1)
-        spread_r = FC.Periodic(0.02, 1)
-
-        ir01 = duration(IR01(), base_r, spread_r, cfs, times)
-        cs01 = duration(CS01(), base_r, spread_r, cfs, times)
-
-        @test ir01 > 0
-        @test cs01 > 0
-        @test ir01 ≈ cs01
-    end
-
-    @testset "without explicit times" begin
-        cfs = [5, 5, 5, 105]
-
-        dv01 = duration(DV01(), 0.05, cfs)
-        ir01 = duration(IR01(), 0.03, 0.02, cfs)
-        cs01 = duration(CS01(), 0.03, 0.02, cfs)
-
-        @test ir01 ≈ dv01
-        @test cs01 ≈ dv01
-    end
-
-    @testset "with Cashflow objects" begin
-        cfs = [5, 5, 5, 105]
-        times = 1:4
-        cfo = FC.Cashflow.(cfs, times)
-
-        ir01_cfo = duration(IR01(), 0.03, 0.02, cfo)
-        ir01_raw = duration(IR01(), 0.03, 0.02, cfs, times)
-
-        @test ir01_cfo ≈ ir01_raw
-
-        cs01_cfo = duration(CS01(), 0.03, 0.02, cfo)
-        cs01_raw = duration(CS01(), 0.03, 0.02, cfs, times)
-
-        @test cs01_cfo ≈ cs01_raw
-    end
-
-    @testset "with yield curve" begin
-        rates = [0.01, 0.02, 0.03, 0.04]
-        mats = [1, 2, 3, 5]
-        y = FM.fit(FM.Spline.Linear(), FM.CMTYield.(rates, mats), FM.Fit.Bootstrap())
-        credit_spread = FC.Periodic(0.02, 1)
-        cfs = [5, 5, 5, 105]
-        times = 1:4
-
-        ir01 = duration(IR01(), y, credit_spread, cfs, times)
-        cs01 = duration(CS01(), y, credit_spread, cfs, times)
-
-        @test ir01 > 0
-        @test cs01 > 0
-    end
+    @test duration(DV01(), 0.03 + 0.02, [5, 5, 5, 105]) ≈ duration(DV01(), 0.05, [5, 5, 5, 105], 1:4)
+    # The fixed-cashflow IR01 and CS01 forms are removed.
+    @test_throws MethodError duration(IR01(), 0.03, 0.02, cfs, times)
+    @test_throws MethodError duration(CS01(), FM.Yield.Constant(0.03), FM.Yield.Constant(0.02), cfs)
 end
 
 @testset "do-block with AbstractYieldModel" begin
@@ -230,25 +178,21 @@ end
 
     # duration with do-block (function-first argument order)
     d = duration(c) do i
-        price(i, cfs, times)
+        pv(i, cfs, times)
     end
     @test d ≈ duration(c, cfs, times)
 
     # convexity with do-block
     cv = convexity(c) do i
-        price(i, cfs, times)
+        pv(i, cfs, times)
     end
     @test cv ≈ convexity(c, cfs, times)
+    @test cv ≈ convexity(FC.Continuous(log1p(0.04)), cfs, times)
 end
 
-@testset "Scalar do-block on ZRC falls through to generic FD path" begin
-    # Previously a ZRC-specific dispatch routed `duration(fn, zrc)` /
-    # `convexity(fn, zrc)` through the AD KRD path. With the unified API,
-    # those 2-arg calls fall through to the generic `duration(yield, vf)`
-    # FD-based scalar path — which adds a parallel shift via Periodic
-    # compounding, not Continuous, so the numerical values are not bitwise
-    # comparable to `sum(KRDs)` (which differentiates w.r.t. continuous zero
-    # rates). We just verify the calls execute and return a Real scalar.
+@testset "Scalar do-block on ZRC uses continuous curve shocks" begin
+    # No-tenor do-block calls use the same continuous-zero parallel shift as
+    # the cashflow and key-rate APIs.
     rates = [0.04, 0.04, 0.04, 0.04, 0.04]
     tenors = [1.0, 2.0, 3.0, 4.0, 5.0]
     zrc = FM.ZeroRateCurve(rates, tenors, FM.Spline.Linear())
@@ -259,9 +203,13 @@ end
         sum(cf * curve(t) for (cf, t) in zip(cfs, times))
     end
     @test vf_dur isa Real
+    @test vf_dur ≈ duration(zrc, cfs, times) atol = 1.0e-12
+    @test vf_dur ≈ sum(duration(KeyRates(tenors), zrc, cfs, times)) atol = 1.0e-12
 
     vf_conv = convexity(zrc) do curve
         sum(cf * curve(t) for (cf, t) in zip(cfs, times))
     end
     @test vf_conv isa Real
+    @test vf_conv ≈ convexity(zrc, cfs, times) atol = 1.0e-12
+    @test vf_conv ≈ sum(convexity(KeyRates(tenors), zrc, cfs, times)) atol = 1.0e-10
 end

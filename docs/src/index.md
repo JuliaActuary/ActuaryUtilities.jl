@@ -8,10 +8,10 @@ times    = [1, 2, 3]
 
 discount_rate = 0.03
 
-present_value(discount_rate, cfs, times)           # 105.65
+present_value(discount_rate, cfs, times)           # 105.66
 duration(Macaulay(), discount_rate, cfs, times)    #   2.86
 duration(discount_rate, cfs, times)                #   2.78
-convexity(discount_rate, cfs, times)               #  10.62
+convexity(discount_rate, cfs, times)               #  10.63
 ```
 
 ## Features
@@ -21,8 +21,9 @@ A collection of common functions/manipulations used in Actuarial Calculations.
 ### Financial Maths
 
 - `duration`:
-  - Calculate the `Macaulay`, `Modified`, or `DV01` durations for a set of cashflows
-  - Calculate the `KeyRate(time)` (a.k.a. `KeyRateZero`) duration or `KeyRatePar(time)` duration
+  - Calculate the `Macaulay`, `Modified`, or signed `DV01` durations for a set of cashflows
+  - Calculate `IR01`/`CS01` and `Effective`/`Spread` risk for curves, contracts, and portfolios
+  - Decompose risk by tenor with `KeyRates(tenors)`
 - `convexity` for price sensitivity
 - Flexible interest rate models via the [`FinanceModels.jl`](https://github.com/JuliaActuary/FinanceModels.jl) package.
 - `internal_rate_of_return` or `irr` to calculate the IRR given cashflows (including at timepoints like Excel's `XIRR`)
@@ -30,9 +31,9 @@ A collection of common functions/manipulations used in Actuarial Calculations.
 - `accum_offset` to calculate accumulations like survivorship from a mortality vector
 - `spread` will calculate the spread needed between two yield curves to equate a set of cashflows
 
-### Key Rate Sensitivities via Automatic Differentiation
+### Key-Rate Sensitivities
 
-Compute exact key rate durations, DV01s, and convexities using ForwardDiff through `ZeroRateCurve` from [FinanceModels.jl](https://github.com/JuliaActuary/FinanceModels.jl) -- machine-precision sensitivities in a single pass, no bump-and-reprice required.
+Compute key-rate durations, DV01s and convexities for any [FinanceModels.jl](https://github.com/JuliaActuary/FinanceModels.jl) yield model, without bump-and-reprice. Fixed cashflows use analytic derivatives; valuation callbacks use ForwardDiff.
 
 ```julia
 using ActuaryUtilities, FinanceModels
@@ -42,28 +43,30 @@ tenors = [1.0, 2.0, 3.0, 4.0, 5.0]
 zrc = ZeroRateCurve(rates, tenors)
 cfs = [5.0, 5.0, 5.0, 5.0, 105.0]
 
-# All key rate sensitivities in one AD pass
-result = sensitivities(KeyRates(tenors), zrc, cfs, tenors)
-result.value       # present value
-result.durations   # key rate durations (vector)
-result.convexities # cross-convexity matrix
+# Value, key-rate durations, DV01s and convexities in one call
+result = sensitivities(SecondOrder(), KeyRates(tenors), zrc, cfs, tenors)
+result.value     # present value
+result.duration  # key-rate durations (vector)
+result.dv01      # key-rate DV01s (vector)
+result.convexity # key-rate convexity matrix
 ```
 
-- **`sensitivities`**: bundled value, key rate durations, and convexity matrix in a single AD pass
+- **`sensitivities`**: value, durations and DV01s in one call, and with `SecondOrder()` convexity; parallel without `KeyRates`, per tenor with it
 - **Two-curve decomposition**: separate `IR01` (risk-free) and `CS01` (credit spread) sensitivities
+- **Contracts and portfolios**: `duration(Effective(), curve, contract; index)`, `Spread()`, and `sensitivities(curve, contract; index)` with the discount and index exposures
 - **Do-block syntax**: custom valuation functions for rate-dependent instruments (callable bonds, floaters, caps/floors)
-- **Hull-White stochastic model**: key rate sensitivities of Monte Carlo expected values, differentiating through the full simulation pipeline
+- **Hull–White stochastic model**: key-rate sensitivities of Monte Carlo expected values, differentiating through the full simulation pipeline
 
 ```julia
 using FinanceModels: ShortRate
 using Random: Xoshiro
 
 hw = ShortRate.HullWhite(0.1, 0.01, zrc)
-hw_result = sensitivities(KeyRates(tenors), hw, cfs, tenors; n_scenarios=1000, rng=Xoshiro(42))
-hw_result.durations   # key rate durations under stochastic dynamics
+hw_result = sensitivities(KeyRates(tenors), Scenarios(hw; horizon=6.0, n_scenarios=1000, rng=Xoshiro(42)), cfs, tenors)
+hw_result.duration   # key-rate durations under stochastic dynamics
 ```
 
-See the [Key Rate Sensitivities documentation](sensitivities.md) for details.
+See the [Interest-Rate Sensitivities documentation](sensitivities.md) for details.
 
 ### Risk Measures
 
@@ -76,8 +79,7 @@ See the [Key Rate Sensitivities documentation](sensitivities.md) for details.
 
 ### Insurance mechanics
 
-- `duration`:
-  - Calculate the duration given an issue date and date (a.k.a. policy duration)
+- `policy_duration`: the policy duration given an issue date and a date
   
 
 ### Typed Rates
@@ -98,10 +100,10 @@ julia> rate(r)
 - You can still pass a simple floating point rate to various methods. E.g. these two are the same (the default compounding convention is periodic once per period):
 
 ```julia
-discount(0.05,cashflows)
+discount(0.05, 3)
 
 r = Rate(0.05,Periodic(1));
-discount(r,cashflows)
+discount(r, 3)
 ```
 
 - convert between rates with:
@@ -129,4 +131,4 @@ See [JuliaActuary.org for instructions](https://juliaactuary.org/tutorials/cashf
 
 ## Useful tips
 
-Functions often use a mix of interest_rates, cashflows, and timepoints. When calling functions, the general order of the arguments is 1) interest rates, 2) cashflows, and 3) timepoints.
+Arguments come in this order: a valuation callback (if any), an order marker for `sensitivities` (`FirstOrder()` or `SecondOrder()`), a measure marker such as `DV01()` or `KeyRates(tenors)`, the rate or curve, then the cashflows and times or a contract. A contract's index curve is the keyword `index`, which defaults to the curve.
