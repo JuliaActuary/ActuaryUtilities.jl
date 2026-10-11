@@ -79,7 +79,7 @@ which defaults to the discount curve.
   | `duration(IR01(), valuation, base, credit, tenors)` (and `CS01`) | `duration(valuation, IR01(), base, credit)` or `duration(IR01(), base, credit) do b, c ... end` |
   | `convexity(valuation, curve, tenors)` | `convexity(valuation, curve)` or `convexity(curve) do c ... end` |
   | `convexity(valuation, base, credit, tenors)` | `convexity(valuation, base, credit)` or `convexity(base, credit) do b, c ... end` |
-  | `duration(Effective(), target, curve, tenors)`, `duration(Spread(), ...)`, and the `dv01` and `convexity(Effective(), ...)` forms | `duration(Effective(), curve, target)`, `duration(Spread(), curve, target)`, and likewise for `dv01` and `convexity` |
+  | `duration(Effective(), target, curve, tenors)`, `duration(Spread(), ...)`, and the `dv01` and `convexity(Effective(), ...)` forms | `duration(Effective(), curve, target)`, `duration(Spread(), curve, target)`, and likewise for `duration(DV01(), Effective(), curve, target)` and `convexity` |
   | `duration(target, curve, tenors)` | `duration(curve, target)` |
   | two-curve contract forms `(target, forward, credit, tenors)` | `(credit, target; index = forward)` |
 
@@ -170,7 +170,7 @@ which defaults to the discount curve.
   `horizon` = the last payment time + 1.
 - Unmarked contract and portfolio DV01 and convexity, which v5 did not define, now
   default to `Effective()`, as unmarked duration already did. So do
-  `duration(DV01(), KeyRates(tenors), curve, target)` (or `dv01`) and
+  `duration(DV01(), KeyRates(tenors), curve, target)` and
   `convexity(KeyRates(tenors), curve, target)`. Use `Spread()` for spread risk.
 - **Scalar and `Rate` DV01 use the analytic formula.** v5 used automatic
   differentiation, so values can move in the last bits (at most 4 ulp in `Float64`).
@@ -279,7 +279,7 @@ which defaults to the discount curve.
   | `dv01(Spread(), contract, curve)` | `duration(DV01(), Spread(), discount, contract; index)` |
 - **Contract measures take the curve first and the index curve as a keyword**, as FinanceCore
   and FinanceModels do: `duration(Effective(), discount, contract; index = discount)`, and the same
-  for `Spread()`, `dv01`, `convexity`, `sensitivities` and `zspread(discount, contract, price; index = discount)`.
+  for `Spread()`, `duration(DV01(), ...)`, `convexity`, `sensitivities` and `zspread(discount, contract, price; index = discount)`.
   The contract-first calls and the positional `(forward, credit)` curves throw `MethodError`.
   Contract `sensitivities` report the index exposure separately under the role names of
   `Models(discount; index)`: `s.dv01.discount` (spread risk) and `s.dv01.index` (coupon reset). The

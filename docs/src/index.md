@@ -1,6 +1,6 @@
 ## Quickstart
 
-```julia
+```@example quickstart
 using ActuaryUtilities
 
 cfs = [5, 5, 105]
@@ -49,9 +49,11 @@ result.value     # present value
 result.duration  # key-rate durations (vector)
 result.dv01      # key-rate DV01s (vector)
 result.convexity # key-rate convexity matrix
+result.dollar_convexity # second derivatives without dividing by value
 ```
 
-- **`sensitivities`**: value, durations and DV01s in one call, and with `SecondOrder()` convexity; parallel without `KeyRates`, per tenor with it
+- **`sensitivities`**: value, durations and DV01s in one call, and with `SecondOrder()` convexity and dollar convexity; parallel without `KeyRates`, per tenor with it
+- **Dollar risk**: `duration(DV01(), ...)` and `convexity(DollarConvexity(), ...)` are defined at zero value and add across positions
 - **Two-curve decomposition**: separate `IR01` (risk-free) and `CS01` (credit spread) sensitivities
 - **Contracts and portfolios**: `duration(Effective(), curve, contract; index)`, `Spread()`, and `sensitivities(curve, contract; index)` with the discount and index exposures
 - **Do-block syntax**: custom valuation functions for rate-dependent instruments (callable bonds, floaters, caps/floors)
@@ -84,7 +86,7 @@ See the [Interest-Rate Sensitivities documentation](sensitivities.md) for detail
 
 ### Typed Rates
 
-- functions which return a rate/yield will return a `FinanceCore.Rate` object. E.g. `irr(cashflows)` will return a `Rate(0.05,Periodic(1))` instead of just a `0.05` (`float64`) to convey the compounding frequency. This is compatible across the JuliaActuary ecosystem and can be used anywhere you would otherwise use a simple floating point rate.
+- functions which return a rate/yield will return a `FinanceCore.Rate` object. E.g. `irr(cashflows)` will return a `Rate(0.05,Periodic(1))` instead of just a `0.05` (`float64`) to convey the compounding frequency. These values are accepted by the supported valuation APIs across the JuliaActuary ecosystem. Use `rate(r)` when an API needs the scalar value, and preserve the compounding convention separately.
 
 A couple of other notes:
 
@@ -93,8 +95,8 @@ A couple of other notes:
 ```julia-repl
 julia> r = Rate(0.05,Periodic(1));
 
-julia> rate(r) 
-0.05
+julia> rate(r) ≈ 0.05
+true
 ```
 
 - You can still pass a simple floating point rate to various methods. E.g. these two are the same (the default compounding convention is periodic once per period):
@@ -125,9 +127,9 @@ Full documentation is [available here](https://docs.juliaactuary.org/ActuaryUtil
 
 ### Interactive, basic cashflow analysis
 
-See [JuliaActuary.org for instructions](https://juliaactuary.org/tutorials/cashflowanalysis/) on running this example.
+See [JuliaActuary.org for instructions](https://juliaactuary.org/posts/cashflow-interactive/) on running this example.
 
-[![Simple cashflow analysis with ActuaryUtilities.jl](https://user-images.githubusercontent.com/711879/95857181-d646a280-0d20-11eb-8300-a4c226021334.gif)](https://juliaactuary.org/tutorials/cashflowanalysis/)
+[![Simple cashflow analysis with ActuaryUtilities.jl](https://user-images.githubusercontent.com/711879/95857181-d646a280-0d20-11eb-8300-a4c226021334.gif)](https://juliaactuary.org/posts/cashflow-interactive/)
 
 ## Useful tips
 

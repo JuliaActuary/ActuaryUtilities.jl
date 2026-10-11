@@ -202,7 +202,7 @@ const ConditionalTailExpectation = CTE
     WangTransform(α)::RiskMeasure
     WangTransform(α)(risk)::T (where T is the type of values sampled in risk)
 
-The Wang Transform is a distortion risk measure that transforms the cumulative distribution function (CDF) of the risk distribution using a normal distribution with mean Φ⁻¹(α) and standard deviation 1. risk can be a univariate distribution or an array of outcomes.
+The Wang Transform applies the survival-probability distortion `g(u) = Φ(Φ⁻¹(u) + Φ⁻¹(α))`, where Φ is the standard normal CDF. `risk` can be a univariate distribution or an array of loss outcomes.
 
 WangTransform(α) returns a functor which can then be called on a risk distribution.
 
@@ -259,7 +259,7 @@ end
     DualPower(v)::RiskMeasure
     DualPower(v)(risk)::T (where T is the type of values sampled in risk)
 
-The Dual Power distortion risk measure is defined as ``1 - (1 - x)^v``, where x is the cumulative distribution function (CDF) of the risk distribution and v is a positive parameter. risk can be a univariate distribution or an array of outcomes.
+The Dual Power distortion risk measure is defined as ``1 - (1 - x)^v``, where x is a survival probability of the loss distribution and v is a positive parameter. risk can be a univariate distribution or an array of outcomes.
 
 DualPower(v) returns a functor which can then be called on a risk distribution.
 
@@ -285,7 +285,7 @@ gbar(rm::DualPower, F) = F^rm.v
     ProportionalHazard(y)::RiskMeasure
     ProportionalHazard(y)(risk)::T (where T is the type of values sampled in risk)
 
-The Proportional Hazard distortion risk measure is defined as ``x^(1/y)``, where x is the cumulative distribution function (CDF) of the risk distribution and y is a positive parameter. risk can be a univariate distribution or an array of outcomes.
+The Proportional Hazard distortion risk measure is defined as ``x^(1/y)``, where x is a survival probability of the loss distribution and y is a positive parameter. risk can be a univariate distribution or an array of outcomes.
 ProportionalHazard(y) returns a functor which can then be called on a risk distribution.
 
 For a distribution that is not discrete, the value is computed by checked
