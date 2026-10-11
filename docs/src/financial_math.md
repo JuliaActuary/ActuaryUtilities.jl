@@ -82,7 +82,7 @@ zero, for that type, so a curve that cannot be evaluated at time zero cannot val
 zero stream either. An untyped empty collection (`Any[]`, `Cashflow[]`, `()`) takes
 its type from the rate or curve.
 
-Valuation never uses an RNG: a [`Scenarios`](@ref) draws its seed when it is constructed,
+Valuation does not advance the RNG passed to [`Scenarios`](@ref): it draws its seed when constructed,
 and every valuation with it, zero streams included, reuses that seed.
 
 To aggregate portfolio risk, sum values and dollar derivatives before normalizing
@@ -139,11 +139,11 @@ pct_change = (pv_shifted - pv_base) / pv_base * 100
 (; pv_base = round(pv_base, digits=4), pv_shifted = round(pv_shifted, digits=4), pct_change = round(pct_change, digits=2))
 ```
 
-### Bootstrapped curve + stress
+### Fitted curve + stress
 
 ```@example transformations
 quotes = ZCBYield.([0.04, 0.05, 0.055, 0.06], [1.0, 3.0, 5.0, 10.0])
-fitted = fit(Spline.Linear(), quotes, Fit.Bootstrap())
+fitted = fit(Spline.Linear(), quotes)
 stressed = fitted + (z, t) -> z + Continuous(0.005)   # +50 bp
 
 dur_base = duration(fitted, cfs, times)

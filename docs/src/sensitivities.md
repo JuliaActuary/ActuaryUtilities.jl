@@ -449,7 +449,7 @@ The Nelson–Siegel parameters stay fixed; only the layered zero-rate bumps move
 
 ## Interest-Sensitive Instruments
 
-For instruments whose cashflows depend on the rate environment (callable bonds, floaters, etc.), use the do-block syntax to pass a custom valuation function:
+For instruments whose cashflows depend on the rate environment, use the do-block syntax to pass a custom valuation function. The example below uses a deterministic call rule to illustrate the interface; it is not an option-pricing model for a callable bond. For pricing, supply a valuation that models the issuer's exercise decision under uncertain future rates.
 
 ```@example sensitivities
 # Callable bond: key-rate durations (vector)
@@ -659,6 +659,8 @@ The curve-risk API differentiates continuous-zero bumps at the supplied tenors.
 For a stochastic valuation:
 
 ```julia
+using Random: Xoshiro
+
 hw = ShortRate.HullWhite(0.1, 0.01, zrc)
 sensitivities(KeyRates(tenors), Scenarios(hw; horizon = 6.0, n_scenarios = 500, rng = Xoshiro(42)), cfs, times)
 ```
@@ -763,7 +765,7 @@ Agreement in total alone does not validate the individual buckets.
 
 Pathwise AD differentiates the simulated estimate through drift calibration,
 path generation, and valuation. See
-[Giles & Glasserman (2006)](https://people.maths.ox.ac.uk/~gilesm/files/mc_greeks.pdf).
+[Giles & Glasserman (2006)](https://people.maths.ox.ac.uk/~gilesm/codes/libor_AD/).
 
 !!! note
     `Scenarios` fixes its horizon and time grid and draws one seed when it is constructed.

@@ -3,12 +3,14 @@
 ## Quickstart
 
 ```julia
-outcomes = rand(100)
+using ActuaryUtilities, Random
+
+outcomes = rand(Xoshiro(42), 10_000)
 
 # direct usage
 VaR(0.90)(outcomes) # ≈ 0.90  
 CTE(0.90)(outcomes) # ≈ 0.95  
-WangTransform(0.90)(outcomes) # ≈ 0.81
+WangTransform(0.90)(outcomes) # ≈ 0.82
 
 # construct a reusable object (functor)
 rm = VaR(0.90)
@@ -63,7 +65,7 @@ In "Properties of Distortion Risk Measures" (Balbás, Garrido, Mayoral) also no
 
 #### Complete
 
-Completeness is the property that the distortion function associated with the risk measure produces a unique mapping between the original risk's survival function $S(x)$ and the distorted  $S*(x)$ for each $x$. See [Distortion Risk Measures](@ref) for more detail on this.
+Completeness here means that the distortion maps survival probabilities $S(x)$ one-to-one to their distorted values $g(S(x))$. A flat stretch of the distortion erases distinctions between probabilities in that range. See [Distortion Risk Measures](@ref) for more detail on this.
 
 In practice, this means that a non-complete risk measure ignores some part of the risk distribution (e.g. `CTE` and `VaR` do not use the full distribution, so two risks that differ only outside the measured tail can produce the same value of the risk measure).
 
@@ -82,13 +84,15 @@ Adaptive risk measures are exhaustive but the converse is not true.
 
 ### Summary of Risk Measure Properties
 
-| Measure      | Coherent | Complete | Exhaustive | Adaptable | Condition 2 |
-|--------------|----------|----------|------------|-----------|-------------|
-| [VaR](@ref ActuaryUtilities.RiskMeasures.VaR)        | No       | No       | No         | No        | No          |
-| [CTE](@ref ActuaryUtilities.RiskMeasures.CTE)       | Yes      | No       | No         | No        | No          |
-| [DualPower](@ref ActuaryUtilities.RiskMeasures.DualPower) $(y > 1)$   | Yes      | Yes      | Yes        | No        | Yes         |
-| [ProportionalHazard](@ref ActuaryUtilities.RiskMeasures.ProportionalHazard) $(γ > 1)$   | Yes      | Yes      | Yes        | No        | Yes         |
-| [WangTransform](@ref ActuaryUtilities.RiskMeasures.WangTransform)           | Yes      | Yes      | Yes        | Yes       | Yes         |
+| Measure | Coherent | Complete | Exhaustive | Adaptable |
+|:--|:--|:--|:--|:--|
+| [VaR](@ref ActuaryUtilities.RiskMeasures.VaR) | No, in general | No | No | No |
+| [CTE](@ref ActuaryUtilities.RiskMeasures.CTE), `0 < α < 1` | Yes | No | No | No |
+| [DualPower](@ref ActuaryUtilities.RiskMeasures.DualPower), `y > 1` | Yes | Yes | Yes | No |
+| [ProportionalHazard](@ref ActuaryUtilities.RiskMeasures.ProportionalHazard), `γ > 1` | Yes | Yes | Yes | No |
+| [WangTransform](@ref ActuaryUtilities.RiskMeasures.WangTransform), `0.5 < α < 1` | Yes | Yes | Yes | Yes |
+
+The parameter restrictions matter. `WangTransform(0.5)` and `CTE(0)` reduce to expectation; Wang parameters below 0.5 are accepted by the API but do not give a coherent loss measure in general. Neither DualPower nor ProportionalHazard satisfies both endpoint-derivative conditions for adaptability: DualPower has a finite derivative at zero, and ProportionalHazard has a nonzero derivative at one.
 
 ## Distortion Risk Measures
 
@@ -103,7 +107,7 @@ This remaps values in the [0,1] range to another value in the [0,1] range, and i
 Let $g:[0,1]\to[0,1]$ be an increasing function with $g(0)=0$ and $g(1)=1$. Applied to the survival function, the transform $S^*(x)=g(S(x))$ defines a distorted probability distribution with $F^*(x) = 1 - g(S(x)) = \bar{g}(F(x))$, where "$g$" is called a distortion function and $\bar{g}(u) = 1 - g(1-u)$ is its complement.
 
 Note that $F^*$ and $F$ are equivalent probability measures if and only if $g:[0,1]\to[0,1]$ is continuous and one-to-one.
-Definition 4.2. We define a family of distortion risk-measures using the mean-value under the distorted probability:
+The resulting family of distortion risk measures uses the mean under the distorted distribution:
 
 ### Risk Measure Integration
 
@@ -148,12 +152,14 @@ the same rules.
 ### Basic Usage
 
 ```julia
-outcomes = rand(100)
+using ActuaryUtilities, Random
+
+outcomes = rand(Xoshiro(42), 10_000)
 
 # direct usage
 VaR(0.90)(outcomes) # ≈ 0.90  
 CTE(0.90)(outcomes) # ≈ 0.95  
-WangTransform(0.90)(outcomes) # ≈ 0.81
+WangTransform(0.90)(outcomes) # ≈ 0.82
 
 # construct a reusable object (functor)
 rm = VaR(0.90)
@@ -238,9 +244,7 @@ A risk measure collapses a whole loss distribution to a single number. Optimal
 transport (OT) supplies the complementary half — the **geometry *between*
 distributions**: how far apart two risks are, how a rank-preserving stress moves
 *every* measure at once, whether a quarter-over-quarter change is real, and how
-much a risk measure can move under model error. In one dimension OT is closed
-form (transport is just rank matching), so these tools need no solver — they are
-sorting and quantile arithmetic layered on the same `rm(risk)` interface. For a
+much a risk measure can move under model error. In one dimension OT has a quantile representation. Samples and finite discrete laws use exact rank or probability-mass matching; other distributions may require numerical integration. These tools avoid an optimization solver and use the same `rm(risk)` interface. For a
 broad treatment of optimal transport in an actuarial context, see Charpentier
 (2026), ["Optimal Transport for Actuarial
 Science"](https://hal.science/hal-05684645) ⟨hal-05684645⟩.
@@ -269,11 +273,11 @@ transport map, push the book through it, and recompute every measure consistentl
 ```julia
 base_law = LogNormal(log(1000) - 0.18, 0.6)                    # the assumed base
 T        = transportmap(base_law, LogNormal(log(1300) - 0.32, 0.8))  # → target
-sample   = rand(base_law, 100_000)
-stress   = pushforward(sample, T)
+draws    = rand(base_law, 100_000)
+stress   = pushforward(draws, T)
 
 for rm in (Expectation(), VaR(0.95), CTE(0.95), VaR(0.995), CTE(0.995))
-    println(rm, ": ", round(rm(sample)), " → ", round(rm(stress)))
+    println(rm, ": ", round(rm(draws)), " → ", round(rm(stress)))
 end
 ```
 
@@ -365,7 +369,7 @@ posterior through the same [`wasserstein`](@ref) primitive, now *between fitted
 laws*:
 
 ```julia
-using Turing
+using Turing, ActuaryUtilities, Distributions, Random, Statistics
 
 @model function severity_drift(x1, x2)
     μ  ~ Normal(log(1000), 1)                  # baseline log-severity location
@@ -428,8 +432,7 @@ anything that passes.
 
 ### Discussion: how to read these numbers, and what is deliberately left out
 
-Every exported verb above is *objective* — sorting and quantile arithmetic with
-no priors, no tuning knobs, and no solver. That is what keeps them auditable and
+The transport operations above use sorting and quantile arithmetic rather than an optimization solver. Users still choose the distance order `p`, the robustness radius, and any tail level; distribution inputs can also require numerical integration. That is what keeps them auditable and
 exactly reproducible, and it is a deliberate scope choice. The drift check is
 the place where judgement necessarily enters, which is exactly why it is a
 worked example rather than an export.
@@ -444,8 +447,7 @@ misread as `P(drift is real | data)`; they are not the same number, and in a
 governance setting the misread is the default. The noise floor exists for a
 concrete reason: the plug-in Wasserstein distance is biased upward in finite
 samples — `wasserstein(x, y)` between two samples of the *same* law is positive,
-not zero — so the permutation floor is best understood as a bias correction for
-that estimator rather than as a hypothesis-testing ritual.
+not zero — so the permutation distribution calibrates the sampling variation under the null. Its threshold is not an unbiased estimate of the population distance or a bias-corrected effect size.
 
 **What the generative (Bayesian) view adds.** The question a capital or
 experience committee usually wants answered is not "is there any drift?" but "how
