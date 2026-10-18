@@ -1,5 +1,22 @@
 # Version Upgrade Guide
 
+## v6.0.0 to v6.1.0
+
+v6.1 adds to v6 without changing existing results. It requires FinanceModels 7.2.
+
+- Contract measures (`duration`, `convexity`, their DV01 and dollar versions, key rates) and
+  `zspread` accept a FinanceModels `Models` context in place of the `discount` and `index` curves.
+  `Effective()` shifts the context's model and every yield model in its store; `Spread()` shifts the
+  model only; credit and prepayment assumptions in the store stay fixed.
+- A `ShortRate.HullWhiteTree` model is shifted through its Hull–White curve, so callable and putable
+  assets are revalued on the recalibrated lattice, and `zspread` on it is the option-adjusted
+  spread.
+- The parallel contract forms take `bump`, for duration and convexity by revaluation at ±`bump`:
+  the effective convexity of exercisable assets, whose second derivatives FinanceModels does not
+  differentiate through exercise decisions.
+
+See [Credit, Optionality and Valuation Contexts](@ref).
+
 ## v5.12.0 to v6.0.0
 
 v6 measures parallel risk without tenor grids. Each single-rate input uses its own

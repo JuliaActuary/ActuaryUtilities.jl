@@ -643,6 +643,88 @@ end
 A par floater at reset has near-zero effective duration. A fixed coupon spread
 adds duration because those payments do not reset with the curve.
 
+## Credit, Optionality and Valuation Contexts
+
+Contract measures also take a FinanceModels `Models` context instead of the `discount` and `index`
+curves. The context's model discounts and prices, and its store holds what contracts read by key:
+index curves, `Credit.Assumptions` for defaultable contracts, prepayment assumptions for pools.
+`Effective()` shifts the model and every yield model in the store; `Spread()` shifts the model only.
+Credit and prepayment assumptions are never shifted, so a defaultable bond's rate risk holds its
+hazard and recovery fixed:
+
+```@example credit
+using ActuaryUtilities, FinanceModels
+
+curve = ZeroRateCurve([0.03, 0.035, 0.04, 0.042], [1.0, 3.0, 7.0, 12.0])
+acme = Credit.Assumptions(Credit.ConstantHazard(0.02); recovery = 0.4)
+bond = Credit.Defaultable(Bond.Fixed(0.05, Periodic(2), 10), "ACME")
+ctx = Models(curve, Dict("ACME" => acme))
+duration(ctx, bond), convexity(ctx, bond)
+```
+
+Sensitivities to the credit assumptions themselves, or to a model's volatility, are market-input
+sensitivities ([Market Inputs](@ref)): build the context inside the valuation.
+
+```@example credit
+sensitivities((; hazard = [0.02], recovery = [0.4])) do m
+    a = Credit.Assumptions(Credit.ConstantHazard(m.hazard[1]); recovery = m.recovery[1])
+    present_value(Models(curve, Dict("ACME" => a)), bond)
+end
+```
+
+### Callable and putable assets
+
+A `ShortRate.HullWhiteTree` valuation model values callable and putable assets on a Hull–White
+lattice. A curve shock moves the curve the lattice is calibrated to, and the lattice redoes the
+exercise decisions, so effective duration and key-rate durations come from the recalibrated
+lattice:
+
+```@example credit
+hw = ShortRate.HullWhite(0.1, 0.01, curve)
+tree = ShortRate.HullWhiteTree(hw; max_step = 1 / 48)
+callable = Bond.Callable(Bond.Fixed(0.05, Periodic(2), 10), 3.0:0.5:9.5, 1.0)
+duration(tree, callable)
+```
+
+Second derivatives along the lattice's decisions leave out the effect of the exercise boundary
+moving with the curve, which is where a callable bond's negative convexity comes from, so
+FinanceModels throws on them. Effective convexity is then measured by revaluation: pass `bump`, a
+parallel shift in continuous-zero units, to the parallel forms of `duration`, `convexity` and
+their dollar versions.
+
+```@example credit
+convexity(tree, callable; bump = 1.0e-3), convexity(curve, Bond.Fixed(0.05, Periodic(2), 10))
+```
+
+[`zspread`](@ref) on a lattice model is the option-adjusted spread: a constant spread on the
+curve the lattice is calibrated to, which for Hull–White is the same spread on every node's rate,
+with the exercise decisions redone at each trial spread. On a context with credit assumptions, it
+is the spread beyond the hazard and recovery.
+
+```@example credit
+price = 0.98
+zspread(tree, callable, price).zspread
+```
+
+For a callable corporate bond, fit the issuer's hazard curve to its straight bonds, then solve for
+the spread that its callable bond's market price leaves beyond rates, credit and the call:
+
+```@example credit
+straight = [Credit.Defaultable(Bond.Fixed(c, Periodic(2), t), "ACME") for (c, t) in ((0.045, 2.0), (0.05, 5.0), (0.055, 10.0))]
+fitted = fit(Credit.Assumptions(Credit.PiecewiseHazard(); recovery = 0.4), Quote.([1.0045, 1.001, 0.998], straight), Fit.Bootstrap(); discount = curve)
+risky_callable = Credit.Defaultable(callable, "ACME")
+corporate = Models(tree, Dict("ACME" => fitted))
+oas = zspread(corporate, risky_callable, 0.96).zspread
+```
+
+The spread is a parallel shift of the curve the lattice is calibrated to, so the bond reprices at
+it:
+
+```@example credit
+shifted = Models(ShortRate.HullWhiteTree(ShortRate.HullWhite(0.1, 0.01, curve + oas); max_step = 1 / 48), Dict("ACME" => fitted))
+present_value(shifted, risky_callable)
+```
+
 ## Stochastic Model Sensitivities
 
 ForwardDiff can differentiate the simulated valuation through Hull–White path

@@ -41,6 +41,10 @@ _bumped(curve, tenors, bumps) = FinanceModels.Yield.TenorShift(
 # over the model would hide them. Its discount factors are the bumped curve's either way.
 _bumped(hw::HW, tenors, bumps) =
     ConstructionBase.setproperties(hw; curve = _bumped(hw.curve, tenors, bumps))
+# A lattice valuation model moves its Hull–White model's curve: the lattice recalibrates to it, and
+# a parallel bump is a constant spread on every node's rate (an option-adjusted spread).
+_bumped(tree::FinanceModels.ShortRate.HullWhiteTree, tenors, bumps) =
+    ConstructionBase.setproperties(tree; model = _bumped(tree.model, tenors, bumps))
 
 # A one-knot grid is an exact parallel shift: its hat is flat everywhere. Every
 # yield-model parallel shift uses it, so parallel results are ≈ the sums of key-rate results.

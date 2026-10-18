@@ -10,17 +10,54 @@ const _ContractMetric = Union{Effective, Spread}
 # `present_value(ctx, c)`; composites and portfolios are valued as the sums of their parts.
 _value(target, index, discount) = FinanceCore.present_value(FinanceModels.Models(discount; index), target)
 
-# The value under one shock, `shock(curve)`, to the curves the metric moves: the index and discount
-# curves for Effective, the discount curve for Spread.
-_contract_value(::Effective, target, discount, index, shock::S) where {S} = _value(target, shock(index), shock(discount))
-_contract_value(::Spread, target, discount, index, shock::S) where {S} = _value(target, index, shock(discount))
-_parallel_value(metric, target, discount, index, s) =
-    _contract_value(metric, target, discount, index, c -> _parallel_bumped(c, s))
+# A valuation context: its model discounts and prices, and its store holds the models contracts read
+# by key (index curves, credit and prepayment assumptions). AU's two-curve forms are the context
+# `Models(discount; index)`, whose store serves `index` under every key.
+const _Context = FinanceModels.Models
+_context(discount, index) = FinanceModels.Models(discount; index)
+
+# The value under one shock, `shock(curve)`, to the curves the metric moves. Effective moves the
+# model and every yield model in the store, so floating coupons reset; Spread moves the model only.
+# Other store entries, such as credit and prepayment assumptions, never move.
+_context_value(::Effective, target, ctx, shock::S) where {S} =
+    FinanceCore.present_value(FinanceModels.Models(shock(ctx.model), _shift_store(ctx.store, shock)), target)
+_context_value(::Spread, target, ctx, shock::S) where {S} =
+    FinanceCore.present_value(FinanceModels.Models(shock(ctx.model), ctx.store), target)
+_shift_store(store::FinanceModels.__EveryKey, shock::S) where {S} = FinanceModels.__EveryKey(shock(store.index))
+_shift_store(store::NamedTuple, shock::S) where {S} = map(v -> _shift_entry(v, shock), store)
+_shift_store(store::AbstractDict, shock::S) where {S} = Dict(k => _shift_entry(v, shock) for (k, v) in store)
+_shift_entry(v::AYM, shock::S) where {S} = shock(v)
+_shift_entry(v, shock) = v
+
+_contract_value(metric, target, discount, index, shock::S) where {S} = _context_value(metric, target, _context(discount, index), shock)
+_parallel_value(metric, target, ctx, s) = _context_value(metric, target, ctx, c -> _parallel_bumped(c, s))
+_parallel_value(metric, target, discount, index, s) = _parallel_value(metric, target, _context(discount, index), s)
 # Derivatives on the key-rate grid of one shock vector applied to the curves the metric moves.
-function _contract_keyrate(metric, grid, discount, target, index, order)
+function _contract_keyrate(metric, grid, ctx, target, order)
     _validate_tenors(grid)
-    v(b) = _contract_value(metric, target, discount, index, c -> _bumped(c, grid, b.shift))
+    v(b) = _context_value(metric, target, ctx, c -> _bumped(c, grid, b.shift))
     return _only_role(_named_ad(v, (; shift = zeros(length(grid))), order))
+end
+_contract_keyrate(metric, grid, discount, target, index, order) = _contract_keyrate(metric, grid, _context(discount, index), target, order)
+
+# The value of the parallel shock `f(s)` and its first and second derivatives at s = 0: by ForwardDiff,
+# or, with a `bump`, by central differences, revaluing at ±bump. Revaluation measures what the
+# derivatives along a valuation's decisions leave out, such as an exercise boundary that moves with
+# the curve (FinanceModels throws on second derivatives through exercise decisions).
+_parallel_first(f::F, ::Nothing) where {F} = _value_and_derivative(f, 0.0)
+_parallel_second(f::F, ::Nothing) where {F} = _value_and_second(f)
+function _parallel_first(f::F, bump::Real) where {F}
+    h = _check_bump(bump)
+    return f(0.0), (f(h) - f(-h)) / 2h
+end
+function _parallel_second(f::F, bump::Real) where {F}
+    h = _check_bump(bump)
+    v = f(0.0)
+    return v, (f(h) - 2v + f(-h)) / h^2
+end
+function _check_bump(bump)
+    (isfinite(bump) && bump > 0) || throw(ArgumentError("a bump is a finite positive shift; got $bump"))
+    return float(bump)
 end
 
 """
@@ -47,36 +84,82 @@ convexity includes the cross terms between the curves: for the parallel second d
 `Cᵢd`, `Cdᵢ` and `Cdd` of the index and discount roles, it is their sum, and spread convexity is
 `Cdd`. A portfolio's value and dollar derivatives are summed before normalizing. See
 [`sensitivities`](@ref) for the roles separately, [`zspread`](@ref) and [`locked_floater`](@ref).
+
+**Valuation contexts.** Every form also takes a FinanceModels `Models` context in place of
+`discount` (and without `index`): `duration(Effective(), ctx, contract)`. Its model discounts and
+prices, and its store holds what contracts read by key. `Effective()` shifts the model and every
+yield model in the store, such as index curves; `Spread()` shifts the model only. Other entries,
+such as `Credit.Assumptions` and prepayment assumptions, are never shifted, so a defaultable bond's
+hazard and recovery stay fixed. A `ShortRate.HullWhiteTree` model shifts the curve its lattice is
+calibrated to, so callable and putable assets are revalued on the recalibrated lattice.
+
+**Revaluation.** The parallel forms take `bump`, a shift in continuous-zero units such as
+`1e-4`: the duration and DV01 are then central differences and the convexity a second difference
+of values at `±bump`, instead of ForwardDiff derivatives. FinanceModels throws on second derivatives
+through an exercise decision, because they leave out the moving exercise boundary; the effective
+convexity of a callable or putable asset is `convexity(ctx, asset; bump)`.
+
+```julia
+ctx = Models(ShortRate.HullWhiteTree(hw), Dict("ACME" => Credit.Assumptions(hazard; recovery = 0.4)))
+callable = Credit.Defaultable(Bond.Callable(Bond.Fixed(0.05, Periodic(2), 10), 3.0:0.5:9.5, 1.0), "ACME")
+duration(ctx, callable)                    # effective duration, along the lattice's decisions
+convexity(ctx, callable; bump = 1.0e-3)    # effective convexity by revaluation
+```
 """
-function duration(metric::_ContractMetric, discount::AYM, target::_Contractish; index::AYM = discount)
-    value, derivative = _value_and_derivative(s -> _parallel_value(metric, target, discount, index, s), 0.0)
+# The contract measures on a context; AU's two-curve forms build `Models(discount; index)`.
+function duration(metric::_ContractMetric, ctx::_Context, target::_Contractish; bump = nothing)
+    value, derivative = _parallel_first(s -> _parallel_value(metric, target, ctx, s), bump)
     return -derivative / value
 end
-function duration(metric::_ContractMetric, kr::KeyRates, discount::AYM, target::_Contractish; index::AYM = discount)
-    r = _contract_keyrate(metric, kr.tenors, discount, target, index, FirstOrder())
+function duration(metric::_ContractMetric, kr::KeyRates, ctx::_Context, target::_Contractish)
+    r = _contract_keyrate(metric, kr.tenors, ctx, target, FirstOrder())
     return _relative(r, r.gradient; negate = true)
 end
-
-function duration(::DV01, metric::_ContractMetric, discount::AYM, target::_Contractish; index::AYM = discount)
-    return -ForwardDiff.derivative(s -> _parallel_value(metric, target, discount, index, s), 0.0) / 10_000
-end
-function duration(::DV01, metric::_ContractMetric, kr::KeyRates, discount::AYM, target::_Contractish; index::AYM = discount)
-    r = _contract_keyrate(metric, kr.tenors, discount, target, index, FirstOrder())
+duration(::DV01, metric::_ContractMetric, ctx::_Context, target::_Contractish; bump = nothing) =
+    -last(_parallel_first(s -> _parallel_value(metric, target, ctx, s), bump)) / 10_000
+function duration(::DV01, metric::_ContractMetric, kr::KeyRates, ctx::_Context, target::_Contractish)
+    r = _contract_keyrate(metric, kr.tenors, ctx, target, FirstOrder())
     return _per_bp(r, r.gradient)
 end
-
-function convexity(metric::_ContractMetric, discount::AYM, target::_Contractish; index::AYM = discount)
-    value, second = _value_and_second(s -> _parallel_value(metric, target, discount, index, s))
+function convexity(metric::_ContractMetric, ctx::_Context, target::_Contractish; bump = nothing)
+    value, second = _parallel_second(s -> _parallel_value(metric, target, ctx, s), bump)
     return second / value
 end
-function convexity(metric::_ContractMetric, kr::KeyRates, discount::AYM, target::_Contractish; index::AYM = discount)
-    r = _contract_keyrate(metric, kr.tenors, discount, target, index, SecondOrder())
+function convexity(metric::_ContractMetric, kr::KeyRates, ctx::_Context, target::_Contractish)
+    r = _contract_keyrate(metric, kr.tenors, ctx, target, SecondOrder())
     return _relative(r, r.hessian)
 end
-convexity(::DollarConvexity, metric::_ContractMetric, discount::AYM, target::_Contractish; index::AYM = discount) =
-    _second(s -> _parallel_value(metric, target, discount, index, s))
+convexity(::DollarConvexity, metric::_ContractMetric, ctx::_Context, target::_Contractish; bump = nothing) =
+    last(_parallel_second(s -> _parallel_value(metric, target, ctx, s), bump))
+convexity(::DollarConvexity, metric::_ContractMetric, kr::KeyRates, ctx::_Context, target::_Contractish) =
+    _contract_keyrate(metric, kr.tenors, ctx, target, SecondOrder()).hessian
+
+# Without a metric, contracts take Effective().
+duration(ctx::_Context, target::_Contractish; kwargs...) = duration(Effective(), ctx, target; kwargs...)
+duration(kr::KeyRates, ctx::_Context, target::_Contractish) = duration(Effective(), kr, ctx, target)
+duration(::DV01, ctx::_Context, target::_Contractish; kwargs...) = duration(DV01(), Effective(), ctx, target; kwargs...)
+duration(::DV01, kr::KeyRates, ctx::_Context, target::_Contractish) = duration(DV01(), Effective(), kr, ctx, target)
+convexity(ctx::_Context, target::_Contractish; kwargs...) = convexity(Effective(), ctx, target; kwargs...)
+convexity(kr::KeyRates, ctx::_Context, target::_Contractish) = convexity(Effective(), kr, ctx, target)
+convexity(::DollarConvexity, ctx::_Context, target::_Contractish; kwargs...) = convexity(DollarConvexity(), Effective(), ctx, target; kwargs...)
+convexity(::DollarConvexity, kr::KeyRates, ctx::_Context, target::_Contractish) = convexity(DollarConvexity(), Effective(), kr, ctx, target)
+
+duration(metric::_ContractMetric, discount::AYM, target::_Contractish; index::AYM = discount, bump = nothing) =
+    duration(metric, _context(discount, index), target; bump)
+duration(metric::_ContractMetric, kr::KeyRates, discount::AYM, target::_Contractish; index::AYM = discount) =
+    duration(metric, kr, _context(discount, index), target)
+duration(::DV01, metric::_ContractMetric, discount::AYM, target::_Contractish; index::AYM = discount, bump = nothing) =
+    duration(DV01(), metric, _context(discount, index), target; bump)
+duration(::DV01, metric::_ContractMetric, kr::KeyRates, discount::AYM, target::_Contractish; index::AYM = discount) =
+    duration(DV01(), metric, kr, _context(discount, index), target)
+convexity(metric::_ContractMetric, discount::AYM, target::_Contractish; index::AYM = discount, bump = nothing) =
+    convexity(metric, _context(discount, index), target; bump)
+convexity(metric::_ContractMetric, kr::KeyRates, discount::AYM, target::_Contractish; index::AYM = discount) =
+    convexity(metric, kr, _context(discount, index), target)
+convexity(::DollarConvexity, metric::_ContractMetric, discount::AYM, target::_Contractish; index::AYM = discount, bump = nothing) =
+    convexity(DollarConvexity(), metric, _context(discount, index), target; bump)
 convexity(::DollarConvexity, metric::_ContractMetric, kr::KeyRates, discount::AYM, target::_Contractish; index::AYM = discount) =
-    _contract_keyrate(metric, kr.tenors, discount, target, index, SecondOrder()).hessian
+    convexity(DollarConvexity(), metric, kr, _context(discount, index), target)
 
 """
     sensitivities([order,] [KeyRates(tenors),] discount, contract; index = discount) -> NamedTuple
@@ -133,9 +216,24 @@ derivatives.
 The solve stops once a Newton step is smaller than `tol` in rate units (not currency), so the
 result does not depend on the contract's notional and is defined for a zero `market_price`.
 An `ErrorException` is thrown if that does not happen within `maxiter` steps.
+
+    zspread(ctx::Models, contract, market_price; s0 = 0.0, tol = 1e-12, maxiter = 100)
+
+The spread on the model of a FinanceModels valuation context; the store's entries, such as index
+curves and credit assumptions, stay fixed. With a `ShortRate.HullWhiteTree` model it is the
+option-adjusted spread of a callable or putable asset: the spread moves the curve the lattice is
+calibrated to, which for Hull–White is the same constant spread on every node's rate, and each
+trial spread redoes the exercise decisions. For a `Credit.Defaultable` asset it is the residual
+spread beyond the hazard and recovery assumptions, which stay fixed.
+
+```julia
+oas = zspread(Models(ShortRate.HullWhiteTree(hw), store), callable, 0.97).zspread
+```
 """
-function zspread(discount::AYM, contract::FinanceCore.AbstractContract, market_price; index::AYM = discount, s0 = 0.0, tol = 1.0e-12, maxiter = 100)
-    pvs(s) = _parallel_value(Spread(), contract, discount, index, s)
+zspread(discount::AYM, contract::FinanceCore.AbstractContract, market_price; index::AYM = discount, kwargs...) =
+    zspread(_context(discount, index), contract, market_price; kwargs...)
+function zspread(ctx::_Context, contract::FinanceCore.AbstractContract, market_price; s0 = 0.0, tol = 1.0e-12, maxiter = 100)
+    pvs(s) = _parallel_value(Spread(), contract, ctx, s)
     f(s) = pvs(s) - market_price
     failed(step, s) = ErrorException("zspread did not converge (last Newton step = $step, residual = $(f(s)))")
     converged, s, step = _newton(f, float(FinanceCore.rate(FinanceCore.Continuous(s0))), maxiter) do s, step, _

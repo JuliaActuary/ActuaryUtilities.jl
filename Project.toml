@@ -1,7 +1,7 @@
 name = "ActuaryUtilities"
 uuid = "bdd23359-8b1c-4f88-b89b-d11982a786f4"
 authors = ["Alec Loudenback"]
-version = "6.0.0"
+version = "6.1.0"
 
 [deps]
 ConstructionBase = "187b0558-2788-49d3-abe0-74a17ed4e7c9"
@@ -23,7 +23,7 @@ Dates = "1"
 DiffResults = "1.1"
 Distributions = "0.25.120"
 FinanceCore = "3"
-FinanceModels = "7"
+FinanceModels = "7.2"
 ForwardDiff = "1"
 PrecompileTools = "1.2"
 QuadGK = "2.10"
