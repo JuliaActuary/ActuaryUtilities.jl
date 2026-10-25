@@ -8,7 +8,7 @@ makedocs(;
     modules = [ActuaryUtilities, FinanceCore],
     format = Documenter.HTML(;
         prettyurls = get(ENV, "CI", "false") == "true",
-        canonical = "https://docs.juliaactuary.org/ActuaryUtilities",
+        canonical = "https://docs.juliaactuary.org/ActuaryUtilities/stable/",
     ),
     pages = [
         "Overview" => "index.md",
