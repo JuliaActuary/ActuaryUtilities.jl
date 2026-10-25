@@ -11,6 +11,10 @@
     y = FinanceModels.fit(FinanceModels.Spline.Linear(), FinanceModels.CMTYield.(rates, mats), FinanceModels.Fit.Bootstrap())
     r = 0.05
     rates = [r, y]
+    # v6 curve risk: the default ZeroRateCurve (MonotoneConvex) and a linear one
+    kr_tenors = [1.0, 2.0, 3.0, 4.0, 5.0]
+    kr_cfs = [5.0, 5.0, 5.0, 5.0, 105.0]
+    risk_samples = collect(range(-3.0, 3.0; length = 101))
     @compile_workload begin
         # all calls in this block will be precompiled, regardless of whether
         # they belong to your package or not (on Julia 1.8 and higher)
@@ -31,6 +35,18 @@
         end
         spread(y, y + 0.01, cfs)
 
+
+        for c in (FinanceModels.ZeroRateCurve(fill(0.03, 5), kr_tenors), FinanceModels.ZeroRateCurve(fill(0.03, 5), kr_tenors, FinanceModels.Spline.Linear()))
+            duration(c, kr_cfs, kr_tenors); duration(Macaulay(), c, kr_cfs, kr_tenors)
+            duration(DV01(), c, kr_cfs, kr_tenors); convexity(c, kr_cfs, kr_tenors)
+            duration(KeyRates(kr_tenors), c, kr_cfs, kr_tenors); duration(DV01(), KeyRates(kr_tenors), c, kr_cfs, kr_tenors)
+            convexity(KeyRates(kr_tenors), c, kr_cfs, kr_tenors)
+            sensitivities(c, FinanceCore.Cashflow.(kr_cfs, kr_tenors))
+            sensitivities(SecondOrder(), KeyRates(kr_tenors), c, FinanceCore.Cashflow.(kr_cfs, kr_tenors))
+        end
+        duration(Effective(), FinanceModels.Yield.Constant(0.03), FinanceModels.Bond.Fixed(0.05, FinanceCore.Periodic(2), 5.0))
+        VaR(0.95)(risk_samples); CTE(0.95)(risk_samples)
+        irr([-100.0, 10.0, 10.0, 110.0])
 
         years_between(Dates.Date(2018, 9, 30), Dates.Date(2018, 9, 30))
         policy_duration(Dates.Date(2018, 9, 30), Dates.Date(2019, 9, 30))
