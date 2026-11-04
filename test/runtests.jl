@@ -18,6 +18,7 @@ include("risk_measures.jl")
 include("optimal_transport.jl")
 include("discrete_transport.jl")
 include("audit.jl")
+include("lorig_reference.jl")
 
 @testset "Temporal functions" begin
     @testset "years_between" begin
