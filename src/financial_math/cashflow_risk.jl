@@ -62,9 +62,9 @@ _zero_stream_time(::Type{FinanceCore.Cashflow{A, T}}, times) where {A <: Real, T
 
 # The zero-stream value for a single rate, number or curve.
 _zero_stream_value(yield, cfs, times) = _zero_cashflow_value(t -> FinanceCore.discount(yield, t), cfs, times)
-# The same for a statistic Σ weight(t)⋅cf⋅d / divisor, so it has the nonempty formula's type.
+# The same for a statistic Σ weight(t, cf⋅d) / divisor, so it has the nonempty formula's type.
 _zero_weighted(yield, weight, cfs, times, divisor = 1) =
-    zero(weight(_zero_stream_time(cfs, times)) * _zero_stream_value(yield, cfs, times) / divisor)
+    zero(weight(_zero_stream_time(cfs, times), _zero_stream_value(yield, cfs, times)) / divisor)
 
 # An all-zero stream in an abstractly typed collection uses the amounts present.
 function _zero_amount(cfs)
