@@ -48,7 +48,7 @@ _shock_numbers(r, ::Nothing) = haskey(r, :hessian) ?
     _, w0, _, _ = _active_hats(tenors, t0)
     T = promote_type(typeof(cfd0), typeof(t0 * cfd0 * w0), eltype(tenors))
     if second
-        T = promote_type(T, typeof(t0 * t0 * cfd0 * w0 * w0))
+        T = promote_type(T, typeof(_valuation_time(t0, cfd0) * t0 * cfd0 * w0 * w0))
     end
     grad_shared = zeros(T, n)
     hess_shared = second ? zeros(T, n, n) : nothing
@@ -59,13 +59,18 @@ _shock_numbers(r, ::Nothing) = haskey(r, :hessian) ?
         cfd = _cf_value(cfs[k]) * d
         V += cfd
         i, wi, j, wj = _active_hats(tenors, t)
-        grad_shared[i] -= t * cfd * wi
+        gi = t * cfd * wi
+        grad_shared = _fit(grad_shared, gi)
+        grad_shared[i] -= gi
         if i != j
             grad_shared[j] -= t * cfd * wj
         end
         if second
-            tt = t * t * cfd
-            hess_shared[i, i] += tt * wi * wi
+            # t² is formed where the stream is valued: `Int8` years would wrap 20·20
+            tt = _valuation_time(t, cfd) * t * cfd
+            ii = tt * wi * wi
+            hess_shared = _fit(hess_shared, ii)
+            hess_shared[i, i] += ii
             if i != j
                 ij = tt * wi * wj
                 hess_shared[i, j] += ij
@@ -80,6 +85,14 @@ _shock_numbers(r, ::Nothing) = haskey(r, :hessian) ?
         return (; value = V, gradient = grad_shared, zero_stream)
     end
 end
+# `buffer`, able to hold `x`. When every payment has the first one's types, the seeded element type
+# already holds each term and this returns `buffer` itself, decided at compile time. A stream of
+# mixed types (`Real[1.0, x]` with a dual number `x`, or `Cashflow`s with abstract fields) is
+# seeded from its first payment only, so a later payment of a wider type gets a widened copy.
+@inline _fit(buffer::AbstractArray{T}, ::S) where {T, S} = _fit(buffer, promote_type(T, S))
+@inline _fit(buffer::AbstractArray{T}, ::Type{T}) where {T} = buffer
+@inline _fit(buffer::AbstractArray, ::Type{T}) where {T} = convert(AbstractArray{T}, buffer)
+
 _fixed_keyrate(curve, kr::KeyRates, order, cfs, times...) =
     _keyrate_analytic(curve, kr.tenors, _cashflow_inputs(cfs, times...)..., order)
 
