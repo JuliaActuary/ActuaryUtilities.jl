@@ -77,12 +77,25 @@ supremum search.
 `rtol`, `atol`, and `maxevals` control that calculation. By default the
 evaluation budget scales with the number of empirical quantile segments; an
 explicit `maxevals` is a hard cap for the numerical calculation. Finite-`p`
-quadrature throws if its error estimate exceeds the requested tolerance.
+quadrature throws, reporting its estimate, error estimate and budget, unless both
+are finite and the error estimate meets the requested tolerance.
 For general distributional `p=Inf`, stable grid maxima are a numerical
-approximation, not a supremum certificate. Infinite
-distance is returned only when proved by support bounds or a supported analytic
-family; unresolved same-side-unbounded pairs throw rather than relying on tail
-growth heuristics.
+approximation, not a supremum certificate.
+
+An infinite distance is returned only when proved, never inferred from quadrature
+that did not converge: a convergent integral with a heavy tail looks the same. For
+finite `p` the proof is that exactly one of the two laws has a finite moment of
+order `p`, as a bounded or finite atomic law against a `Cauchy`. It uses bounded
+support and the `mean` and `var` that Distributions defines for the law, so it
+covers every `p` when a law is bounded or has no mean, and `p ≤ 2` or `p ≥ 2`
+when the variance decides. For `p=Inf` it is support bounds or a supported
+analytic family. Unresolved pairs throw.
+
+At `p=1`, the distance from a law to a point mass at `c` (a `Dirac`, a one-point
+sample) is `abs(mean(law) - c)` when the law lies on one side of `c` and
+Distributions defines its mean: a nonnegative risk is its mean away from zero. That
+is exact where the tail is too heavy for quadrature
+(`wasserstein(Pareto(1.001), [0.0])` is 1001).
 
 ## References
 - "Optimal Transport for Actuarial Science", Arthur Charpentier, 2026.
@@ -179,19 +192,61 @@ function _wasserstein(a::FiniteAtoms, b::FiniteAtoms, p; kwargs...)
     return isinf(p) ? acc : acc^(1 / p)
 end
 
-# A divergent endpoint integral has tail-shell masses that do not tend to zero.
-# This deliberately conservative detector only reports divergence when the last
-# five dyadic shells are essentially flat; ambiguous non-convergence remains an
-# error rather than being converted to a finite number or to Inf.
-function _divergent_quantile_tail(f)
-    shells = map(20:30) do k
-        ε = exp2(-k)
-        width = ε / 2
-        width * (f(3ε / 4) + f(1 - 3ε / 4))
-    end
-    tail = @view shells[(end - 4):end]
-    return all(isfinite, tail) && minimum(tail) > 0 && minimum(tail) / maximum(tail) > 0.98
+# ── Facts that settle a finite-order distance without quadrature ────────────
+#
+# Quadrature cannot tell a divergent quantile integral from a convergent one with a heavy tail:
+# both leave an error estimate above tolerance, and their tail contributions look alike at any
+# finite resolution (the mean of `Pareto(1.001)` is 1001, with most of it beyond the last
+# representable probability). An infinite distance is therefore returned only when proved.
+
+# `f(d)` where a method of `f` is defined for the law's type, and `nothing` where only the generic
+# collection method would apply: `mean(itr)`, `var(itr)` and `minimum(itr)` accept any argument, so
+# `applicable` cannot tell. A law that defines only `quantile` has no facts and is integrated.
+_known(f::F, d) where {F} = which(f, Tuple{typeof(d)}) === which(f, Tuple{Any}) ? nothing : f(d)
+
+# Whether E|X|^p is finite, for p ≥ 1: `true` or `false` where a fact proves it, `nothing` otherwise.
+# A bounded law has every moment. Distributions reports a mean or variance that does not exist as
+# `Inf` or `NaN`; a law without a mean has no moment of order p ≥ 1, and the variance decides the
+# orders on its side of 2.
+function _has_moment(d::Distributions.UnivariateDistribution, p)
+    lo, hi = _known(minimum, d), _known(maximum, d)
+    !isnothing(lo) && !isnothing(hi) && isfinite(lo) && isfinite(hi) && return true
+    m = _known(Distributions.mean, d)
+    isnothing(m) && return nothing
+    isfinite(m) || return false
+    p == 1 && return true
+    v = _known(Distributions.var, d)
+    isnothing(v) && return nothing
+    return isfinite(v) ? (p <= 2 ? true : nothing) : (p >= 2 ? false : nothing)
 end
+function _has_moment(a::FiniteAtoms, p)
+    lo, hi = first(a.values), last(a.values)
+    (isnan(lo) || isnan(hi)) && return nothing
+    return isfinite(lo) && isfinite(hi)
+end
+
+# W_p(a, b) ≥ |‖a‖_p - ‖b‖_p| by the triangle inequality through a point mass at zero, so the
+# distance is infinite when exactly one law has a finite moment of order p. A missing moment of one
+# law alone proves nothing: two Cauchy laws a shift apart are that shift apart.
+function _moments_prove_infinite(a, b, p)
+    ma, mb = _has_moment(a, p), _has_moment(b, p)
+    return (ma === true && mb === false) || (ma === false && mb === true)
+end
+
+# W₁ from a law to a point mass at c is E|X - c|, which is |E X - c| when the law lies on one side
+# of c: the mean of a nonnegative law is its distance from a point mass at zero. `nothing` when the
+# atoms are not one point, the law straddles c, or its mean is not known.
+function _point_mass_distance(atoms::FiniteAtoms, d::Distributions.UnivariateDistribution)
+    c = first(atoms.values)
+    (c == last(atoms.values) && isfinite(c)) || return nothing
+    lo, hi = _known(minimum, d), _known(maximum, d)
+    ((!isnothing(lo) && lo >= c) || (!isnothing(hi) && hi <= c)) || return nothing
+    m = _known(Distributions.mean, d)
+    (isnothing(m) || !isfinite(m)) && return nothing
+    return float(abs(m - c))
+end
+_point_mass_distance(d::Distributions.UnivariateDistribution, atoms::FiniteAtoms) = _point_mass_distance(atoms, d)
+_point_mass_distance(a, b) = nothing
 
 _quantile_breaks(::Distributions.UnivariateDistribution) = Float64[]
 _quantile_breaks(a::FiniteAtoms) = probability_breaks(a)[1:(end - 1)]
@@ -201,6 +256,11 @@ function _quantile_fn(a::FiniteAtoms)
 end
 
 function _wasserstein_finite(a, b, p; rtol, atol, maxevals)
+    _moments_prove_infinite(a, b, p) && return Inf
+    if p == 1
+        exact = _point_mass_distance(a, b)
+        isnothing(exact) || return exact
+    end
     Qa, Qb = _quantile_fn(a), _quantile_fn(b)
     f(u) = abs(Qa(u) - Qb(u))^p
     # Empirical quantiles jump at i/n. Supplying those known discontinuities as
@@ -210,14 +270,15 @@ function _wasserstein_finite(a, b, p; rtol, atol, maxevals)
     budget = isnothing(maxevals) ? max(100_000, 30 * (length(points) - 1)) : maxevals
     integral, err = QuadGK.quadgk(f, points; rtol, atol, maxevals = budget)
     tolerance = max(atol, rtol * abs(integral))
-    if !isfinite(integral)
-        return Inf
-    elseif err <= tolerance
-        return integral^(1 / p)
-    elseif _divergent_quantile_tail(f)
-        return Inf
-    end
-    throw(ErrorException("wasserstein quantile integration did not converge: estimated error $err exceeds tolerance $tolerance"))
+    isfinite(integral) && isfinite(err) && err <= tolerance && return integral^(1 / p)
+    # An unresolved integral is not evidence of divergence (see the facts above).
+    throw(
+        ErrorException(
+            "wasserstein quantile integration did not converge within maxevals=$budget: " *
+                "estimate $integral, estimated error $err, tolerance $tolerance. " *
+                "The distance may be infinite, or its integrand's tails need a larger `maxevals` or a looser `rtol`"
+        )
+    )
 end
 
 # Distributional W∞ is the supremum quantile gap. The k/n grids are nested under
