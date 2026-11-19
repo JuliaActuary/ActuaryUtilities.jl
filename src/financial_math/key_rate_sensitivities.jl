@@ -142,7 +142,7 @@ function duration(valuation_fn::F, kr::KeyRates, curve::AYM) where {F}
     return _relative(r, r.gradient; negate = true)
 end
 duration(kr::KeyRates, curve::AYM, x::_Instrument, times...; kwargs...) =
-    _fixed(x) ? _keyrate_duration(curve, kr, x, times...; kwargs...) : duration(Effective(), kr, curve, x, times...; kwargs...)
+    _default_risk(_keyrate_duration, (curve, kr), duration, (Effective(), kr, curve), x, times...; kwargs...)
 function _keyrate_duration(curve, kr, cfs, times...)
     r = _fixed_keyrate(curve, kr, FirstOrder(), cfs, times...)
     return _relative(r, r.gradient; negate = true)
@@ -161,7 +161,7 @@ function duration(valuation_fn::F, ::DV01, kr::KeyRates, curve::AYM) where {F}
     return _per_bp(r, r.gradient)
 end
 duration(::DV01, kr::KeyRates, curve::AYM, x::_Instrument, times...; kwargs...) =
-    _fixed(x) ? _keyrate_dv01(curve, kr, x, times...; kwargs...) : duration(DV01(), Effective(), kr, curve, x, times...; kwargs...)
+    _default_risk(_keyrate_dv01, (curve, kr), duration, (DV01(), Effective(), kr, curve), x, times...; kwargs...)
 function _keyrate_dv01(curve, kr, cfs, times...)
     r = _fixed_keyrate(curve, kr, FirstOrder(), cfs, times...)
     return _per_bp(r, r.gradient)
@@ -248,7 +248,7 @@ function convexity(valuation_fn::F, kr::KeyRates, curve::AYM) where {F}
     return _relative(r, r.hessian)
 end
 convexity(kr::KeyRates, curve::AYM, x::_Instrument, times...; kwargs...) =
-    _fixed(x) ? _keyrate_convexity(curve, kr, x, times...; kwargs...) : convexity(Effective(), kr, curve, x, times...; kwargs...)
+    _default_risk(_keyrate_convexity, (curve, kr), convexity, (Effective(), kr, curve), x, times...; kwargs...)
 function _keyrate_convexity(curve, kr, cfs, times...)
     r = _fixed_keyrate(curve, kr, SecondOrder(), cfs, times...)
     return _relative(r, r.hessian)
@@ -259,8 +259,8 @@ convexity(valuation_fn::F, base::AYM, credit::AYM) where {F} =
 
 # Dollar convexity (see `DollarConvexity`): the raw Hessians, in the layouts above.
 convexity(::DollarConvexity, kr::KeyRates, curve::AYM, x::_Instrument, times...; kwargs...) =
-    _fixed(x) ? _fixed_keyrate(curve, kr, SecondOrder(), x, times...; kwargs...).hessian :
-    convexity(DollarConvexity(), Effective(), kr, curve, x, times...; kwargs...)
+    _default_risk(_keyrate_dollar_convexity, (curve, kr), convexity, (DollarConvexity(), Effective(), kr, curve), x, times...; kwargs...)
+_keyrate_dollar_convexity(curve, kr, cfs, times...) = _fixed_keyrate(curve, kr, SecondOrder(), cfs, times...).hessian
 convexity(valuation::F, ::DollarConvexity, kr::KeyRates, curve::AYM) where {F} =
     _one_curve_ad(valuation, curve, kr.tenors, SecondOrder()).hessian
 convexity(valuation::F, ::DollarConvexity, base::AYM, credit::AYM) where {F} =
@@ -356,9 +356,11 @@ sensitivities(order::_Order, curve::_CurveInput, x::_Instrument, times...; kwarg
 sensitivities(order::_Order, kr::KeyRates, curve::_CurveInput, x::_Instrument, times...; kwargs...) =
     _sensitivities_of(order, kr.tenors, curve, x, times...; kwargs...)
 
-_sensitivities_of(order, grid, curve, x, times...; kwargs...) = _fixed(x) ?
-    _fixed_sensitivities(order, grid, curve, x, times...; kwargs...) :
-    _contract_sensitivities(order, grid, curve, x, times...; kwargs...)
+_sensitivities_of(order, grid, curve, x, times...; kwargs...) =
+    _default_risk(_fixed_sensitivities, (order, grid, curve), _contract_sensitivities, (order, grid, curve), x, times...; kwargs...)
+# Named discount layers are a contract valuation and require a projection curve.
+_sensitivities_of(order, grid, layers::NamedTuple, x, times...; kwargs...) =
+    _contract_sensitivities(order, grid, layers, _portfolio(x), times...; kwargs...)
 function _fixed_sensitivities(order, grid, yield, cfs, times...)
     amounts, ts = _cashflow_inputs(cfs, times...)
     return _sensitivities(_fixed_derivatives(yield, grid, amounts, ts, order), order)

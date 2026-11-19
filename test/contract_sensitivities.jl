@@ -109,6 +109,21 @@
         @test duration(curve, cfs) ≈ duration(curve, FC.AbstractContract[cfs...])
     end
 
+    @testset "a floater among cashflows retains its projection curve" begin
+        discount = curve + FM.Yield.Constant(FC.Continuous(0.01))
+        portfolio = FC.AbstractContract[FC.Cashflow(0.5, 2.5), flm]
+        value(c) = FC.present_value(FM.Models(c.discount; index = c.index), portfolio)
+        for grid in ((), (KeyRates(tenors),))
+            roles = sensitivities(value, grid..., (; discount, index = curve))
+            @test sum(roles.duration.index) < 0
+            @test duration(grid..., discount, portfolio; index = curve) ≈ roles.duration.discount + roles.duration.index
+            @test duration(Spread(), grid..., discount, portfolio; index = curve) ≈ roles.duration.discount
+            @test duration(grid..., curve, Any[portfolio...]) ≈ duration(Effective(), grid..., curve, portfolio)
+            @test _same_sensitivity(sensitivities(grid..., discount, Any[portfolio...]; index = curve), roles)
+            @test _same_sensitivity(sensitivities(grid..., curve, (c for c in OnePass(portfolio))), sensitivities(grid..., curve, portfolio))
+        end
+    end
+
     @testset "portfolio: one-pass == value-weighted" begin
         port = [flm, fb]
         dport = duration(curve, port)

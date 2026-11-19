@@ -21,7 +21,7 @@ end
 
 _vector(x::AbstractVector) = x
 _vector(x::AbstractArray) = vec(x)
-_vector(x::Union{Tuple, Base.Generator}) = collect(x)
+_vector(x::Union{Tuple, Base.Generator}) = vec(collect(x))
 
 _one_based(x, ::Base.OneTo) = x
 _one_based(x, _) = view(x, firstindex(x):lastindex(x))

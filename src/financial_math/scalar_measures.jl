@@ -5,15 +5,35 @@
 const _YieldInput = Union{Real, FinanceCore.Rate, AYM}
 const _CashflowCollection = Union{AbstractArray, Tuple, Base.Generator}
 
-# The unmarked, `DV01()`, key-rate and `sensitivities` forms take fixed cashflows or a contract
-# after the curve, and `_fixed` routes them. A vector of contracts is a portfolio, but a vector of
-# `Cashflow`s is fixed cashflows: its contract measures would equal these, which are analytic and
-# keep the zero-stream convention.
 const _Instrument = Union{_CashflowCollection, FinanceCore.AbstractContract}
-_fixed(x) = true
-_fixed(::FinanceCore.AbstractContract) = false
-_fixed(::AbstractVector{<:FinanceCore.AbstractContract}) = false
-_fixed(::AbstractVector{<:FinanceCore.Cashflow}) = true
+
+# The contract methods take either a single contract or a vector declared to hold contracts.
+# Keep typed portfolios as they are, and narrow wider collections only for repricing.
+_portfolio(x::FinanceCore.AbstractContract) = x
+_portfolio(x::_CashflowCollection) = _portfolio(_vector(x))
+_portfolio(x::AbstractVector{<:FinanceCore.AbstractContract}) = x
+_portfolio(x::AbstractVector) = FinanceCore.AbstractContract[c for c in x]
+
+_fixed(::AbstractVector{<:Union{Real, FinanceCore.Cashflow}}, source) = true
+function _fixed(payments::AbstractVector{T}, source) where {T}
+    # Empty contract vectors already represent portfolios. Other empty collections are streams.
+    isempty(payments) && return !(source isa AbstractVector{<:FinanceCore.AbstractContract})
+    T <: FinanceCore.AbstractContract && typeintersect(T, FinanceCore.Cashflow) === Union{} && return false
+    return all(c -> !(c isa FinanceCore.AbstractContract) || c isa FinanceCore.Cashflow, payments)
+end
+
+# Materialize a generator before inspecting its payments, then pass the same collection to
+# valuation. Supplying an index explicitly selects the contract method, including for fixed payments.
+function _default_risk(analytic::A, analytic_args, reprice::R, contract_args, x, times...; kwargs...) where {A, R}
+    if x isa _CashflowCollection
+        payments = _vector(x)
+        if !haskey(kwargs, :index) && _fixed(payments, x)
+            return analytic(analytic_args..., payments, times...; kwargs...)
+        end
+        x = _portfolio(payments)
+    end
+    return reprice(contract_args..., x, times...; kwargs...)
+end
 
 """
     duration(Macaulay(),interest_rate,cfs,times)
@@ -44,8 +64,9 @@ Dollar sensitivities differentiate the signed value directly, so they stay defin
 zero present value, where normalized duration is not. Callback forms do not use the
 zero-stream convention: a zero value from them gives undefined normalized risk.
 
-The default measure is `Modified()`. With a contract or a portfolio after the curve, it is
-`Effective()`; see [`Effective`](@ref).
+The default measure for fixed payments is `Modified()`, including for a nonempty
+`AbstractContract` vector containing only `Cashflow`s. Contracts and portfolios containing
+other instruments default to [`Effective`](@ref). Supplying `index` requests contract repricing.
 
 - Modified duration: `-∂V/∂r / V`, the relative value lost per unit increase in the shocked rate.
 - Macaulay: the present-value-weighted average payment time.
@@ -121,7 +142,7 @@ julia> duration(0.03) do i
 ```
 """
 duration(yield::_YieldInput, x::_Instrument, times...; kwargs...) =
-    _fixed(x) ? duration(Modified(), yield, x, times...; kwargs...) : duration(Effective(), yield, x, times...; kwargs...)
+    _default_risk(duration, (Modified(), yield), duration, (Effective(), yield), x, times...; kwargs...)
 
 ## Analytic measures for fixed cashflows
 # Each single-rate input moves in its own shock coordinate (docs: "Shock coordinates").
@@ -155,7 +176,7 @@ duration(::Modified, yield::_YieldInput, cfs::_CashflowCollection, times...) =
     _weighted_ratio(yield, _first_moment, _cashflow_inputs(cfs, times...)...; divisor = _coordinate(yield).divisor)
 
 duration(::DV01, yield::_YieldInput, x::_Instrument, times...; kwargs...) =
-    _fixed(x) ? _fixed_dv01(yield, x, times...; kwargs...) : duration(DV01(), Effective(), yield, x, times...; kwargs...)
+    _default_risk(_fixed_dv01, (yield,), duration, (DV01(), Effective(), yield), x, times...; kwargs...)
 
 # -∂V/∂s is Σ t·cf·d divided by the coordinate's divisor; do not divide by V so dollar
 # exposure remains defined at zero present value.
@@ -221,7 +242,7 @@ julia> convexity(i -> 100 / (1 + i)^5, 0.03)
 #
 # Signed normalization makes convexity invariant to position sign.
 convexity(yield::_YieldInput, x::_Instrument, times...; kwargs...) =
-    _fixed(x) ? _fixed_convexity(yield, x, times...; kwargs...) : convexity(Effective(), yield, x, times...; kwargs...)
+    _default_risk(_fixed_convexity, (yield,), convexity, (Effective(), yield), x, times...; kwargs...)
 
 function _fixed_convexity(yield, cfs, times...)
     w = _convexity_weight(_coordinate(yield))
@@ -286,8 +307,7 @@ end
 
 # Dollar convexity: the raw second derivatives (see `DollarConvexity`).
 convexity(::DollarConvexity, yield::_YieldInput, x::_Instrument, times...; kwargs...) =
-    _fixed(x) ? _fixed_dollar_convexity(yield, x, times...; kwargs...) :
-    convexity(DollarConvexity(), Effective(), yield, x, times...; kwargs...)
+    _default_risk(_fixed_dollar_convexity, (yield,), convexity, (DollarConvexity(), Effective(), yield), x, times...; kwargs...)
 # ∂²V/∂s² is Σ t(t + 1/m)·cf·d divided by the squared divisor; do not divide by V.
 function _fixed_dollar_convexity(yield, cfs, times...)
     amounts, ts = _cashflow_inputs(cfs, times...)
