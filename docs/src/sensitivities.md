@@ -539,7 +539,11 @@ portfolio = [floater, Bond.Fixed(0.03, Periodic(1), 7.0)]
 duration(zrc, portfolio)
 ```
 
-A vector of `Cashflow`s is fixed cashflows rather than a portfolio; their measures agree.
+A nonempty vector containing only `Cashflow` payments uses fixed-cashflow risk by default,
+including when its element type is `AbstractContract`. For example, a single zero payment
+has zero duration in either representation. To reprice the payments as contracts, pass
+`Effective()` or `Spread()` to a scalar or key-rate measure. For a bundle with separate
+discount and index exposures, use `sensitivities(zrc, payments; index = zrc)`.
 
 ### Multi-curve: risk-free + credit + ILP + index
 
