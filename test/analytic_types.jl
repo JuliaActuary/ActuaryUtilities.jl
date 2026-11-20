@@ -112,9 +112,8 @@ end
 end
 
 @testset "Cashflow moments are formed in the valuation's arithmetic" begin
-    # A unit payment at year 20 on a zero curve has dollar convexity t² = 400. `Int8` years cannot
-    # hold 20·20, which wraps to -112: each moment multiplies a time into the discounted amount
-    # before it meets another time.
+    # A unit payment at year 20 on a zero curve has dollar convexity t² = 400.
+    # Squaring the maturity in Int8 would wrap to -112.
     kernel = ActuaryUtilities.FinancialMath._keyrate_analytic
     curve = FM.Yield.Constant(FC.Continuous(0.0))
     kr = KeyRates([10.0, 30.0])
@@ -141,6 +140,17 @@ end
         @test H(FC.Periodic(0.0, 2), cfs, times) == 410
         @test H(FC.Continuous(0.0), cfs, times) == 400
     end
+    # Fractional years need the same promotion before t². Squaring 31/365 in
+    # Rational{Int16} overflows its denominator, and Float16 rounds 50.25² to 2526.
+    for t in (Int16(31) // Int16(365), Float16(50.25))
+        payment = [FC.Cashflow(1.0, t)]
+        expected = Float64(t)^2
+        for grid in ((), (kr,))
+            @test sum(H(grid..., curve, payment)) ≈ expected
+            @test sum(sensitivities(SecondOrder(), grid..., curve, payment).convexity) ≈ expected
+        end
+    end
+
     # the widest times of a narrow type
     @test H(0.0, [1.0], Int8[127]) == 127 * 128
     @test H(0.0, [1.0], UInt8[255]) == 255 * 256
@@ -167,8 +177,7 @@ end
 end
 
 @testset "Key-rate buffers hold every payment's type" begin
-    # The gradient and Hessian are seeded from the first payment. A later payment of a wider type
-    # (here a dual number after a `Float64`) used to fail to convert into them.
+    # Every payment contributes its type, including a dual amount or time after a Float64.
     kernel = ActuaryUtilities.FinancialMath._keyrate_analytic
     kr = KeyRates([1.0, 2.0])
     curve = FM.Yield.Constant(FC.Continuous(0.03))
@@ -226,5 +235,25 @@ end
         @test (@inferred kernel(curve, kr.tenors, [1.0, 3.0], [1.0, 2.0], order)).gradient == homogeneous.gradient
         @test (@inferred kernel(curve, kr.tenors, Float32[1, 3], Int8[1, 2], order)).gradient ≈ homogeneous.gradient
         @test (@inferred kernel(curve, big.(kr.tenors), [1.0, 3.0], [1.0, 2.0], order)).gradient isa Vector{BigFloat}
+    end
+end
+
+
+@testset "Mixed precision preserves a net payment in either order" begin
+    curve = FM.Yield.Constant(FC.Continuous(0.0f0))
+    kr = KeyRates(Float32[1, 2])
+    amounts = Real[100_000_000.0f0, 1.0f0, -100_000_000.0]
+    times = fill(2.0f0, 3)
+    for order in (1:3, 3:-1:1)
+        for args in ((amounts[order], times), (FC.Cashflow[FC.Cashflow(amounts[i], times[i]) for i in order],))
+            # All three payments fall at year two and net to one dollar.
+            for grid in ((), (kr,))
+                bundle = sensitivities(SecondOrder(), grid..., curve, args...)
+                @test bundle.value == 1
+                @test sum(bundle.duration) == sum(duration(grid..., curve, args...)) == 2
+                @test sum(bundle.dv01) == sum(duration(DV01(), grid..., curve, args...)) == 0.0002
+                @test sum(bundle.dollar_convexity) == sum(convexity(DollarConvexity(), grid..., curve, args...)) == 4
+            end
+        end
     end
 end

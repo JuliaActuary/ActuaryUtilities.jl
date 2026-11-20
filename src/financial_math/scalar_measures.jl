@@ -137,10 +137,8 @@ end
 _coordinate(::Union{FinanceCore.Rate{<:Real, FinanceCore.Continuous}, AYM}) =
     (; inv_m = false, divisor = 1)
 
-# A payment's moments, the terms of the weighted sums below: t·cf·d and t(t + 1/m)·cf·d for the
-# discounted amount `cfd = cf·d`. The second multiplies a time by a time, a product the times'
-# own type need not hold (`Int8` years wrap 20·20 to -112), so the time enters it as
-# `_valuation_time`.
+# Form the time product in the valuation's arithmetic. The time keeps its own AD
+# partials. Derivatives carried only by the amount or curve enter through cfd.
 _first_moment(t, cfd) = t * cfd
 struct _SecondMoment{M}
     inv_m::M
@@ -149,14 +147,7 @@ function (w::_SecondMoment)(t, cfd)
     tv = _valuation_time(t, cfd)
     return (tv * (tv + w.inv_m)) * cfd
 end
-
-# A time ready to be multiplied by another time. An integer time is converted to the arithmetic of
-# the discounted amount `cfd`, where the stream is valued: its number type without derivatives, so
-# the weight stays a plain number that scales a dual `cfd` once. Small integers convert and multiply
-# exactly, so the weight is the one integer arithmetic gave where that did not wrap. Other times
-# multiply in their own type, which does not wrap.
-_valuation_time(t, cfd) = t
-_valuation_time(t::Integer, cfd) = t * one(_primal(cfd))
+_valuation_time(t, cfd) = convert(promote_type(typeof(t), typeof(_primal(cfd))), t)
 
 duration(::Macaulay, yield::_YieldInput, cfs::_CashflowCollection, times...) =
     _weighted_ratio(yield, _first_moment, _cashflow_inputs(cfs, times...)...)
@@ -243,13 +234,11 @@ _convexity_weight(c) = _SecondMoment(c.inv_m)
 # returns `nothing` without valuing any payment; callers return its typed zero.
 function _weighted_sums(yield, weights::Tuple, cfs, times)
     _iszero_cashflow_stream(cfs) && return nothing
-    t1 = FinanceCore.timepoint(first(cfs), first(times))
-    z = _cf_value(first(cfs)) * FinanceCore.discount(yield, t1)
+    payments = _risk_payments(yield, cfs, times)
+    t1, z = first(payments)
     V = zero(z)
     Vw = map(w -> zero(w(t1, z)), weights)
-    @inbounds for k in eachindex(cfs)
-        t = FinanceCore.timepoint(cfs[k], times[k])
-        cfd = _cf_value(cfs[k]) * FinanceCore.discount(yield, t)
+    @inbounds for (t, cfd) in payments
         V += cfd
         Vw = map((acc, w) -> acc + w(t, cfd), Vw, weights)
     end
