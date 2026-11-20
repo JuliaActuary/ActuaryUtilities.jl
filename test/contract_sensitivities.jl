@@ -121,6 +121,15 @@
             @test duration(grid..., curve, Any[portfolio...]) ≈ duration(Effective(), grid..., curve, portfolio)
             @test _same_sensitivity(sensitivities(grid..., discount, Any[portfolio...]; index = curve), roles)
             @test _same_sensitivity(sensitivities(grid..., curve, (c for c in OnePass(portfolio))), sensitivities(grid..., curve, portfolio))
+            for metric in (Effective(), Spread()), (f, marker) in (
+                        (duration, ()), (duration, (DV01(),)), (convexity, ()), (convexity, (DollarConvexity(),)),
+                    )
+                risk(target) = f(marker..., metric, grid..., discount, target; index = curve)
+                expected = risk(portfolio)
+                @test risk(Any[portfolio...]) ≈ expected
+                @test risk(Tuple(portfolio)) ≈ expected
+                @test risk(c for c in OnePass(portfolio)) ≈ expected
+            end
         end
     end
 
