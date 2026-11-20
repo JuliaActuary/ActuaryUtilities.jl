@@ -14,12 +14,15 @@ _value(target, index, discount) = FinanceCore.present_value(FinanceModels.Models
 # curves for Effective, the discount curve for Spread.
 _contract_value(::Effective, target, discount, index, shock::S) where {S} = _value(target, shock(index), shock(discount))
 _contract_value(::Spread, target, discount, index, shock::S) where {S} = _value(target, index, shock(discount))
-_parallel_value(metric, target, discount, index, s) =
-    _contract_value(metric, target, discount, index, c -> _parallel_bumped(c, s))
+function _parallel_value(metric, target, discount, index)
+    portfolio = _portfolio(target)
+    return s -> _contract_value(metric, portfolio, discount, index, c -> _parallel_bumped(c, s))
+end
 # Derivatives on the key-rate grid of one shock vector applied to the curves the metric moves.
 function _contract_keyrate(metric, grid, discount, target, index, order)
     _validate_tenors(grid)
-    v(b) = _contract_value(metric, target, discount, index, c -> _bumped(c, grid, b.shift))
+    portfolio = _portfolio(target)
+    v(b) = _contract_value(metric, portfolio, discount, index, c -> _bumped(c, grid, b.shift))
     return _only_role(_named_ad(v, (; shift = zeros(length(grid))), order))
 end
 
@@ -34,7 +37,8 @@ end
     convexity(discount, contract; index = discount)
 
 Effective (rate) and spread (credit) duration, DV01 and convexity for a contract or a portfolio
-(a vector of contracts), reprojecting cashflows under continuous-zero shifts. Coupons project on
+containing contracts. Arrays, tuples, and finite generators are accepted. Cashflows are
+reprojected under continuous-zero shifts. Coupons project on
 the `index` curve, which defaults to `discount`, and every payment is discounted on `discount`:
 
 - `Effective()` shifts both curves, so floating coupons reset.
@@ -48,34 +52,34 @@ convexity includes the cross terms between the curves: for the parallel second d
 `Cdd`. A portfolio's value and dollar derivatives are summed before normalizing. See
 [`sensitivities`](@ref) for the roles separately, [`zspread`](@ref) and [`locked_floater`](@ref).
 """
-function duration(metric::_ContractMetric, discount::AYM, target::_Contractish; index::AYM = discount)
-    value, derivative = _value_and_derivative(s -> _parallel_value(metric, target, discount, index, s), 0.0)
+function duration(metric::_ContractMetric, discount::AYM, target::_Instrument; index::AYM = discount)
+    value, derivative = _value_and_derivative(_parallel_value(metric, target, discount, index), 0.0)
     return -derivative / value
 end
-function duration(metric::_ContractMetric, kr::KeyRates, discount::AYM, target::_Contractish; index::AYM = discount)
+function duration(metric::_ContractMetric, kr::KeyRates, discount::AYM, target::_Instrument; index::AYM = discount)
     r = _contract_keyrate(metric, kr.tenors, discount, target, index, FirstOrder())
     return _relative(r, r.gradient; negate = true)
 end
 
-function duration(::DV01, metric::_ContractMetric, discount::AYM, target::_Contractish; index::AYM = discount)
-    return -ForwardDiff.derivative(s -> _parallel_value(metric, target, discount, index, s), 0.0) / 10_000
+function duration(::DV01, metric::_ContractMetric, discount::AYM, target::_Instrument; index::AYM = discount)
+    return -ForwardDiff.derivative(_parallel_value(metric, target, discount, index), 0.0) / 10_000
 end
-function duration(::DV01, metric::_ContractMetric, kr::KeyRates, discount::AYM, target::_Contractish; index::AYM = discount)
+function duration(::DV01, metric::_ContractMetric, kr::KeyRates, discount::AYM, target::_Instrument; index::AYM = discount)
     r = _contract_keyrate(metric, kr.tenors, discount, target, index, FirstOrder())
     return _per_bp(r, r.gradient)
 end
 
-function convexity(metric::_ContractMetric, discount::AYM, target::_Contractish; index::AYM = discount)
-    value, second = _value_and_second(s -> _parallel_value(metric, target, discount, index, s))
+function convexity(metric::_ContractMetric, discount::AYM, target::_Instrument; index::AYM = discount)
+    value, second = _value_and_second(_parallel_value(metric, target, discount, index))
     return second / value
 end
-function convexity(metric::_ContractMetric, kr::KeyRates, discount::AYM, target::_Contractish; index::AYM = discount)
+function convexity(metric::_ContractMetric, kr::KeyRates, discount::AYM, target::_Instrument; index::AYM = discount)
     r = _contract_keyrate(metric, kr.tenors, discount, target, index, SecondOrder())
     return _relative(r, r.hessian)
 end
-convexity(::DollarConvexity, metric::_ContractMetric, discount::AYM, target::_Contractish; index::AYM = discount) =
-    _second(s -> _parallel_value(metric, target, discount, index, s))
-convexity(::DollarConvexity, metric::_ContractMetric, kr::KeyRates, discount::AYM, target::_Contractish; index::AYM = discount) =
+convexity(::DollarConvexity, metric::_ContractMetric, discount::AYM, target::_Instrument; index::AYM = discount) =
+    _second(_parallel_value(metric, target, discount, index))
+convexity(::DollarConvexity, metric::_ContractMetric, kr::KeyRates, discount::AYM, target::_Instrument; index::AYM = discount) =
     _contract_keyrate(metric, kr.tenors, discount, target, index, SecondOrder()).hessian
 
 """
@@ -135,7 +139,7 @@ result does not depend on the contract's notional and is defined for a zero `mar
 An `ErrorException` is thrown if that does not happen within `maxiter` steps.
 """
 function zspread(discount::AYM, contract::FinanceCore.AbstractContract, market_price; index::AYM = discount, s0 = 0.0, tol = 1.0e-12, maxiter = 100)
-    pvs(s) = _parallel_value(Spread(), contract, discount, index, s)
+    pvs = _parallel_value(Spread(), contract, discount, index)
     f(s) = pvs(s) - market_price
     failed(step, s) = ErrorException("zspread did not converge (last Newton step = $step, residual = $(f(s)))")
     converged, s, step = _newton(f, float(FinanceCore.rate(FinanceCore.Continuous(s0))), maxiter) do s, step, _

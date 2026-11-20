@@ -1,3 +1,57 @@
+@testset "Equivalent payment collections use fixed-cashflow risk" begin
+    curve = FM.Yield.Constant(FC.Continuous(0.0))
+    kr = KeyRates([1.0, 3.0])
+    times = [0.5, 2.5]
+    for amounts in ([0.0, -0.0], [4.0, 6.0], [4.0, -4.0])
+        payments = FC.Cashflow.(amounts, times)
+        wide = FC.AbstractContract[payments...]
+        for grid in ((), (kr,)), (f, marker) in (
+                    (duration, ()), (duration, (DV01(),)),
+                    (convexity, ()), (convexity, (DollarConvexity(),)),
+                    (sensitivities, ()), (sensitivities, (SecondOrder(),)),
+                )
+            risk(x, t...) = f(marker..., grid..., curve, x, t...)
+            expected = risk(amounts, times)
+            # isequal compares result shapes and also handles undefined risk at zero net PV.
+            @test isequal(risk(payments), expected)
+            @test isequal(risk(wide), expected)
+            @test isequal(risk(wide, [8.0, 9.0]), expected)
+            @test isequal(risk(c for c in OnePass(wide)), expected)
+        end
+    end
+
+    # These portfolios switch from repricing to the analytic kernel when the
+    # measure is omitted. Both routes must retain the net payment and its timing.
+    flat32 = FM.Yield.Constant(FC.Continuous(0.0f0))
+    mixed = FC.AbstractContract[FC.Cashflow(a, 2.0f0) for a in (100_000_000.0f0, 1.0f0, -100_000_000.0)]
+    @test sensitivities(flat32, mixed).value == 1
+    @test sum(duration(DV01(), KeyRates(Float32[1, 2]), flat32, mixed)) == 0.0002
+    fraction = Int16(31) // Int16(365)
+    short = FC.AbstractContract[FC.Cashflow(1.0, fraction)]
+    @test convexity(curve, short) ≈ Float64(fraction)^2
+
+    matrix = reshape(FC.AbstractContract[FC.Cashflow(3.0, 2.5), FC.Cashflow(3.0, 0.5)], 1, 2)
+    @test duration(curve, (c for c in matrix)) == 1.5
+
+    # The element type distinguishes an empty portfolio from an empty payment stream.
+    @test isnan(duration(curve, FC.AbstractContract[]))
+    @test keys(sensitivities(curve, FC.AbstractContract[]).dv01) == (:discount, :index)
+    @test iszero(duration(curve, FC.Cashflow[]))
+    @test iszero(duration(curve, (c for c in FC.AbstractContract[])))
+    @test sensitivities(curve, Any[]).dv01 === 0.0
+
+    # Explicit contract measures and an explicit projection curve request repricing.
+    zero_payment = FC.Cashflow(0.0, 1.0)
+    for target in ([zero_payment], FC.AbstractContract[zero_payment])
+        @test isnan(duration(Effective(), curve, target))
+        @test isnan(duration(Spread(), curve, target))
+        @test isnan(duration(curve, target; index = curve))
+        @test isnan(sensitivities(curve, target; index = curve).duration.discount)
+        @test_throws UndefKeywordError sensitivities((; rf = curve), target)
+        @test keys(sensitivities((; rf = curve), target; index = curve).dv01) == (:rf, :index)
+    end
+end
+
 @testset "Sensitivity cashflow amounts and embedded times" begin
     tenors = [1.0, 2.0, 5.0]
     kr = KeyRates(tenors)
