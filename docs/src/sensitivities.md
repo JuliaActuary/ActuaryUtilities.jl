@@ -530,9 +530,10 @@ duration(Effective(), zrc, locked_floater(floater, 0.04, 1.0))   # â‰ˆ 1y, not â
 
 ### Portfolios
 
-For a portfolio, pass a vector of contracts. The calculation sums their values and dollar
-derivatives before normalizing risk, so a portfolio's duration is the value-weighted average
-of its contracts' durations:
+Portfolio measures accept an array, tuple, or finite generator of contracts. Both
+`Effective()` and `Spread()` accept these collections. The calculation sums contract
+values and dollar derivatives before normalizing, so portfolio duration is the
+value-weighted average of the contract durations.
 
 ```@example sensitivities
 portfolio = [floater, Bond.Fixed(0.03, Periodic(1), 7.0)]
