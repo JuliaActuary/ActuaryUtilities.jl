@@ -49,15 +49,19 @@ function _named_ad(f::F, x::NamedTuple{roles}, order) where {F, roles}
     # even for a single role, which `reduce(vcat, ...)` returns as it is.
     result = _ad_derivatives(g, reduce(vcat, map(v -> float.(_one_based(v, axes(v, 1))), values(x))), order)
     gradient = NamedTuple{roles}(ntuple(i -> part(result.gradient, i), length(x)))
-    return _with_hessian((; result.value, gradient, zero_stream = false), result, ranges, roles, order)
+    return _with_hessian((; result.value, gradient, zero_stream = false), result, ranges, order)
 end
-_with_hessian(r, result, ranges, roles, ::FirstOrder) = r
-function _with_hessian(r, result, ranges, roles, ::SecondOrder)
+_with_hessian(r, result, ranges, ::FirstOrder) = r
+function _with_hessian(r, result, ranges, ::SecondOrder)
     h = result.hessian
     block(i, j) = length(ranges) == 1 ? h : view(h, ranges[i], ranges[j])
-    hessian = NamedTuple{roles}(ntuple(i -> NamedTuple{roles}(ntuple(j -> block(i, j), length(ranges))), length(ranges)))
-    return (; r.value, r.gradient, hessian, r.zero_stream)
+    return (; r.value, r.gradient, hessian = _role_blocks(r.gradient, block), r.zero_stream)
 end
+# `block(i, j)` for every pair of roles, keyed as the gradient is. The names are read from the
+# gradient's type: passed as a value, the compiler knows them only when it judges the receiving
+# function small enough to inline, which Julia 1.13 does here and 1.14 does not.
+_role_blocks(::NamedTuple{roles}, block::B) where {roles, B} =
+    NamedTuple{roles}(ntuple(i -> NamedTuple{roles}(ntuple(j -> block(i, j), length(roles))), length(roles)))
 
 # The derivatives of the one role of a result, unkeyed.
 _only_role(r) = haskey(r, :hessian) ?
