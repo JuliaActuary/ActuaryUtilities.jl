@@ -234,11 +234,14 @@ _convexity_weight(c) = _SecondMoment(c.inv_m)
 # returns `nothing` without valuing any payment; callers return its typed zero.
 function _weighted_sums(yield, weights::Tuple, cfs, times)
     _iszero_cashflow_stream(cfs) && return nothing
-    payments = _risk_payments(yield, cfs, times)
-    t1, z = first(payments)
+    return _moment_sums(weights, _risk_payments(yield, cfs, times)...)
+end
+function _moment_sums(weights, yield, cfs, times)
+    t1, z = _payment(yield, cfs, times, firstindex(cfs))
     V = zero(z)
     Vw = map(w -> zero(w(t1, z)), weights)
-    @inbounds for (t, cfd) in payments
+    @inbounds for k in eachindex(cfs)
+        t, cfd = _payment(yield, cfs, times, k)
         V += cfd
         Vw = map((acc, w) -> acc + w(t, cfd), Vw, weights)
     end

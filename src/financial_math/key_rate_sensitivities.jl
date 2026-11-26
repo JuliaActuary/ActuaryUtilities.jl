@@ -41,8 +41,12 @@ _shock_numbers(r, ::Nothing) = haskey(r, :hessian) ?
         gradient = zeros(T, n)
         return second ? (; value, gradient, hessian = zeros(T, n, n), zero_stream) : (; value, gradient, zero_stream)
     end
-    payments = _risk_payments(curve, cfs, times)
-    t0, cfd0 = first(payments)
+    return _keyrate_sums(tenors, order, _risk_payments(curve, cfs, times)...)
+end
+@inline function _keyrate_sums(tenors, order, curve, cfs, times)
+    n = length(tenors)
+    second = order isa SecondOrder
+    t0, cfd0 = _payment(curve, cfs, times, firstindex(cfs))
     _, w0, _, _ = _active_hats(tenors, t0)
     T = promote_type(typeof(cfd0), typeof(t0 * cfd0 * w0), eltype(tenors))
     if second
@@ -51,7 +55,8 @@ _shock_numbers(r, ::Nothing) = haskey(r, :hessian) ?
     grad_shared = zeros(T, n)
     hess_shared = second ? zeros(T, n, n) : nothing
     V = zero(cfd0)
-    @inbounds for (t, cfd) in payments
+    @inbounds for k in eachindex(cfs)
+        t, cfd = _payment(curve, cfs, times, k)
         V += cfd
         i, wi, j, wj = _active_hats(tenors, t)
         gi = t * cfd * wi
@@ -74,9 +79,9 @@ _shock_numbers(r, ::Nothing) = haskey(r, :hessian) ?
         end
     end
     if second
-        return (; value = V, gradient = grad_shared, hessian = hess_shared, zero_stream)
+        return (; value = V, gradient = grad_shared, hessian = hess_shared, zero_stream = false)
     else
-        return (; value = V, gradient = grad_shared, zero_stream)
+        return (; value = V, gradient = grad_shared, zero_stream = false)
     end
 end
 # Payment types are resolved before summation. A hat weight can still have a

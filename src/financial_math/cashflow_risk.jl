@@ -34,19 +34,26 @@ _one_based(x, _) = view(x, firstindex(x):lastindex(x))
     return t, _cf_value(cf) * FinanceCore.discount(yield, t)
 end
 
-# A concrete payment time and discounted amount can be accumulated directly. With mixed
-# precision, resolve all amount and time types before discounting, and all discount types
-# before summing. Widening a running sum cannot recover a payment already rounded away.
+# What a kernel accumulates: `_payment(inputs..., k)` is the k-th payment's time and discounted
+# amount. Concrete payment types pass through and are discounted in the kernel's loop. With
+# mixed precision, resolve all amount and time types before discounting, and all discount
+# types before summing. Widening a running sum cannot recover a payment already rounded away.
+#
+# Each kernel takes the inputs through a function barrier, where the resolved vectors of a
+# mixed stream are concretely typed, and indexes them in its own loop. Iterating a generator
+# of payments took up to twice as long under ForwardDiff.
 @inline function _risk_payments(yield, cfs, times)
     payment_type = Base.promote_op(_discounted_payment, typeof(yield), eltype(cfs), eltype(times))
-    if isconcretetype(payment_type)
-        return (_discounted_payment(yield, cfs[k], times[k]) for k in eachindex(cfs))
-    end
+    isconcretetype(payment_type) && return yield, cfs, times
     amounts = _promoted_values(_cf_value, cfs)
     dates = _promoted_values(FinanceCore.timepoint, cfs, times)
     discounts = _promoted_values(t -> FinanceCore.discount(yield, t), dates)
-    return ((dates[k], amounts[k] * discounts[k]) for k in eachindex(dates))
+    return _Discounted(), map(*, amounts, discounts), dates
 end
+# Stands in for the yield when the amounts are already discounted at their effective times.
+struct _Discounted end
+Base.@propagate_inbounds _payment(yield, cfs, times, k) = _discounted_payment(yield, cfs[k], times[k])
+Base.@propagate_inbounds _payment(::_Discounted, discounted, times, k) = times[k], discounted[k]
 
 function _promoted_values(f::F, xs...) where {F}
     vals = map(f, xs...)
