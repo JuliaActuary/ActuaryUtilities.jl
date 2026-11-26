@@ -285,9 +285,10 @@ which defaults to the discount curve.
   `Models(discount; index)`: `s.dv01.discount` (spread risk) and `s.dv01.index` (coupon reset). The
   layered form `sensitivities(KeyRates(tenors), target; discount = (; rf, credit), index)` becomes
   `sensitivities(KeyRates(tenors), (; rf, credit), target; index)`. `convexity(Spread(), ...)` is
-  new; effective convexity includes the cross terms between the curves. A vector of `Cashflow`s
-  after a curve is fixed cashflows; to value one as a portfolio of contracts, give it the element
-  type `AbstractContract`.
+  new. Effective convexity includes the cross terms between the curves. A nonempty vector
+  containing only `Cashflow` payments uses fixed-cashflow risk by default, including with
+  element type `AbstractContract`. Pass
+  `index = discount` for a contract bundle with separate discount and index exposures.
 - **Amounts and times pair by position in every cashflow form**, including `present_values`,
   `breakeven` and `spread`: the k-th amount is paid at the k-th time, counted from each
   vector's first entry. Offset time vectors used to pair by index:

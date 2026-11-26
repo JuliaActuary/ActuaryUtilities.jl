@@ -91,8 +91,8 @@ end
     A = 100.0
     B = A * FC.discount(curve, 1.0) / FC.discount(curve, 5.0)
     for sign in (-1, 1)
-        # A vector of contracts, so a portfolio; a vector of `Cashflow`s is fixed cashflows.
-        port = FC.AbstractContract[FC.Cashflow(sign * A, 1.0), FC.Cashflow(-sign * B, 5.0)]
+        # The forward delivers its payment at year five and requests contract repricing.
+        port = FC.AbstractContract[FC.Cashflow(sign * A, 1.0), FM.Forward(4.0, FC.Cashflow(-sign * B, 1.0))]
         fixed = FC.Cashflow.([sign * A, -sign * B], [1.0, 5.0])
         @test abs(FC.present_value(curve, port)) < 1.0e-10
         expected = duration(DV01(), curve, sign .* [A, -B], [1.0, 5.0])
