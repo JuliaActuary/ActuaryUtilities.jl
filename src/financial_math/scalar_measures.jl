@@ -137,10 +137,22 @@ end
 _coordinate(::Union{FinanceCore.Rate{<:Real, FinanceCore.Continuous}, AYM}) =
     (; inv_m = false, divisor = 1)
 
+# Form the time product in the valuation's arithmetic. The time keeps its own AD
+# partials. Derivatives carried only by the amount or curve enter through cfd.
+_first_moment(t, cfd) = t * cfd
+struct _SecondMoment{M}
+    inv_m::M
+end
+function (w::_SecondMoment)(t, cfd)
+    tv = _valuation_time(t, cfd)
+    return (tv * (tv + w.inv_m)) * cfd
+end
+_valuation_time(t, cfd) = convert(promote_type(typeof(t), typeof(_primal(cfd))), t)
+
 duration(::Macaulay, yield::_YieldInput, cfs::_CashflowCollection, times...) =
-    _weighted_ratio(yield, identity, _cashflow_inputs(cfs, times...)...)
+    _weighted_ratio(yield, _first_moment, _cashflow_inputs(cfs, times...)...)
 duration(::Modified, yield::_YieldInput, cfs::_CashflowCollection, times...) =
-    _weighted_ratio(yield, identity, _cashflow_inputs(cfs, times...)...; divisor = _coordinate(yield).divisor)
+    _weighted_ratio(yield, _first_moment, _cashflow_inputs(cfs, times...)...; divisor = _coordinate(yield).divisor)
 
 duration(::DV01, yield::_YieldInput, x::_Instrument, times...; kwargs...) =
     _fixed(x) ? _fixed_dv01(yield, x, times...; kwargs...) : duration(DV01(), Effective(), yield, x, times...; kwargs...)
@@ -150,8 +162,8 @@ duration(::DV01, yield::_YieldInput, x::_Instrument, times...; kwargs...) =
 function _fixed_dv01(yield, cfs, times...)
     amounts, ts = _cashflow_inputs(cfs, times...)
     divisor = _coordinate(yield).divisor * 10_000
-    sums = _weighted_sums(yield, identity, amounts, ts)
-    isnothing(sums) && return _zero_weighted(yield, identity, amounts, ts, divisor)
+    sums = _weighted_sums(yield, _first_moment, amounts, ts)
+    isnothing(sums) && return _zero_weighted(yield, _first_moment, amounts, ts, divisor)
     return last(sums) / divisor
 end
 
@@ -215,22 +227,23 @@ function _fixed_convexity(yield, cfs, times...)
     w = _convexity_weight(_coordinate(yield))
     return _weighted_ratio(yield, w, _cashflow_inputs(cfs, times...)...; divisor = _coordinate(yield).divisor^2)
 end
-_convexity_weight(c) = t -> t * (t + c.inv_m)
+_convexity_weight(c) = _SecondMoment(c.inv_m)
 
-# Shared accumulation kernel: V = Σ cf·d and Vw = Σ weight(t)·cf·d for each weight, over the
-# 1-based, equal-length inputs of `_cashflow_inputs`. A zero stream returns `nothing` without
-# valuing any payment; callers return its typed zero.
+# Shared accumulation kernel: V = Σ cf·d and Vw = Σ weight(t, cf·d) for each weight (a moment, as
+# `_first_moment`), over the 1-based, equal-length inputs of `_cashflow_inputs`. A zero stream
+# returns `nothing` without valuing any payment; callers return its typed zero.
 function _weighted_sums(yield, weights::Tuple, cfs, times)
     _iszero_cashflow_stream(cfs) && return nothing
-    t1 = FinanceCore.timepoint(first(cfs), first(times))
-    z = _cf_value(first(cfs)) * FinanceCore.discount(yield, t1)
+    return _moment_sums(weights, _risk_payments(yield, cfs, times)...)
+end
+function _moment_sums(weights, yield, cfs, times)
+    t1, z = _payment(yield, cfs, times, firstindex(cfs))
     V = zero(z)
-    Vw = map(w -> zero(w(t1) * z), weights)
+    Vw = map(w -> zero(w(t1, z)), weights)
     @inbounds for k in eachindex(cfs)
-        t = FinanceCore.timepoint(cfs[k], times[k])
-        cfd = _cf_value(cfs[k]) * FinanceCore.discount(yield, t)
+        t, cfd = _payment(yield, cfs, times, k)
         V += cfd
-        Vw = map((acc, w) -> acc + w(t) * cfd, Vw, weights)
+        Vw = map((acc, w) -> acc + w(t, cfd), Vw, weights)
     end
     return V, Vw
 end
@@ -245,10 +258,10 @@ end
 function _parallel_analytic(yield, cfs, times, order)
     c = _coordinate(yield)
     w = _convexity_weight(c)
-    sums = _weighted_sums(yield, order isa SecondOrder ? (identity, w) : (identity,), cfs, times)
+    sums = _weighted_sums(yield, order isa SecondOrder ? (_first_moment, w) : (_first_moment,), cfs, times)
     if isnothing(sums)
         value = _zero_stream_value(yield, cfs, times)
-        gradient = _zero_weighted(yield, identity, cfs, times, c.divisor)
+        gradient = _zero_weighted(yield, _first_moment, cfs, times, c.divisor)
         order isa FirstOrder && return (; value, gradient, zero_stream = true)
         return (; value, gradient, hessian = _zero_weighted(yield, w, cfs, times, c.divisor^2), zero_stream = true)
     end

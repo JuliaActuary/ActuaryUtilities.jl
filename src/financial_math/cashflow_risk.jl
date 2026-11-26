@@ -29,6 +29,39 @@ _one_based(x, _) = view(x, firstindex(x):lastindex(x))
 @inline _cf_value(c::FinanceCore.Cashflow) = FinanceCore.amount(c)
 @inline _cf_value(c) = c
 
+@inline function _discounted_payment(yield, cf, fallback)
+    t = FinanceCore.timepoint(cf, fallback)
+    return t, _cf_value(cf) * FinanceCore.discount(yield, t)
+end
+
+# What a kernel accumulates: `_payment(inputs..., k)` is the k-th payment's time and discounted
+# amount. Concrete payment types pass through and are discounted in the kernel's loop. With
+# mixed precision, resolve all amount and time types before discounting, and all discount
+# types before summing. Widening a running sum cannot recover a payment already rounded away.
+#
+# Each kernel takes the inputs through a function barrier, where the resolved vectors of a
+# mixed stream are concretely typed, and indexes them in its own loop. Iterating a generator
+# of payments took up to twice as long under ForwardDiff.
+@inline function _risk_payments(yield, cfs, times)
+    payment_type = Base.promote_op(_discounted_payment, typeof(yield), eltype(cfs), eltype(times))
+    isconcretetype(payment_type) && return yield, cfs, times
+    amounts = _promoted_values(_cf_value, cfs)
+    dates = _promoted_values(FinanceCore.timepoint, cfs, times)
+    discounts = _promoted_values(t -> FinanceCore.discount(yield, t), dates)
+    return _Discounted(), map(*, amounts, discounts), dates
+end
+# Stands in for the yield when the amounts are already discounted at their effective times.
+struct _Discounted end
+Base.@propagate_inbounds _payment(yield, cfs, times, k) = _discounted_payment(yield, cfs[k], times[k])
+Base.@propagate_inbounds _payment(::_Discounted, discounted, times, k) = times[k], discounted[k]
+
+function _promoted_values(f::F, xs...) where {F}
+    vals = map(f, xs...)
+    isconcretetype(eltype(vals)) && return vals
+    T = mapreduce(typeof, promote_type, vals)
+    return convert(Vector{T}, vals)
+end
+
 # A zero stream is an empty collection or one whose amounts are all exactly zero.
 # `iszero` checks Dual partials too: a zero primal with a nonzero derivative must
 # continue through valuation. Never infer a zero stream from its net present value.
@@ -62,9 +95,9 @@ _zero_stream_time(::Type{FinanceCore.Cashflow{A, T}}, times) where {A <: Real, T
 
 # The zero-stream value for a single rate, number or curve.
 _zero_stream_value(yield, cfs, times) = _zero_cashflow_value(t -> FinanceCore.discount(yield, t), cfs, times)
-# The same for a statistic Σ weight(t)⋅cf⋅d / divisor, so it has the nonempty formula's type.
+# The same for a statistic Σ weight(t, cf⋅d) / divisor, so it has the nonempty formula's type.
 _zero_weighted(yield, weight, cfs, times, divisor = 1) =
-    zero(weight(_zero_stream_time(cfs, times)) * _zero_stream_value(yield, cfs, times) / divisor)
+    zero(weight(_zero_stream_time(cfs, times), _zero_stream_value(yield, cfs, times)) / divisor)
 
 # An all-zero stream in an abstractly typed collection uses the amounts present.
 function _zero_amount(cfs)

@@ -41,31 +41,35 @@ _shock_numbers(r, ::Nothing) = haskey(r, :hessian) ?
         gradient = zeros(T, n)
         return second ? (; value, gradient, hessian = zeros(T, n, n), zero_stream) : (; value, gradient, zero_stream)
     end
-    # Seed from a discounted payment to preserve curve numeric types and AD.
-    # Its type must accommodate later terms, including payments at t=0.
-    t0 = FinanceCore.timepoint(cfs[1], times[1])
-    cfd0 = _cf_value(cfs[1]) * disc(t0)
+    return _keyrate_sums(tenors, order, _risk_payments(curve, cfs, times)...)
+end
+@inline function _keyrate_sums(tenors, order, curve, cfs, times)
+    n = length(tenors)
+    second = order isa SecondOrder
+    t0, cfd0 = _payment(curve, cfs, times, firstindex(cfs))
     _, w0, _, _ = _active_hats(tenors, t0)
     T = promote_type(typeof(cfd0), typeof(t0 * cfd0 * w0), eltype(tenors))
     if second
-        T = promote_type(T, typeof(t0 * t0 * cfd0 * w0 * w0))
+        T = promote_type(T, typeof(_valuation_time(t0, cfd0) * t0 * cfd0 * w0 * w0))
     end
     grad_shared = zeros(T, n)
     hess_shared = second ? zeros(T, n, n) : nothing
     V = zero(cfd0)
     @inbounds for k in eachindex(cfs)
-        t = FinanceCore.timepoint(cfs[k], times[k])
-        d = disc(t)
-        cfd = _cf_value(cfs[k]) * d
+        t, cfd = _payment(curve, cfs, times, k)
         V += cfd
         i, wi, j, wj = _active_hats(tenors, t)
-        grad_shared[i] -= t * cfd * wi
+        gi = t * cfd * wi
+        grad_shared = _fit(grad_shared, gi)
+        grad_shared[i] -= gi
         if i != j
             grad_shared[j] -= t * cfd * wj
         end
         if second
-            tt = t * t * cfd
-            hess_shared[i, i] += tt * wi * wi
+            tt = _valuation_time(t, cfd) * t * cfd
+            ii = tt * wi * wi
+            hess_shared = _fit(hess_shared, ii)
+            hess_shared[i, i] += ii
             if i != j
                 ij = tt * wi * wj
                 hess_shared[i, j] += ij
@@ -75,11 +79,17 @@ _shock_numbers(r, ::Nothing) = haskey(r, :hessian) ?
         end
     end
     if second
-        return (; value = V, gradient = grad_shared, hessian = hess_shared, zero_stream)
+        return (; value = V, gradient = grad_shared, hessian = hess_shared, zero_stream = false)
     else
-        return (; value = V, gradient = grad_shared, zero_stream)
+        return (; value = V, gradient = grad_shared, zero_stream = false)
     end
 end
+# Payment types are resolved before summation. A hat weight can still have a
+# different type at an endpoint than in the interior of a custom tenor grid.
+@inline _fit(buffer::AbstractArray{T}, ::S) where {T, S} = _fit(buffer, promote_type(T, S))
+@inline _fit(buffer::AbstractArray{T}, ::Type{T}) where {T} = buffer
+@inline _fit(buffer::AbstractArray, ::Type{T}) where {T} = convert(AbstractArray{T}, buffer)
+
 _fixed_keyrate(curve, kr::KeyRates, order, cfs, times...) =
     _keyrate_analytic(curve, kr.tenors, _cashflow_inputs(cfs, times...)..., order)
 
