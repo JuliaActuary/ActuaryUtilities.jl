@@ -1,3 +1,7 @@
+# A law that defines only its quantile function: uniform on (0, 1).
+struct QuantileOnlyLaw <: ContinuousUnivariateDistribution end
+Distributions.quantile(::QuantileOnlyLaw, u::Real) = u
+
 @testset "Optimal Transport" begin
 
     @testset "wasserstein" begin
@@ -33,8 +37,8 @@
 
         @test_throws ArgumentError wasserstein([1, 2], [3, 4]; p = 0.5)
 
-        # Distribution forms use adaptive quantile integration and distinguish a
-        # genuinely divergent moment from tail cancellation between two laws.
+        # Distribution forms use adaptive quantile integration. A distance is infinite
+        # when one law alone lacks the moment, not when both do and their tails cancel.
         @test wasserstein(Cauchy(), Dirac(0.0); p = 1) == Inf
         @test wasserstein(Cauchy(), Cauchy(3, 1); p = 1) ≈ 3.0
         @test wasserstein(Normal(), Normal(3, 1); p = Inf) ≈ 3.0
@@ -55,6 +59,78 @@
         @test_throws ErrorException wasserstein(Uniform(0, 1), Uniform(3, 4); p = Inf, maxevals = 64)
         mix = MixtureModel([Normal(0, 1), Normal(5, 1)], [0.99, 0.01])
         @test_throws ErrorException wasserstein(mix, Normal(); p = Inf)
+    end
+
+    @testset "wasserstein is infinite only when proved" begin
+        # A nonnegative law is its mean away from a point mass at zero. Most of the mean of
+        # Pareto(1.001) lies beyond the last probability quadrature can reach, and its failure
+        # to converge used to be read as divergence: the distance was reported as Inf.
+        heavy = Pareto(1.001, 1.0)
+        @test mean(heavy) ≈ 1001 rtol = 1.0e-9
+        point_masses = (Dirac(0.0), Dirac(0), [0.0], [0], [0.0, 0.0, 0.0], DiscreteNonParametric([0.0], [1.0]))
+        for zero_mass in point_masses
+            @test wasserstein(heavy, zero_mass) == mean(heavy)
+            @test wasserstein(zero_mass, heavy) == mean(heavy)
+            @test wasserstein(heavy, zero_mass; p = 1.0) == mean(heavy)
+        end
+        # The identity is |E X - c| for any law on one side of the point c.
+        @test wasserstein(Exponential(2.0), [0.0]) == 2.0
+        @test wasserstein(Exponential(2.0), Dirac(-1.0)) == 3.0
+        @test wasserstein([3], Uniform(0, 1)) == 2.5
+        @test wasserstein(-1 * heavy, [0.0]) == mean(heavy)
+        @test wasserstein([2.0, 2.0], Pareto(1.001, 2.0)) == mean(Pareto(1.001, 2.0)) - 2
+        @test wasserstein(Poisson(3.0), [0]) == 3.0
+        @test wasserstein(Pareto(1.5, 1.0), [0.0]) == 3.0
+        # A point inside the support, another order, or more than one atom is integrated.
+        @test wasserstein([0.5], Uniform(0, 1)) ≈ 0.25 rtol = 1.0e-6
+        @test wasserstein(Exponential(2.0), [0.0]; p = 2) ≈ sqrt(8) rtol = 1.0e-6
+        @test wasserstein(Uniform(0, 1), [0.0, 1.0]) ≈ 0.25 rtol = 1.0e-6
+        # So is a law that states no facts about itself.
+        @test wasserstein(QuantileOnlyLaw(), [0.0]) ≈ 0.5 rtol = 1.0e-6
+        @test wasserstein(QuantileOnlyLaw(), Uniform(0, 2); p = 2) ≈ sqrt(1 / 3) rtol = 1.0e-6
+
+        # Proved divergence: exactly one of the laws has a finite moment of order p.
+        for (a, b, p) in (
+                (Cauchy(), Dirac(0.0), 1), (Cauchy(), [0.0, 1.0], 1), (Cauchy(), Normal(), 1),
+                (Cauchy(), Uniform(), 3), (Pareto(0.9, 1.0), [0.0], 1), (Pareto(0.5, 1.0), Normal(), 1),
+                (Levy(), Exponential(1.0), 1.5), (TDist(2), Normal(), 2), (Pareto(1.5, 1.0), Exponential(1.0), 2),
+                (TDist(1.5), Uniform(), 4), ([Inf], Normal(), 1), (MixtureModel([Normal(), Cauchy()], [0.9, 0.1]), Normal(), 1),
+            )
+            @test wasserstein(a, b; p) == Inf
+            @test wasserstein(b, a; p) == Inf
+        end
+        # A missing moment of both laws proves nothing: these tails cancel.
+        @test wasserstein(Cauchy(), Cauchy(3, 1)) ≈ 3.0
+        @test wasserstein(Cauchy(3, 1), Cauchy(); p = 2) ≈ 3.0
+        @test wasserstein(Pareto(0.5, 1.0), Pareto(0.5, 1.0) + 2) ≈ 2.0
+
+        # The generic path, with no shortcut: Gamma(2, 1) is the sum of two Exponential(1), so its
+        # quantiles lie above Exponential(1)'s and the distance is the difference of the means.
+        @test wasserstein(Exponential(1.0), Gamma(2.0, 1.0)) ≈ 1.0 rtol = 1.0e-6
+        a, b = LogNormal(0, 1), Gamma(2, 1)
+        reference, _ = QuadGK.quadgk(u -> abs(quantile(a, u) - quantile(b, u)), 0, 0.5, 1; rtol = 1.0e-11)
+        @test wasserstein(a, b) ≈ reference rtol = 1.0e-6
+        @test wasserstein(a, b; rtol = 1.0e-9) ≈ reference rtol = 1.0e-9
+
+        # Quadrature that does not meet its tolerance is an error that reports what it reached,
+        # never an infinite or a finite distance. An insufficient budget:
+        message(f) = try
+            f()
+            ""
+        catch e
+            e isa ErrorException ? e.msg : rethrow()
+        end
+        failed = message(() -> wasserstein(Exponential(1.0), Gamma(2.0, 1.0); maxevals = 30))
+        @test occursin("did not converge within maxevals=30", failed)
+        @test occursin(r"estimate [0-9.e+-]+, estimated error [0-9.e+-]+, tolerance [0-9.e+-]+\.", failed)
+        @test_throws ErrorException wasserstein(a, b; maxevals = 30)
+        # A finite distance whose tail the default budget cannot resolve (it is below
+        # mean(heavy) + 1), and an infinite one that no fact here proves:
+        failed = message(() -> wasserstein(heavy, Exponential(1.0)))
+        @test occursin("did not converge within maxevals=100000", failed)
+        @test_throws ErrorException wasserstein(Exponential(1.0), heavy)
+        @test_throws ErrorException wasserstein(Pareto(0.5, 1.0), Pareto(0.6, 1.0))
+        @test_throws ErrorException wasserstein(Pareto(2.001, 1.0), [0.0]; p = 2)
     end
 
     @testset "transportmap / pushforward" begin
